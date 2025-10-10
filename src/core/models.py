@@ -10,7 +10,7 @@ These models represent the fundamental entities and data structures.
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from .enums import ErrorReason
+from src.core.enums import ErrorReason
 
 
 @dataclass

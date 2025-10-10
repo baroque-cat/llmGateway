@@ -11,7 +11,7 @@ ensuring a modular and extensible architecture.
 from abc import ABC, abstractmethod
 from typing import List
 
-from .models import CheckResult
+from src.core.models import CheckResult
 
 
 class IProvider(ABC):

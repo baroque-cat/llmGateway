@@ -2,8 +2,8 @@
 
 import os
 import yaml
-from .schemas import Config, ProviderConfig
-from .defaults import get_default_config
+from src.config.schemas import Config, ProviderConfig
+from src.config.defaults import get_default_config
 
 def load_config(path: str = "config/providers.yaml") -> Config:
     """
