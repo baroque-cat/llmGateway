@@ -34,7 +34,8 @@ def load_config(path: str = "config/providers.yaml") -> Config:
             keys_path=provider_data.get('keys_path', ''),
             api_base_url=provider_data.get('api_base_url', ''),
             default_model=provider_data.get('default_model', ''),
-            models=provider_data.get('models', {})
+            models=provider_data.get('models', {}),
+            use_proxy_list=provider_data.get('use_proxy_list')
         )
         app_config.providers[name] = provider_conf
 
