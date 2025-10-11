@@ -9,7 +9,10 @@ ensuring a modular and extensible architecture.
 """
 
 from abc import ABC, abstractmethod
-from typing import List
+from typing import List, Tuple
+
+from flask import Request
+import requests
 
 from src.core.models import CheckResult
 
@@ -55,6 +58,28 @@ class IProvider(ABC):
 
         Returns:
             List[str]: A list of available model names.
+        """
+        pass
+
+    @abstractmethod
+    def proxy_request(self, token: str, request: Request) -> Tuple[requests.Response, CheckResult]:
+        """
+        Proxies an incoming client request to the target API provider.
+
+        This method is the core of the real-time proxying functionality. It is responsible
+        for transforming the incoming Flask request into an outbound request to the
+        actual LLM provider, handling provider-specific authentication and URL structuring.
+
+        Args:
+            token: A valid API key/token to be used for the outbound request.
+            request: The original incoming Flask request object from the client.
+
+        Returns:
+            A tuple containing:
+            1. The raw `requests.Response` object from the upstream provider.
+               This object should be created with `stream=True` to support streaming.
+            2. A `CheckResult` object generated from the response, which will be used
+               by the proxy service to update the key's status in the database.
         """
         pass
 
