@@ -47,24 +47,28 @@ CREATE TABLE IF NOT EXISTS proxy_status (
     FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE CASCADE
 );
 
--- Table 5: API keys
+-- Table 5: API keys. Now with an 'is_dead' flag.
 CREATE TABLE IF NOT EXISTS api_keys (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     provider_id INTEGER NOT NULL,
     key_value TEXT NOT NULL,
+    is_dead BOOLEAN NOT NULL DEFAULT FALSE, -- Flag for permanently invalid keys for this provider
     UNIQUE (provider_id, key_value),
     FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE CASCADE
 );
 
--- Table 6: Health status of keys
-CREATE TABLE IF NOT EXISTS key_status (
-    key_id INTEGER PRIMARY KEY,
-    status TEXT NOT NULL,
+-- Table 6: NEW - Health status for each key-model pair.
+-- Replaces the old 'key_status' table.
+CREATE TABLE IF NOT EXISTS key_model_status (
+    key_id INTEGER NOT NULL,
+    model_name TEXT NOT NULL,
+    status TEXT NOT NULL, -- e.g., 'VALID', 'NO_QUOTA', 'INVALID_KEY'
     last_checked TIMESTAMP,
     next_check_time TIMESTAMP NOT NULL,
     status_code INTEGER,
     response_time REAL,
     error_message TEXT,
+    PRIMARY KEY (key_id, model_name),
     FOREIGN KEY (key_id) REFERENCES api_keys(id) ON DELETE CASCADE
 );
 """
@@ -111,10 +115,6 @@ def initialize_database(db_path: str):
             conn.close()
 
 # --- Synchronization Functions ---
-# Justification: These functions form the bridge between the configuration/files
-# and the database state. They are designed to be idempotent - running them
-# multiple times with the same input will not cause issues.
-# I am starting with provider sync as it's the top-level entity.
 
 def sync_providers(db_path: str, provider_names_from_config: List[str]):
     """
@@ -136,7 +136,6 @@ def sync_providers(db_path: str, provider_names_from_config: List[str]):
             new_providers = set(provider_names_from_config) - providers_in_db
             
             if new_providers:
-                # Use executemany for efficient batch insertion
                 to_insert = [(name,) for name in new_providers]
                 conn.executemany("INSERT INTO providers (name) VALUES (?)", to_insert)
                 print(f"SYNC: Added {len(new_providers)} new providers to the database: {new_providers}")
@@ -148,20 +147,15 @@ def sync_providers(db_path: str, provider_names_from_config: List[str]):
         if conn:
             conn.close()
 
-# Justification: Now, the key synchronization function. This is more complex.
-# It needs to get the provider's ID, then compare file keys with DB keys for that specific provider.
-# For any new key, it must also create a default "untested" status record in key_status.
-# This ensures the key is immediately picked up by the background tester.
-# The use of set operations makes this process highly efficient.
-
-def sync_keys_for_provider(db_path: str, provider_name: str, keys_from_file: Set[str]):
+def sync_keys_for_provider(db_path: str, provider_name: str, keys_from_file: Set[str], provider_models: List[str]):
     """
-    Synchronizes the api_keys and key_status tables for a specific provider.
+    Synchronizes the api_keys and key_model_status tables for a specific provider.
 
     Args:
         db_path: Path to the database file.
         provider_name: The name of the provider to sync keys for.
         keys_from_file: A set of key strings read from the provider's key files.
+        provider_models: A list of model names supported by this provider from config.
     """
     conn = get_db_connection(db_path)
     if not conn:
@@ -173,7 +167,7 @@ def sync_keys_for_provider(db_path: str, provider_name: str, keys_from_file: Set
             cursor = conn.execute("SELECT id FROM providers WHERE name = ?", (provider_name,))
             provider_row = cursor.fetchone()
             if not provider_row:
-                print(f"SYNC ERROR: Provider '{provider_name}' not found in database. Run provider sync first.")
+                print(f"SYNC ERROR: Provider '{provider_name}' not found. Run provider sync first.")
                 return
             provider_id = provider_row['id']
 
@@ -182,39 +176,43 @@ def sync_keys_for_provider(db_path: str, provider_name: str, keys_from_file: Set
             keys_in_db = {row['key_value']: row['id'] for row in cursor.fetchall()}
             db_key_values = set(keys_in_db.keys())
 
-            # 3. Add new keys
+            # 3. Add new keys to api_keys table
             new_keys_to_add = keys_from_file - db_key_values
             if new_keys_to_add:
                 to_insert = [(provider_id, key) for key in new_keys_to_add]
-                cursor = conn.executemany("INSERT INTO api_keys (provider_id, key_value) VALUES (?, ?)", to_insert)
-                
-                # 3.1 For each new key, create an initial status record
-                # This is crucial for the key tester to pick them up.
-                newly_inserted_ids = [rowid[0] for rowid in cursor.execute(
-                    "SELECT id FROM api_keys WHERE provider_id = ? AND key_value IN ({})".format(
-                        ','.join('?'*len(new_keys_to_add))
-                    ), (provider_id, *new_keys_to_add)
-                ).fetchall()]
-                
-                status_to_insert = []
-                initial_check_time = datetime.utcnow().isoformat()
-                for key_id in newly_inserted_ids:
-                    status_to_insert.append(
-                        (key_id, ErrorReason.UNKNOWN.value, initial_check_time)
-                    )
-                conn.executemany(
-                    "INSERT INTO key_status (key_id, status, next_check_time) VALUES (?, ?, ?)",
-                    status_to_insert
-                )
+                conn.executemany("INSERT INTO api_keys (provider_id, key_value) VALUES (?, ?)", to_insert)
                 print(f"SYNC: Added {len(new_keys_to_add)} new keys for provider '{provider_name}'.")
+                # Refresh keys_in_db to get the new IDs
+                cursor = conn.execute("SELECT id, key_value FROM api_keys WHERE provider_id = ?", (provider_id,))
+                keys_in_db = {row['key_value']: row['id'] for row in cursor.fetchall()}
 
-            # 4. Remove old keys
+            # 4. Remove old keys from api_keys table
             keys_to_remove = db_key_values - keys_from_file
             if keys_to_remove:
                 ids_to_remove = [keys_in_db[val] for val in keys_to_remove]
-                # The ON DELETE CASCADE on key_status will handle cleaning up status records automatically.
                 conn.executemany("DELETE FROM api_keys WHERE id = ?", [(id,) for id in ids_to_remove])
                 print(f"SYNC: Removed {len(keys_to_remove)} obsolete keys for provider '{provider_name}'.")
+
+            # 5. Sync key_model_status table for all current keys of this provider
+            cursor = conn.execute("SELECT id FROM api_keys WHERE provider_id = ?", (provider_id,))
+            current_key_ids = {row['id'] for row in cursor.fetchall()}
+
+            cursor = conn.execute("SELECT key_id, model_name FROM key_model_status WHERE key_id IN ({})".format(','.join('?'*len(current_key_ids)) if current_key_ids else '0'), (*current_key_ids,))
+            model_statuses_in_db = {(row['key_id'], row['model_name']) for row in cursor.fetchall()}
+            
+            models_to_add = []
+            initial_check_time = datetime.utcnow().isoformat()
+            for key_id in current_key_ids:
+                for model_name in provider_models:
+                    if (key_id, model_name) not in model_statuses_in_db:
+                        models_to_add.append((key_id, model_name, 'UNTESTED', initial_check_time))
+            
+            if models_to_add:
+                conn.executemany(
+                    "INSERT INTO key_model_status (key_id, model_name, status, next_check_time) VALUES (?, ?, ?, ?)",
+                    models_to_add
+                )
+                print(f"SYNC: Added {len(models_to_add)} new model status records for provider '{provider_name}'.")
 
     except sqlite3.Error:
         print(f"--- DATABASE ERROR: Failed to sync keys for provider '{provider_name}' ---")
@@ -224,18 +222,15 @@ def sync_keys_for_provider(db_path: str, provider_name: str, keys_from_file: Set
             conn.close()
 
 # --- Operational Functions ---
-# Justification: These functions are the API for the rest of the application.
-# `update_key_status` is the most critical. It accepts a rich CheckResult object,
-# which is a core part of our new architecture. It contains the logic for scheduling
-# the next check based on the error type, abstracting this away from the tester.
 
-def update_key_status(db_path: str, key_id: int, result: CheckResult):
+def update_key_model_status(db_path: str, key_id: int, model_name: str, result: CheckResult):
     """
-    Updates the status of a key in the database based on a CheckResult.
+    Updates the status of a key-model pair and potentially marks the key as dead.
 
     Args:
         db_path: Path to the database file.
         key_id: The ID of the key to update.
+        model_name: The name of the model that was tested.
         result: The CheckResult object from the provider's check method.
     """
     conn = get_db_connection(db_path)
@@ -243,32 +238,28 @@ def update_key_status(db_path: str, key_id: int, result: CheckResult):
         return
         
     now = datetime.utcnow()
-    next_check_time = now # Default to now
+    next_check_time = now
 
-    # This is the adaptive scheduling logic based on the error type.
     if result.ok:
-        status = 'VALID' # A simple, human-readable valid status
-        next_check_time = now + timedelta(hours=12) # Check healthy keys less often
+        status = 'VALID'
+        next_check_time = now + timedelta(hours=12)
     else:
         status = result.error_reason.value
         if result.error_reason.is_retryable():
-             # Retry transient errors relatively quickly
             next_check_time = now + timedelta(minutes=10)
         elif result.error_reason in (ErrorReason.INVALID_KEY, ErrorReason.NO_ACCESS):
-            # Do not re-check invalid keys often
             next_check_time = now + timedelta(days=10)
         else:
-             # Other client-side errors can be checked less frequently
             next_check_time = now + timedelta(days=1)
             
     try:
         with conn:
             conn.execute(
                 """
-                UPDATE key_status
+                UPDATE key_model_status
                 SET status = ?, last_checked = ?, next_check_time = ?,
                     status_code = ?, response_time = ?, error_message = ?
-                WHERE key_id = ?
+                WHERE key_id = ? AND model_name = ?
                 """,
                 (
                     status,
@@ -276,10 +267,17 @@ def update_key_status(db_path: str, key_id: int, result: CheckResult):
                     next_check_time.isoformat(),
                     result.status_code,
                     result.response_time,
-                    result.message[:1000], # Truncate message to avoid large db entries
-                    key_id
+                    result.message[:1000],
+                    key_id,
+                    model_name
                 )
             )
+
+            # If the key is confirmed invalid, mark it as dead for this provider.
+            if result.error_reason == ErrorReason.INVALID_KEY:
+                conn.execute("UPDATE api_keys SET is_dead = TRUE WHERE id = ?", (key_id,))
+                print(f"FLAGGED: Key ID {key_id} marked as dead due to invalid key error.")
+
     except sqlite3.Error:
         print(f"--- DATABASE ERROR: Failed to update status for key_id {key_id} ---")
         traceback.print_exc()
@@ -287,20 +285,12 @@ def update_key_status(db_path: str, key_id: int, result: CheckResult):
         if conn:
             conn.close()
 
-# Justification: These "getter" functions will be used by the background worker and proxy service.
-# They are read-only operations. `get_keys_to_check` is simple and efficient,
-# finding all keys that are due for a check. `get_available_key` implements the
-# strategy of finding a validated, working key for immediate use.
-
 def get_keys_to_check(db_path: str) -> List[Dict[str, Any]]:
     """
-    Retrieves all keys that are due for a health check.
-
-    Args:
-        db_path: Path to the database file.
+    Retrieves all key-model pairs that are due for a health check, excluding dead keys.
 
     Returns:
-        A list of dictionaries, each containing key and provider info.
+        A list of dictionaries, each containing key, model, and provider info.
     """
     conn = get_db_connection(db_path)
     if not conn:
@@ -314,11 +304,12 @@ def get_keys_to_check(db_path: str) -> List[Dict[str, Any]]:
             SELECT
                 k.id AS key_id,
                 k.key_value,
-                p.name AS provider_name
+                p.name AS provider_name,
+                s.model_name AS model_name
             FROM api_keys AS k
-            JOIN key_status AS s ON k.id = s.key_id
+            JOIN key_model_status AS s ON k.id = s.key_id
             JOIN providers AS p ON k.provider_id = p.id
-            WHERE s.next_check_time <= ?
+            WHERE k.is_dead = FALSE AND s.next_check_time <= ?
             """,
             (now_str,)
         )
@@ -331,13 +322,13 @@ def get_keys_to_check(db_path: str) -> List[Dict[str, Any]]:
             conn.close()
     return results
 
-def get_available_key(db_path: str, provider_name: str) -> Optional[Dict[str, Any]]:
+def get_available_key(db_path: str, provider_name: str, model_name: str) -> Optional[Dict[str, Any]]:
     """
-    Finds a random, available (VALID) key for a given provider.
+    Finds a random, available (VALID) key for a given provider and model.
 
     Args:
-        db_path: Path to the database file.
         provider_name: The name of the provider.
+        model_name: The name of the model requested.
 
     Returns:
         A dictionary with key info, or None if no valid key is found.
@@ -354,19 +345,19 @@ def get_available_key(db_path: str, provider_name: str) -> Optional[Dict[str, An
                 k.id AS key_id,
                 k.key_value
             FROM api_keys AS k
-            JOIN key_status AS s ON k.id = s.key_id
+            JOIN key_model_status AS s ON k.id = s.key_id
             JOIN providers AS p ON k.provider_id = p.id
-            WHERE p.name = ? AND s.status = 'VALID'
+            WHERE k.is_dead = FALSE AND p.name = ? AND s.model_name = ? AND s.status = 'VALID'
             ORDER BY RANDOM()
             LIMIT 1
             """,
-            (provider_name,)
+            (provider_name, model_name)
         )
         row = cursor.fetchone()
         if row:
             result = dict(row)
     except sqlite3.Error:
-        print(f"--- DATABASE ERROR: Failed to get available key for provider '{provider_name}' ---")
+        print(f"--- DATABASE ERROR: Failed to get available key for '{provider_name}' - '{model_name}' ---")
         traceback.print_exc()
     finally:
         if conn:
@@ -374,43 +365,30 @@ def get_available_key(db_path: str, provider_name: str) -> Optional[Dict[str, An
     return result
 
 # --- Proxy-related Function Stubs ---
-# Justification: As per our plan, I am adding stubs for proxy-related functions.
-# This makes the database module's API complete from the start, even if the
-# implementation will be added in a future step. It reminds us of the work to be done
-# and allows other modules to be built against this interface.
+# These are kept as stubs for now as per the development plan.
 
 def sync_proxy_lists(db_path: str, proxy_lists_from_config: Dict[str, str]):
-    """
-    (STUB) Synchronizes the proxy_lists table with the config.
-    """
+    """(STUB) Synchronizes the proxy_lists table with the config."""
     print("TODO: Implement sync_proxy_lists")
     pass
 
 def sync_proxies_for_list(db_path: str, list_name: str, proxies_from_file: Set[str]):
-    """
-    (STUB) Synchronizes the proxies table for a specific list.
-    """
+    """(STUB) Synchronizes the proxies table for a specific list."""
     print("TODO: Implement sync_proxies_for_list")
     pass
 
 def update_proxy_status(db_path: str, proxy_id: int, provider_id: int, result: CheckResult):
-    """
-    (STUB) Updates the status of a proxy for a specific provider.
-    """
+    """(STUB) Updates the status of a proxy for a specific provider."""
     print("TODO: Implement update_proxy_status")
     pass
 
 def get_proxies_to_check(db_path: str) -> List[Dict[str, Any]]:
-    """
-    (STUB) Retrieves proxies that are due for a health check.
-    """
+    """(STUB) Retrieves proxies that are due for a health check."""
     print("TODO: Implement get_proxies_to_check")
     return []
 
 def get_available_proxy(db_path: str, provider_name: str) -> Optional[Dict[str, Any]]:
-    """
-    (STUB) Finds a random, available proxy for a given provider.
-    """
+    """(STUB) Finds a random, available proxy for a given provider."""
     print("TODO: Implement get_available_proxy")
     return None
 
