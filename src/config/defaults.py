@@ -9,7 +9,8 @@ def get_default_config() -> Dict[str, Any]:
     """
     return {
         "providers": {
-            "gemini": {
+            "gemini_test": {
+                "provider_type": "gemini",
                 "enabled": True,
                 "keys_path": "keys/gemini/",
                 "api_base_url": "https://generativelanguage.googleapis.com",

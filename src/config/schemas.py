@@ -10,6 +10,7 @@ class ProviderConfig:
     This structure holds all settings specific to one provider,
     such as paths, URLs, and model lists.
     """
+    provider_type: str = ""
     enabled: bool = False
     keys_path: str = ""
     api_base_url: str = ""

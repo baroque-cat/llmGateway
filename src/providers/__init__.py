@@ -31,6 +31,9 @@ def get_provider(provider_name: str, config: ProviderConfig) -> IProvider:
     Raises:
         ValueError: If the requested provider name is not registered.
     """
+    provider_type = config.provider_type
+    if not provider_type:
+        raise ValueError(f"Provider type is not specified for instance '{provider_name}'.")
     provider_class = _PROVIDER_CLASSES.get(provider_name)
     if not provider_class:
         raise ValueError(f"Unknown provider type: '{provider_name}'. "
