@@ -24,24 +24,16 @@ CREATE TABLE IF NOT EXISTS providers (
     name TEXT UNIQUE NOT NULL
 );
 
--- Table 2: Lists of proxy servers (allows grouping proxies)
-CREATE TABLE IF NOT EXISTS proxy_lists (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT UNIQUE NOT NULL,
-    source_path TEXT NOT NULL
-);
-
--- Table 3: The proxy servers themselves
+-- Table 2: The proxy servers themselves. A global pool of proxies.
 CREATE TABLE IF NOT EXISTS proxies (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    list_id INTEGER NOT NULL,
-    address TEXT UNIQUE NOT NULL,
-    FOREIGN KEY (list_id) REFERENCES proxy_lists(id) ON DELETE CASCADE
+    address TEXT UNIQUE NOT NULL -- e.g., "socks5://user:pass@host:port"
 );
 
--- Table 4: Health status of a proxy FOR A SPECIFIC PROVIDER
--- This is the key table for the "masking mode".
-CREATE TABLE IF NOT EXISTS proxy_status (
+-- Table 3: Health status of a proxy FOR A SPECIFIC PROVIDER.
+-- This is the key table for the "stealth mode". It links a proxy from the global
+-- pool to a specific provider and tracks its health in that context.
+CREATE TABLE IF NOT EXISTS provider_proxy_status (
     proxy_id INTEGER NOT NULL,
     provider_id INTEGER NOT NULL,
     status TEXT NOT NULL,
@@ -53,7 +45,7 @@ CREATE TABLE IF NOT EXISTS proxy_status (
     FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE CASCADE
 );
 
--- Table 5: API keys. Now with an 'is_dead' flag.
+-- Table 4: API keys. Now with an 'is_dead' flag.
 CREATE TABLE IF NOT EXISTS api_keys (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     provider_id INTEGER NOT NULL,
@@ -63,7 +55,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
     FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE CASCADE
 );
 
--- Table 6: Health status for each key-model pair.
+-- Table 5: Health status for each key-model pair.
 CREATE TABLE IF NOT EXISTS key_model_status (
     key_id INTEGER NOT NULL,
     model_name TEXT NOT NULL,
@@ -82,6 +74,8 @@ CREATE INDEX IF NOT EXISTS idx_api_keys_provider_id ON api_keys(provider_id);
 CREATE INDEX IF NOT EXISTS idx_api_keys_is_dead ON api_keys(is_dead);
 CREATE INDEX IF NOT EXISTS idx_key_model_status_next_check_time ON key_model_status(next_check_time);
 CREATE INDEX IF NOT EXISTS idx_key_model_status_status ON key_model_status(status);
+CREATE INDEX IF NOT EXISTS idx_proxy_status_next_check_time ON provider_proxy_status(next_check_time);
+CREATE INDEX IF NOT EXISTS idx_proxy_status_status ON provider_proxy_status(status);
 """
 
 def get_db_connection(db_path: str) -> Optional[sqlite3.Connection]:
@@ -97,6 +91,7 @@ def get_db_connection(db_path: str) -> Optional[sqlite3.Connection]:
     try:
         conn = sqlite3.connect(db_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row  # Allows accessing columns by name
+        conn.execute("PRAGMA foreign_keys = ON;") # Enforce foreign key constraints
         return conn
     except sqlite3.Error:
         print("--- DATABASE ERROR: Failed to connect to database ---")
@@ -208,7 +203,11 @@ def sync_keys_for_provider(db_path: str, provider_name: str, keys_from_file: Set
             cursor = conn.execute("SELECT id FROM api_keys WHERE provider_id = ?", (provider_id,))
             current_key_ids = {row['id'] for row in cursor.fetchall()}
 
-            cursor = conn.execute("SELECT key_id, model_name FROM key_model_status WHERE key_id IN ({})".format(','.join('?'*len(current_key_ids)) if current_key_ids else '0'), (*current_key_ids,))
+            if not current_key_ids: # No keys for this provider, skip model sync
+                return
+            
+            placeholders = ','.join('?' for _ in current_key_ids)
+            cursor = conn.execute(f"SELECT key_id, model_name FROM key_model_status WHERE key_id IN ({placeholders})", tuple(current_key_ids))
             model_statuses_in_db = {(row['key_id'], row['model_name']) for row in cursor.fetchall()}
             
             models_to_add = []
