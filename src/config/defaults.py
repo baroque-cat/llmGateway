@@ -9,7 +9,7 @@ def get_default_config() -> Dict[str, Any]:
     """
     return {
         "providers": {
-            "gemini_test": {
+            "gemini_default": {
                 "provider_type": "gemini",
                 "enabled": True,
                 "keys_path": "keys/gemini/",
@@ -17,9 +17,26 @@ def get_default_config() -> Dict[str, Any]:
                 "default_model": "gemini-2.5-flash",
                 "models": {
                     "llm": [
-                        "gemini-2.5-pro",
-                        "gemini-2.5-flash"
+                        "gemini-2.5-flash",
+                        "gemini-2.5-pro"
                     ]
+                }
+                "access_control": {
+                    "gateway_access_token": "gp-changeme-xxxxxxxxxxxxxxxxxxxx"
+                },
+
+                "health_policy": {
+                    "on_success_hr": 2,
+                    "on_overload_min": 60,
+                    "on_rate_limit_min": 180,
+                    "on_server_error_min": 10,
+                    "on_invalid_key_days": 10,
+                    "on_other_error_hr": 1
+                },
+
+                "proxy_config": {
+                    "enabled": False,
+                    "proxy_list_path": "proxies/gemini/"
                 }
             },
         }

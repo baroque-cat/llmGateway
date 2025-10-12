@@ -2,14 +2,50 @@
 
 import os
 import yaml
-from src.config.schemas import Config, ProviderConfig
+from typing import Set
+
+from src.config.schemas import Config, ProviderConfig, AccessControlConfig, HealthPolicyConfig, ProxyConfig
 from src.config.defaults import get_default_config
+
+def _validate_config(config: Config):
+    """
+    Performs validation on the loaded configuration.
+
+    Args:
+        config: The fully loaded Config object.
+
+    Raises:
+        ValueError: If any validation rule is violated.
+    """
+    used_tokens: Set[str] = set()
+
+    for name, conf in config.providers.items():
+        if conf.enabled:
+            # Basic field validation
+            if not conf.provider_type:
+                raise ValueError(f"Provider '{name}' is enabled but 'provider_type' is not set.")
+            if not conf.keys_path:
+                raise ValueError(f"Provider '{name}' is enabled but 'keys_path' is not set.")
+            if not conf.default_model:
+                raise ValueError(f"Provider '{name}' is enabled but 'default_model' is not set.")
+            
+            # Access token validation
+            token = conf.access_control.gateway_access_token
+            if not token:
+                raise ValueError(f"Provider '{name}' is enabled but 'gateway_access_token' is not set.")
+            
+            if token in used_tokens:
+                raise ValueError(
+                    f"Duplicate gateway_access_token '{token}' found for provider '{name}'. "
+                    "All gateway access tokens must be unique across all provider instances."
+                )
+            used_tokens.add(token)
 
 def load_config(path: str = "config/providers.yaml") -> Config:
     """
     Loads configuration from a YAML file.
     If the file does not exist, it creates a default one.
-    It parses the raw data into structured Config objects.
+    It parses the raw data into structured Config objects and validates them.
     
     Args:
         path: The path to the YAML configuration file.
@@ -24,11 +60,17 @@ def load_config(path: str = "config/providers.yaml") -> Config:
             yaml.dump(get_default_config(), f, default_flow_style=False, sort_keys=False)
 
     with open(path, 'r', encoding='utf-8') as f:
-        raw_config = yaml.safe_load(f)
+        raw_config = yaml.safe_load(f) or {}
 
     app_config = Config()
 
     for name, provider_data in raw_config.get('providers', {}).items():
+        # Safely get nested dictionaries, defaulting to empty dicts if a section is missing.
+        # This allows dataclasses to use their default values.
+        access_data = provider_data.get('access_control', {})
+        health_data = provider_data.get('health_policy', {})
+        proxy_data = provider_data.get('proxy_config', {})
+
         provider_conf = ProviderConfig(
             provider_type=provider_data.get('provider_type', ''),
             enabled=provider_data.get('enabled', False),
@@ -36,19 +78,15 @@ def load_config(path: str = "config/providers.yaml") -> Config:
             api_base_url=provider_data.get('api_base_url', ''),
             default_model=provider_data.get('default_model', ''),
             models=provider_data.get('models', {}),
-            use_proxy_list=provider_data.get('use_proxy_list')
+            
+            # Create nested dataclass objects from the parsed dictionaries.
+            access_control=AccessControlConfig(**access_data),
+            health_policy=HealthPolicyConfig(**health_data),
+            proxy_config=ProxyConfig(**proxy_data)
         )
         app_config.providers[name] = provider_conf
 
-    # Simple validation
-    for name, conf in app_config.providers.items():
-        if conf.enabled:
-            if not conf.provider_type:
-                raise ValueError(f"Provider '{name}' is enabled but 'provider_type' is not set.")
-            if not conf.keys_path:
-                raise ValueError(f"Provider '{name}' is enabled but 'keys_path' is not set.")
-            if not conf.default_model:
-                raise ValueError(f"Provider '{name}' is enabled but 'default_model' is not set.")
+    # Perform validation after loading all providers.
+    _validate_config(app_config)
 
     return app_config
-
