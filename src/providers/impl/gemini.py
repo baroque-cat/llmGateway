@@ -63,7 +63,7 @@ class GeminiProvider(AIBaseProvider):
         elif status_code >= 500:
             return CheckResult.fail(ErrorReason.SERVER_ERROR, response_text, response_time, status_code)
         elif status_code >= 503:
-            return CheckResult.fail(ErrorReason.SERVICE_OVERLOADED, response_text, response_time, status_code)
+            return CheckResult.fail(ErrorReason.OVERLOADED, response_text, response_time, status_code)
         else:
             return CheckResult.fail(ErrorReason.UNKNOWN, response_text, response_time, status_code)
 
