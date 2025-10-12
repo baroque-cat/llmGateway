@@ -2,15 +2,15 @@
 
 import sqlite3
 import traceback
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import List, Set, Dict, Any, Optional
 
-from src.core.models import CheckResult
 from src.core.enums import ErrorReason
 
 # --- Data Integrity Contract ---
 # Create a set of all valid string values for the status field.
 # This acts as a programmatic guard against writing invalid data.
+# 'VALID' and 'UNTESTED' are special statuses not present in ErrorReason.
 VALID_STATUSES = {reason.value for reason in ErrorReason} | {'VALID', 'UNTESTED'}
 
 
@@ -63,8 +63,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
     FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE CASCADE
 );
 
--- Table 6: NEW - Health status for each key-model pair.
--- Replaces the old 'key_status' table.
+-- Table 6: Health status for each key-model pair.
 CREATE TABLE IF NOT EXISTS key_model_status (
     key_id INTEGER NOT NULL,
     model_name TEXT NOT NULL,
@@ -235,35 +234,26 @@ def sync_keys_for_provider(db_path: str, provider_name: str, keys_from_file: Set
 
 # --- Operational Functions ---
 
-def update_key_model_status(db_path: str, key_id: int, model_name: str, result: CheckResult):
+def update_key_model_status(db_path: str, key_id: int, model_name: str, status: str, next_check_time: datetime, status_code: Optional[int], response_time: float, error_message: str):
     """
-    Updates the status of a key-model pair and potentially marks the key as dead.
+    Updates the status of a key-model pair based on pre-computed values.
+    This function is a "dumb" writer; all business logic for calculating
+    the next check time is handled by the calling service.
 
     Args:
         db_path: Path to the database file.
         key_id: The ID of the key to update.
         model_name: The name of the model that was tested.
-        result: The CheckResult object from the provider's check method.
+        status: The new status string (e.g., 'VALID', 'invalid_key').
+        next_check_time: The pre-calculated datetime for the next check.
+        status_code: The HTTP status code from the check.
+        response_time: The response time of the check in seconds.
+        error_message: Any error message associated with the check.
     """
     conn = get_db_connection(db_path)
     if not conn:
         return
-        
-    now = datetime.utcnow()
-    next_check_time = now
 
-    if result.ok:
-        status = 'VALID'
-        next_check_time = now + timedelta(hours=12)
-    else:
-        status = result.error_reason.value
-        if result.error_reason.is_retryable():
-            next_check_time = now + timedelta(minutes=10)
-        elif result.error_reason in (ErrorReason.INVALID_KEY, ErrorReason.NO_ACCESS):
-            next_check_time = now + timedelta(days=10)
-        else:
-            next_check_time = now + timedelta(days=1)
-    
     # Assert that the status we are about to write is a valid, known status.
     # This prevents data corruption from future code changes.
     assert status in VALID_STATUSES, f"Attempted to write invalid status '{status}' to the database!"
@@ -279,18 +269,18 @@ def update_key_model_status(db_path: str, key_id: int, model_name: str, result: 
                 """,
                 (
                     status,
-                    now.isoformat(),
+                    datetime.utcnow().isoformat(),
                     next_check_time.isoformat(),
-                    result.status_code,
-                    result.response_time,
-                    result.message[:1000],
+                    status_code,
+                    response_time,
+                    error_message[:1000],  # Truncate message to avoid db errors
                     key_id,
                     model_name
                 )
             )
 
             # If the key is confirmed invalid, mark it as dead for this provider.
-            if result.error_reason == ErrorReason.INVALID_KEY:
+            if status == ErrorReason.INVALID_KEY.value:
                 conn.execute("UPDATE api_keys SET is_dead = TRUE WHERE id = ?", (key_id,))
                 print(f"FLAGGED: Key ID {key_id} marked as dead due to invalid key error.")
 
@@ -300,6 +290,7 @@ def update_key_model_status(db_path: str, key_id: int, model_name: str, result: 
     finally:
         if conn:
             conn.close()
+
 
 def get_keys_to_check(db_path: str) -> List[Dict[str, Any]]:
     """
@@ -399,9 +390,13 @@ def amnesty_dead_keys(db_path: str, provider_name: Optional[str] = None):
         with conn:
             if provider_name:
                 cursor = conn.execute("SELECT id FROM providers WHERE name = ?", (provider_name,))
-                provider_id = cursor.fetchone()['id']
-                cursor = conn.execute("UPDATE api_keys SET is_dead = FALSE WHERE is_dead = TRUE AND provider_id = ?", (provider_id,))
-                print(f"MAINTENANCE: Amnesty granted for 'dead' keys of provider '{provider_name}'. {cursor.rowcount} keys reset.")
+                provider_row = cursor.fetchone()
+                if provider_row:
+                    provider_id = provider_row['id']
+                    cursor = conn.execute("UPDATE api_keys SET is_dead = FALSE WHERE is_dead = TRUE AND provider_id = ?", (provider_id,))
+                    print(f"MAINTENANCE: Amnesty granted for 'dead' keys of provider '{provider_name}'. {cursor.rowcount} keys reset.")
+                else:
+                    print(f"MAINTENANCE ERROR: Provider '{provider_name}' not found for amnesty.")
             else:
                 cursor = conn.execute("UPDATE api_keys SET is_dead = FALSE WHERE is_dead = TRUE")
                 print(f"MAINTENANCE: Global amnesty granted for all 'dead' keys. {cursor.rowcount} keys reset.")
@@ -434,32 +429,3 @@ def vacuum_database(db_path: str):
     finally:
         if conn:
             conn.close()
-
-
-# --- Proxy-related Function Stubs ---
-# These are kept as stubs for now as per the development plan.
-
-def sync_proxy_lists(db_path: str, proxy_lists_from_config: Dict[str, str]):
-    """(STUB) Synchronizes the proxy_lists table with the config."""
-    print("TODO: Implement sync_proxy_lists")
-    pass
-
-def sync_proxies_for_list(db_path: str, list_name: str, proxies_from_file: Set[str]):
-    """(STUB) Synchronizes the proxies table for a specific list."""
-    print("TODO: Implement sync_proxies_for_list")
-    pass
-
-def update_proxy_status(db_path: str, proxy_id: int, provider_id: int, result: CheckResult):
-    """(STUB) Updates the status of a proxy for a specific provider."""
-    print("TODO: Implement update_proxy_status")
-    pass
-
-def get_proxies_to_check(db_path: str) -> List[Dict[str, Any]]:
-    """(STUB) Retrieves proxies that are due for a health check."""
-    print("TODO: Implement get_proxies_to_check")
-    return []
-
-def get_available_proxy(db_path: str, provider_name: str) -> Optional[Dict[str, Any]]:
-    """(STUB) Finds a random, available proxy for a given provider."""
-    print("TODO: Implement get_available_proxy")
-    return None
