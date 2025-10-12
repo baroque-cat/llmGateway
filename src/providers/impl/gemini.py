@@ -63,7 +63,7 @@ class GeminiProvider(AIBaseProvider):
         elif status_code >= 500:
             return CheckResult.fail(ErrorReason.SERVER_ERROR, response_text, response_time, status_code)
         elif status_code >= 503:
-            return CheckResult.fail(ErrorReason.SERVICE_UNAVAILABLE, response_text, response_time, status_code)
+            return CheckResult.fail(ErrorReason.SERVICE_OVERLOADED, response_text, response_time, status_code)
         else:
             return CheckResult.fail(ErrorReason.UNKNOWN, response_text, response_time, status_code)
 
@@ -119,6 +119,8 @@ class GeminiProvider(AIBaseProvider):
                     reason = ErrorReason.RATE_LIMITED
                 elif status_code >= 500:
                     reason = ErrorReason.SERVER_ERROR
+                elif status_code == 503: 
+                    reason = ErrorReason.OVERLOADED
                 else:
                     reason = ErrorReason.UNKNOWN
 
@@ -130,7 +132,7 @@ class GeminiProvider(AIBaseProvider):
             # Handle network-level errors (e.g., timeout, connection error)
             response_time = time.time() - start_time
             upstream_response = requests.Response() # Create a dummy response object
-            upstream_response.status_code = 503 # Service Unavailable
+            upstream_response.status_code = 503 
             upstream_response.reason = str(e)
             check_result = CheckResult.fail(
                 ErrorReason.NETWORK_ERROR, str(e), response_time, 503

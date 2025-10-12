@@ -24,6 +24,7 @@ class ErrorReason(Enum):
     TIMEOUT = "timeout"
     SERVER_ERROR = "server_error"
     SERVICE_UNAVAILABLE = "service_unavailable"
+    OVERLOADED = "overloaded"
     
     # Client-Side & Authentication Errors
     BAD_REQUEST = "bad_request"
@@ -50,6 +51,7 @@ class ErrorReason(Enum):
             ErrorReason.RATE_LIMITED,
             ErrorReason.SERVER_ERROR,
             ErrorReason.SERVICE_UNAVAILABLE,
+            ErrorReason.OVERLOADED,
         }
         return self in retryable_errors
 

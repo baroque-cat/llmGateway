@@ -257,7 +257,9 @@ def update_key_model_status(db_path: str, key_id: int, model_name: str, result: 
         next_check_time = now + timedelta(hours=12)
     else:
         status = result.error_reason.value
-        if result.error_reason.is_retryable():
+        if result.error_reason == ErrorReason.OVERLOADED:
+            next_check_time = now + timedelta(minutes=2)
+        elif result.error_reason.is_retryable():
             next_check_time = now + timedelta(minutes=10)
         elif result.error_reason in (ErrorReason.INVALID_KEY, ErrorReason.NO_ACCESS):
             next_check_time = now + timedelta(days=10)
