@@ -22,6 +22,8 @@ class HealthPolicyConfig:
     on_server_error_min: int = 10
     on_invalid_key_days: int = 10
     on_other_error_hr: int = 1
+    batch_size: int = 30  # Number of keys to check in a single batch.
+    batch_delay_sec: int = 15  # Delay in seconds between batches for the same provider.
 
 @dataclass
 class ProxyConfig:

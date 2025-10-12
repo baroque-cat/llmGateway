@@ -32,6 +32,8 @@ def get_default_config() -> Dict[str, Any]:
                     "on_server_error_min": 10,
                     "on_invalid_key_days": 10,
                     "on_other_error_hr": 1
+                    "batch_size": 30,
+                    "batch_delay_sec": 15
                 },
 
                 "proxy_config": {
