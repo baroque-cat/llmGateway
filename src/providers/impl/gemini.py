@@ -59,9 +59,11 @@ class GeminiProvider(AIBaseProvider):
         elif "API_KEY_INVALID" in response_text or status_code == 400:
              return CheckResult.fail(ErrorReason.INVALID_KEY, response_text, response_time, status_code)
         elif status_code == 429:
-            return CheckResult.fail(ErrorReason.NO_QUOTA, response_text, response_time, status_code)
+            return CheckResult.fail(ErrorReason.RATE_LIMITED, response_text, response_time, status_code)
         elif status_code >= 500:
             return CheckResult.fail(ErrorReason.SERVER_ERROR, response_text, response_time, status_code)
+        elif status_code >= 503:
+            return CheckResult.fail(ErrorReason.SERVICE_UNAVAILABLE, response_text, response_time, status_code)
         else:
             return CheckResult.fail(ErrorReason.UNKNOWN, response_text, response_time, status_code)
 
