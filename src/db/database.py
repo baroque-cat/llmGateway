@@ -8,6 +8,12 @@ from typing import List, Set, Dict, Any, Optional
 from src.core.models import CheckResult
 from src.core.enums import ErrorReason
 
+# --- Data Integrity Contract ---
+# Create a set of all valid string values for the status field.
+# This acts as a programmatic guard against writing invalid data.
+VALID_STATUSES = {reason.value for reason in ErrorReason} | {'VALID', 'UNTESTED'}
+
+
 # This constant defines the entire database schema in one place.
 # It makes the schema version-controllable and easy to read.
 # ON DELETE CASCADE is used to ensure data integrity when parent records are removed.
@@ -71,6 +77,12 @@ CREATE TABLE IF NOT EXISTS key_model_status (
     PRIMARY KEY (key_id, model_name),
     FOREIGN KEY (key_id) REFERENCES api_keys(id) ON DELETE CASCADE
 );
+
+-- Indexes for performance optimization
+CREATE INDEX IF NOT EXISTS idx_api_keys_provider_id ON api_keys(provider_id);
+CREATE INDEX IF NOT EXISTS idx_api_keys_is_dead ON api_keys(is_dead);
+CREATE INDEX IF NOT EXISTS idx_key_model_status_next_check_time ON key_model_status(next_check_time);
+CREATE INDEX IF NOT EXISTS idx_key_model_status_status ON key_model_status(status);
 """
 
 def get_db_connection(db_path: str) -> Optional[sqlite3.Connection]:
@@ -251,6 +263,10 @@ def update_key_model_status(db_path: str, key_id: int, model_name: str, result: 
             next_check_time = now + timedelta(days=10)
         else:
             next_check_time = now + timedelta(days=1)
+    
+    # Assert that the status we are about to write is a valid, known status.
+    # This prevents data corruption from future code changes.
+    assert status in VALID_STATUSES, f"Attempted to write invalid status '{status}' to the database!"
             
     try:
         with conn:
@@ -364,6 +380,62 @@ def get_available_key(db_path: str, provider_name: str, model_name: str) -> Opti
             conn.close()
     return result
 
+# --- Maintenance Functions ---
+
+def amnesty_dead_keys(db_path: str, provider_name: Optional[str] = None):
+    """
+    Resets the 'is_dead' flag for all keys, or only for a specific provider.
+    This gives "dead" keys a second chance to be re-validated.
+
+    Args:
+        db_path: Path to the database file.
+        provider_name: (Optional) The name of the provider to run amnesty for.
+    """
+    conn = get_db_connection(db_path)
+    if not conn:
+        return
+    
+    try:
+        with conn:
+            if provider_name:
+                cursor = conn.execute("SELECT id FROM providers WHERE name = ?", (provider_name,))
+                provider_id = cursor.fetchone()['id']
+                cursor = conn.execute("UPDATE api_keys SET is_dead = FALSE WHERE is_dead = TRUE AND provider_id = ?", (provider_id,))
+                print(f"MAINTENANCE: Amnesty granted for 'dead' keys of provider '{provider_name}'. {cursor.rowcount} keys reset.")
+            else:
+                cursor = conn.execute("UPDATE api_keys SET is_dead = FALSE WHERE is_dead = TRUE")
+                print(f"MAINTENANCE: Global amnesty granted for all 'dead' keys. {cursor.rowcount} keys reset.")
+
+    except sqlite3.Error:
+        print("--- DATABASE ERROR: Failed during key amnesty ---")
+        traceback.print_exc()
+    finally:
+        if conn:
+            conn.close()
+
+def vacuum_database(db_path: str):
+    """
+    Executes the VACUUM command to rebuild the database file, repacking it into a minimal amount of disk space.
+
+    Args:
+        db_path: Path to the database file.
+    """
+    conn = get_db_connection(db_path)
+    if not conn:
+        return
+    
+    try:
+        print("MAINTENANCE: Starting database VACUUM operation...")
+        conn.execute("VACUUM;")
+        print("MAINTENANCE: Database VACUUM completed successfully.")
+    except sqlite3.Error:
+        print("--- DATABASE ERROR: VACUUM operation failed ---")
+        traceback.print_exc()
+    finally:
+        if conn:
+            conn.close()
+
+
 # --- Proxy-related Function Stubs ---
 # These are kept as stubs for now as per the development plan.
 
@@ -391,4 +463,3 @@ def get_available_proxy(db_path: str, provider_name: str) -> Optional[Dict[str, 
     """(STUB) Finds a random, available proxy for a given provider."""
     print("TODO: Implement get_available_proxy")
     return None
-
