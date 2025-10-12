@@ -76,3 +76,23 @@ class CheckResult:
             "status_code": self.status_code,
         }
 
+
+class RequestMetadata:
+    """
+    Represents metadata extracted from a successful provider response.
+    This object is designed to be flexible and provider-agnostic.
+    """
+    parser_callback: Optional[Callable[[str], Dict[str, Any]]] = None
+
+    model_name: str = ""
+
+    def parse(self, response_body: str) -> Dict[str, Any]:
+        """
+        Executes the parsing callback if it exists.
+        """
+        if self.parser_callback:
+            try:
+                return self.parser_callback(response_body)
+            except Exception:
+                return {}
+        return {}
