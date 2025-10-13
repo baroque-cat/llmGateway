@@ -7,6 +7,7 @@ from typing import Set
 from src.config.schemas import Config, ProviderConfig, AccessControlConfig, HealthPolicyConfig, ProxyConfig
 from src.config.defaults import get_default_config
 
+
 def _validate_config(config: Config):
     """
     Performs validation on the loaded configuration.
@@ -40,6 +41,30 @@ def _validate_config(config: Config):
                     "All gateway access tokens must be unique across all provider instances."
                 )
             used_tokens.add(token)
+
+            # --- NEW PROXY CONFIGURATION VALIDATION LOGIC ---
+            proxy_conf = conf.proxy_config
+            valid_modes = {'none', 'static', 'stealth'}
+
+            # 1. Check if the specified mode is one of the allowed values.
+            if proxy_conf.mode not in valid_modes:
+                raise ValueError(
+                    f"Provider '{name}' has an invalid proxy mode '{proxy_conf.mode}'. "
+                    f"Valid modes are: {valid_modes}"
+                )
+
+            # 2. If mode is 'static', ensure the URL is provided.
+            if proxy_conf.mode == 'static' and not proxy_conf.static_url:
+                raise ValueError(
+                    f"Provider '{name}' is in 'static' proxy mode but 'static_url' is not set."
+                )
+            
+            # 3. If mode is 'stealth', ensure the path to the proxy list is provided.
+            if proxy_conf.mode == 'stealth' and not proxy_conf.pool_list_path:
+                raise ValueError(
+                    f"Provider '{name}' is in 'stealth' proxy mode but 'pool_list_path' is not set."
+                )
+
 
 def load_config(path: str = "config/providers.yaml") -> Config:
     """

@@ -28,6 +28,7 @@ def get_default_config() -> Dict[str, Any]:
                 "health_policy": {
                     "on_success_hr": 2,
                     "on_overload_min": 60,
+                    "on_no_quota_hr": 24,
                     "on_rate_limit_min": 180,
                     "on_server_error_min": 10,
                     "on_invalid_key_days": 10,
@@ -37,8 +38,9 @@ def get_default_config() -> Dict[str, Any]:
                 },
 
                 "proxy_config": {
-                    "enabled": False,
-                    "proxy_list_path": "proxies/gemini/"
+                    "mode": "none",
+                    "static_url": None,
+                    "pool_list_path": "proxies/gemini/"
                 }
             },
         }
