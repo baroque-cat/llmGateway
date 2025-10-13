@@ -14,7 +14,8 @@ from typing import List, Tuple
 from flask import Request
 import requests
 
-from src.core.models import CheckResult, RequestMetadata
+from src.config.schemas import Config
+from src.core.models import CheckResult
 
 
 class IProvider(ABC):
@@ -83,3 +84,24 @@ class IProvider(ABC):
         """
         pass
 
+
+class IResourceSyncer(ABC):
+    """
+    Abstract Base Class (Interface) for all resource synchronizers.
+
+    This contract defines a universal interface for any service that synchronizes
+    resources (like API keys, proxies) from a source (e.g., config files)
+    to a destination (e.g., the database). The background worker will use this
+    contract to run all sync tasks polymorphically.
+    """
+
+    @abstractmethod
+    def sync(self, config: Config, db_path: str):
+        """
+        Executes one full synchronization cycle for the specific resource type.
+
+        Args:
+            config: The application's loaded configuration object.
+            db_path: The file path to the SQLite database.
+        """
+        pass
