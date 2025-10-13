@@ -18,6 +18,7 @@ class HealthPolicyConfig:
     """
     on_success_hr: int = 2
     on_overload_min: int = 60
+    on_no_quota_hr: int = 24
     on_rate_limit_min: int = 180
     on_server_error_min: int = 10
     on_invalid_key_days: int = 10
@@ -28,10 +29,20 @@ class HealthPolicyConfig:
 @dataclass
 class ProxyConfig:
     """
-    Configuration for the optional stealth/masking mode which uses proxies.
+    Configuration for proxy usage, supporting multiple operational modes.
     """
-    enabled: bool = False
-    proxy_list_path: str = ""
+    # Defines the proxy mode:
+    # 'none': (Default) Direct connection, no proxy is used.
+    # 'static': A single, fixed proxy is used for all requests for this provider.
+    # 'stealth': A pool of proxies is used, with health checks and rotation (future implementation).
+    mode: str = "none"
+
+    # The URL for the proxy when mode is 'static'.
+    # e.g., "http://user:pass@host:port" or "socks5://host:port"
+    static_url: Optional[str] = None
+
+    # The file path to the list of proxies when mode is 'stealth'.
+    pool_list_path: Optional[str] = None
 
 @dataclass
 class ProviderConfig:
