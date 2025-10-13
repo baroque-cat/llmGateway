@@ -62,7 +62,7 @@ class IProvider(ABC):
         pass
 
     @abstractmethod
-    def proxy_request(self, token: str, request: Request) -> Tuple[requests.Response, CheckResult, RequestMetadata]:
+    def proxy_request(self, token: str, request: Request) -> Tuple[requests.Response, CheckResult]:
         """
         Proxies an incoming client request to the target API provider.
 
@@ -80,7 +80,6 @@ class IProvider(ABC):
                This object should be created with `stream=True` to support streaming.
             2. A `CheckResult` object generated from the response, which will be used
                by the proxy service to update the key's status in the database.
-            3. A `RequestMetadata` object, possibly containing a callback for parsing the final response body.
         """
         pass
 
