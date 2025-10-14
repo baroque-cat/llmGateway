@@ -70,17 +70,12 @@ class ProxySyncer(IResourceSyncer):
             if not proxies_from_file:
                 logger.warning(f"No proxies found in file '{provider_config.proxy_config.proxy_list_path}' for provider '{provider_name}'.")
 
-            # TODO: Implement the corresponding database function.
-            # This function will need to:
-            # 1. Add new proxy addresses to the global 'proxies' table.
-            # 2. Add entries to the 'provider_proxy_status' table, linking the provider
-            #    with the proxies from the file.
-            # 3. Handle removal of proxies that are no longer in the file for this provider.
-            # database.sync_proxies_for_provider(
-            #     db_path=db_path,
-            #     provider_name=provider_name,
-            #     proxies_from_file=proxies_from_file
-            # )
+            database.sync_proxies_for_provider(
+                db_path=db_path,
+                provider_name=provider_name,
+                proxies_from_file=proxies_from_file
+            )
+
             logger.info(f"Database sync for proxies of provider '{provider_name}' is not yet implemented. Found {len(proxies_from_file)} proxies.")
 
         logger.info("Proxy synchronization cycle finished.")
