@@ -4,8 +4,8 @@ import os
 import yaml
 from typing import Set
 
-from src/config/schemas import Config, ProviderConfig, AccessControlConfig, HealthPolicyConfig, ProxyConfig
-from src/config/defaults import get_default_config
+from src.config.schemas import Config, ProviderConfig, AccessControlConfig, HealthPolicyConfig, ProxyConfig, LoggingConfig
+from src.config.defaults import get_default_config
 
 
 def _validate_config(config: Config):
@@ -29,8 +29,8 @@ def _validate_config(config: Config):
                 raise ValueError(f"Provider '{name}' is enabled but 'keys_path' is not set.")
             if not conf.default_model:
                 raise ValueError(f"Provider '{name}' is enabled but 'default_model' is not set.")
-            
             # Access token validation
+
             token = conf.access_control.gateway_access_token
             if not token:
                 raise ValueError(f"Provider '{name}' is enabled but 'gateway_access_token' is not set.")
@@ -87,11 +87,14 @@ def load_config(path: str = "config/providers.yaml") -> Config:
     with open(path, 'r', encoding='utf-8') as f:
         raw_config = yaml.safe_load(f) or {}
 
-    # --- UPDATED: Create the main Config object, populating global settings first ---
+    # --- MODIFIED: Parse global and nested logging settings ---
+    # Safely get the logging settings dictionary, defaulting to an empty dict.
+    logging_data = raw_config.get('logging', {})
+    
+    # Create the main Config object, populating it with global settings.
     app_config = Config(
         debug=raw_config.get('debug', False),
-        summary_log_path=raw_config.get('summary_log_path', "data/summary.log"),
-        summary_interval_min=raw_config.get('summary_interval_min', 60)
+        logging=LoggingConfig(**logging_data)
     )
 
     for name, provider_data in raw_config.get('providers', {}).items():

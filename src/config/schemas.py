@@ -65,21 +65,36 @@ class ProviderConfig:
     health_policy: HealthPolicyConfig = field(default_factory=HealthPolicyConfig)
     proxy_config: ProxyConfig = field(default_factory=ProxyConfig)
 
+
+@dataclass
+class LoggingConfig:
+    """
+    Global configuration for the statistics and logging system.
+    """
+    # The directory where summary .jsonl log files will be stored.
+    summary_log_path: str = "logs/summary/"
+    
+    # The interval in minutes for generating a summary report.
+    summary_interval_min: int = 60
+    
+    # The maximum size in megabytes for a single summary log file before rotation.
+    summary_log_max_size_mb: int = 5
+    
+    # The number of old (rotated) summary log files to keep.
+    summary_log_backup_count: int = 3
+
+
 @dataclass
 class Config:
     """
     The main configuration object for the entire application.
-    It aggregates configurations for all provider instances and holds global settings.
+    It aggregates configurations for all provider instances and global settings.
     """
-    # --- NEW: Global application settings ---
-    # Enables detailed operational logging to stdout.
+    # Global debug mode flag. If true, enables verbose operational logging to stdout.
     debug: bool = False
-    
-    # Path to the file where periodic summary reports will be written.
-    summary_log_path: str = "data/summary.log"
-    
-    # Interval in minutes for writing the summary report.
-    summary_interval_min: int = 60
-    
-    # --- Existing provider configurations ---
+
+    # Nested configuration for the logging system.
+    logging: LoggingConfig = field(default_factory=LoggingConfig)
+
+    # Dictionary of all configured provider instances, keyed by their unique name.
     providers: Dict[str, ProviderConfig] = field(default_factory=dict)
