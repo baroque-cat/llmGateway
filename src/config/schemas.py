@@ -69,7 +69,17 @@ class ProviderConfig:
 class Config:
     """
     The main configuration object for the entire application.
-    It aggregates configurations for all provider instances, keyed by their unique name.
+    It aggregates configurations for all provider instances and holds global settings.
     """
+    # --- NEW: Global application settings ---
+    # Enables detailed operational logging to stdout.
+    debug: bool = False
+    
+    # Path to the file where periodic summary reports will be written.
+    summary_log_path: str = "data/summary.log"
+    
+    # Interval in minutes for writing the summary report.
+    summary_interval_min: int = 60
+    
+    # --- Existing provider configurations ---
     providers: Dict[str, ProviderConfig] = field(default_factory=dict)
-

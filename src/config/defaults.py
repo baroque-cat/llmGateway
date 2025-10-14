@@ -8,6 +8,11 @@ def get_default_config() -> Dict[str, Any]:
     This serves as a template for generating the initial providers.yaml file.
     """
     return {
+        # --- NEW: Global application settings have been added to the template ---
+        "debug": False,
+        "summary_log_path": "logs/llm_gateway_summary.log",
+        "summary_interval_min": 60,
+        
         "providers": {
             "gemini_default": {
                 "provider_type": "gemini",
@@ -20,7 +25,7 @@ def get_default_config() -> Dict[str, Any]:
                         "gemini-2.5-flash",
                         "gemini-2.5-pro"
                     ]
-                }
+                }, # Corrected: Added a closing brace here
                 "access_control": {
                     "gateway_access_token": "gp-changeme-xxxxxxxxxxxxxxxxxxxx"
                 },
@@ -32,7 +37,7 @@ def get_default_config() -> Dict[str, Any]:
                     "on_rate_limit_min": 180,
                     "on_server_error_min": 10,
                     "on_invalid_key_days": 10,
-                    "on_other_error_hr": 1
+                    "on_other_error_hr": 1,
                     "batch_size": 30,
                     "batch_delay_sec": 15
                 },

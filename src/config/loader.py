@@ -4,8 +4,8 @@ import os
 import yaml
 from typing import Set
 
-from src.config.schemas import Config, ProviderConfig, AccessControlConfig, HealthPolicyConfig, ProxyConfig
-from src.config.defaults import get_default_config
+from src/config/schemas import Config, ProviderConfig, AccessControlConfig, HealthPolicyConfig, ProxyConfig
+from src/config/defaults import get_default_config
 
 
 def _validate_config(config: Config):
@@ -87,7 +87,12 @@ def load_config(path: str = "config/providers.yaml") -> Config:
     with open(path, 'r', encoding='utf-8') as f:
         raw_config = yaml.safe_load(f) or {}
 
-    app_config = Config()
+    # --- UPDATED: Create the main Config object, populating global settings first ---
+    app_config = Config(
+        debug=raw_config.get('debug', False),
+        summary_log_path=raw_config.get('summary_log_path', "data/summary.log"),
+        summary_interval_min=raw_config.get('summary_interval_min', 60)
+    )
 
     for name, provider_data in raw_config.get('providers', {}).items():
         # Safely get nested dictionaries, defaulting to empty dicts if a section is missing.
