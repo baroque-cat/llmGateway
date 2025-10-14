@@ -156,4 +156,3 @@ class IResourceProbe(ABC):
             result: The CheckResult from the check.
         """
         raise NotImplementedError
-
