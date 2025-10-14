@@ -1,5 +1,6 @@
 # src/services/synchronizers/__init__.py
 
+import logging
 from typing import Dict, Type, List
 
 from src.core.types import IResourceSyncer
@@ -7,6 +8,8 @@ from src.core.types import IResourceSyncer
 # Import concrete syncer implementations
 from src.services.synchronizers.key_sync import KeySyncer
 from src.services.synchronizers.proxy_sync import ProxySyncer
+
+logger = logging.getLogger(__name__)
 
 # A registry to map syncer type names to their classes.
 # This allows for easy extension with new resource types in the future.
@@ -32,6 +35,6 @@ def get_all_syncers() -> List[IResourceSyncer]:
             instance = syncer_class()
             all_syncers.append(instance)
         except Exception as e:
-            print(f"ERROR: Failed to initialize synchronizer '{syncer_name}': {e}")
+            logger.error(f"Failed to initialize synchronizer '{syncer_name}': {e}", exc_info=True)
             
     return all_syncers

@@ -1,5 +1,6 @@
 # src/services/probes/__init__.py
 
+import logging
 from typing import Dict, Type, List
 
 from src.config.schemas import Config
@@ -9,6 +10,8 @@ from src.core.probes import IResourceProbe
 from src.services.probes.key_probe import KeyProbe
 # Future probes like ProxyProbe would be imported here
 # from src.services.probes.proxy_probe import ProxyProbe
+
+logger = logging.getLogger(__name__)
 
 # A registry to map probe type names to their classes.
 # This makes adding new probes trivial: just add the class to this dictionary.
@@ -40,7 +43,6 @@ def get_all_probes(config: Config, db_path: str) -> List[IResourceProbe]:
         except Exception as e:
             # It's better to log this error than to crash the whole worker
             # if one probe fails to initialize.
-            print(f"ERROR: Failed to initialize probe '{probe_name}': {e}")
+            logger.error(f"Failed to initialize probe '{probe_name}': {e}", exc_info=True)
     
     return all_probes
-
