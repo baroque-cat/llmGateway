@@ -1,6 +1,11 @@
 # src/services/maintenance.py
 
+import logging
 from src.db import database
+
+# Initialize a logger for this module.
+# The output will be handled by the central logging configuration.
+logger = logging.getLogger(__name__)
 
 def run_periodic_amnesty(db_path: str):
     """
@@ -10,7 +15,7 @@ def run_periodic_amnesty(db_path: str):
     Args:
         db_path: The file path to the SQLite database.
     """
-    print("SERVICE: Running periodic task: Amnesty for dead keys.")
+    logger.info("SERVICE: Running periodic task: Amnesty for dead keys.")
     database.amnesty_dead_keys(db_path)
 
 def run_periodic_vacuum(db_path: str):
@@ -22,6 +27,5 @@ def run_periodic_vacuum(db_path: str):
     Args:
         db_path: The file path to the SQLite database.
     """
-    print("SERVICE: Running periodic task: Database VACUUM.")
+    logger.info("SERVICE: Running periodic task: Database VACUUM.")
     database.vacuum_database(db_path)
-
