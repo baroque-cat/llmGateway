@@ -47,9 +47,9 @@ def _read_keys_from_directory(path: str) -> Set[str]:
                         cleaned_keys = {key for key in keys_in_file if key}
                         all_keys.update(cleaned_keys)
                 except Exception as e:
-                    logger.error(f"Failed to read or parse key file '{filepath}': {e}")
+                    logger.error(f"Failed to read or parse key file '{filepath}': {e}", exc_info=True)
     except Exception as e:
-        logger.error(f"Failed to list files in directory '{path}': {e}")
+        logger.error(f"Failed to list files in directory '{path}': {e}", exc_info=True)
 
     return all_keys
 
@@ -75,16 +75,14 @@ class KeySyncer(IResourceSyncer):
 
             # Check if keys_path is configured for this provider.
             if not provider_config.keys_path:
-                logger.debug(f"No 'keys_path' configured for provider '{provider_name}'. Skipping key sync.")
+                logger.warning(f"No 'keys_path' configured for provider '{provider_name}'. Skipping key sync.")
                 continue
 
             logger.info(f"Syncing keys for provider: '{provider_name}'")
 
             # Step 1: Read all unique keys from the specified directory.
             keys_from_file = _read_keys_from_directory(provider_config.keys_path)
-            if not keys_from_file:
-                logger.warning(f"No keys found in directory '{provider_config.keys_path}' for provider '{provider_name}'.")
-                # We still proceed to sync, as this might be intentional (to remove all keys).
+            logger.info(f"Found {len(keys_from_file)} unique keys in '{provider_config.keys_path}' for provider '{provider_name}'.")
 
             # Step 2: Aggregate all models supported by this provider from the config.
             all_provider_models: List[str] = [
