@@ -1,3 +1,8 @@
 .env
-.envrs
+.envrc
+poetry.toml
+keys/*
+logs/*
+data/*
 config/providers.yaml
+__pycache__/
