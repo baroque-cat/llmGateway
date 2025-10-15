@@ -22,7 +22,7 @@ def setup_logging(config: Config):
 
     # Define the format for log messages for consistency across the application.
     # Format includes timestamp, logger name, log level, and the message itself.
-    log_format = '%(asctime)s - %(name)s - [%(levelname)s] - %(message)s'
+    log_format = '%(name)s - [%(levelname)s] - %(message)s'
 
     # Get the root logger. All other loggers created with logging.getLogger(__name__)
     # will inherit this configuration.
