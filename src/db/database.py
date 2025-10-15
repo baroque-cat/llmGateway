@@ -180,6 +180,7 @@ def sync_keys_for_provider(db_path: str, provider_name: str, keys_from_file: Set
                 to_insert = [(provider_id, key) for key in new_keys_to_add]
                 conn.executemany("INSERT INTO api_keys (provider_id, key_value) VALUES (?, ?)", to_insert)
                 logger.info(f"SYNC: Added {len(new_keys_to_add)} new keys for provider '{provider_name}'.")
+                # Refresh the keys_in_db map to include the newly inserted keys with their IDs
                 cursor = conn.execute("SELECT id, key_value FROM api_keys WHERE provider_id = ?", (provider_id,))
                 keys_in_db = {row['key_value']: row['id'] for row in cursor.fetchall()}
 
@@ -248,7 +249,7 @@ def sync_proxies_for_provider(db_path: str, provider_name: str, proxies_from_fil
             if new_proxies:
                 conn.executemany("INSERT INTO proxies (address) VALUES (?)", [(p,) for p in new_proxies])
                 logger.info(f"SYNC: Added {len(new_proxies)} new proxies to the global pool.")
-                # Refresh the mapping
+                # Refresh the mapping to include new proxy IDs
                 cursor = conn.execute("SELECT id, address FROM proxies")
                 proxies_in_db = {row['address']: row['id'] for row in cursor.fetchall()}
 
@@ -309,7 +310,7 @@ def update_key_model_status(db_path: str, key_id: int, model_name: str, status: 
                     next_check_time.isoformat(),
                     status_code,
                     response_time,
-                    error_message[:1000],
+                    error_message[:1000], # Truncate message to avoid db errors
                     key_id,
                     model_name
                 )
@@ -320,7 +321,7 @@ def update_key_model_status(db_path: str, key_id: int, model_name: str, status: 
                 logger.info(f"FLAGGED: Key ID {key_id} marked as dead due to invalid key error.")
 
     except sqlite3.Error as e:
-        logger.error(f"Failed to update status for key_id {key_id}: {e}", exc_info=True)
+        logger.error(f"Failed to update status for key_id {key_id}, model '{model_name}': {e}", exc_info=True)
     finally:
         if conn:
             conn.close()
@@ -474,4 +475,3 @@ def vacuum_database(db_path: str):
     finally:
         if conn:
             conn.close()
-
