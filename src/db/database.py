@@ -1,49 +1,51 @@
 # src/db/database.py
 
-import sqlite3
 import logging
-from datetime import datetime
 from typing import List, Set, Dict, Any, Optional
+from datetime import datetime
 
+import asyncpg
+from asyncpg.pool import Pool
+
+from src.config.schemas import Config
+from src.core.models import CheckResult
 from src.core.enums import ErrorReason
 
-# --- Module-level logger setup ---
-# All database operations will log through this logger.
-# Configuration (level, format, destination) is handled at the application entry point.
+# --- Module-level setup ---
 logger = logging.getLogger(__name__)
+
+# This will hold the connection pool instance after initialization.
+_db_pool: Optional[Pool] = None
 
 # --- Data Integrity Contract ---
 # Create a set of all valid string values for the status field.
-# This acts as a programmatic guard against writing invalid data.
+# This acts as a programmatic guard against writing invalid data, similar to the
+# previous SQLite implementation. It provides flexibility while ensuring consistency.
 # 'valid' and 'untested' are special statuses not present in ErrorReason.
 VALID_STATUSES = {reason.value for reason in ErrorReason} | {'valid', 'untested'}
 
 
-# This constant defines the entire database schema in one place.
-# It makes the schema version-controllable and easy to read.
-# ON DELETE CASCADE is used to ensure data integrity when parent records are removed.
+# This constant defines the entire database schema using PostgreSQL syntax.
 DB_SCHEMA = """
 -- Table 1: Provider directory (heart of our multi-provider system)
 CREATE TABLE IF NOT EXISTS providers (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     name TEXT UNIQUE NOT NULL
 );
 
 -- Table 2: The proxy servers themselves. A global pool of proxies.
 CREATE TABLE IF NOT EXISTS proxies (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     address TEXT UNIQUE NOT NULL -- e.g., "socks5://user:pass@host:port"
 );
 
 -- Table 3: Health status of a proxy FOR A SPECIFIC PROVIDER.
--- This is the key table for the "stealth mode". It links a proxy from the global
--- pool to a specific provider and tracks its health in that context.
 CREATE TABLE IF NOT EXISTS provider_proxy_status (
     proxy_id INTEGER NOT NULL,
     provider_id INTEGER NOT NULL,
     status TEXT NOT NULL,
-    last_checked TIMESTAMP,
-    next_check_time TIMESTAMP NOT NULL,
+    last_checked TIMESTAMPTZ,
+    next_check_time TIMESTAMPTZ NOT NULL,
     error_message TEXT,
     PRIMARY KEY (proxy_id, provider_id),
     FOREIGN KEY (proxy_id) REFERENCES proxies(id) ON DELETE CASCADE,
@@ -52,10 +54,10 @@ CREATE TABLE IF NOT EXISTS provider_proxy_status (
 
 -- Table 4: API keys. Now with an 'is_dead' flag.
 CREATE TABLE IF NOT EXISTS api_keys (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     provider_id INTEGER NOT NULL,
     key_value TEXT NOT NULL,
-    is_dead BOOLEAN NOT NULL DEFAULT FALSE, -- Flag for permanently invalid keys for this provider
+    is_dead BOOLEAN NOT NULL DEFAULT FALSE, -- Flag for permanently invalid keys
     UNIQUE (provider_id, key_value),
     FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE CASCADE
 );
@@ -64,9 +66,9 @@ CREATE TABLE IF NOT EXISTS api_keys (
 CREATE TABLE IF NOT EXISTS key_model_status (
     key_id INTEGER NOT NULL,
     model_name TEXT NOT NULL,
-    status TEXT NOT NULL, -- e.g., 'VALID', 'NO_QUOTA', 'INVALID_KEY'
-    last_checked TIMESTAMP,
-    next_check_time TIMESTAMP NOT NULL,
+    status TEXT NOT NULL, -- e.g., 'valid', 'no_quota', 'invalid_key'
+    last_checked TIMESTAMPTZ,
+    next_check_time TIMESTAMPTZ NOT NULL,
     status_code INTEGER,
     response_time REAL,
     error_message TEXT,
@@ -83,330 +85,215 @@ CREATE INDEX IF NOT EXISTS idx_proxy_status_next_check_time ON provider_proxy_st
 CREATE INDEX IF NOT EXISTS idx_proxy_status_status ON provider_proxy_status(status);
 """
 
-def get_db_connection(db_path: str) -> Optional[sqlite3.Connection]:
-    """
-    Establishes a connection to the SQLite database.
+# --- Component 1: Connection Management ---
 
-    Args:
-        db_path: The file path to the SQLite database.
-
-    Returns:
-        A connection object or None if connection fails.
+async def init_db_pool(dsn: str):
     """
-    try:
-        conn = sqlite3.connect(db_path, check_same_thread=False)
-        conn.row_factory = sqlite3.Row  # Allows accessing columns by name
-        conn.execute("PRAGMA foreign_keys = ON;") # Enforce foreign key constraints
-        return conn
-    except sqlite3.Error as e:
-        logger.critical(f"Failed to connect to database at '{db_path}': {e}", exc_info=True)
-        return None
-
-def initialize_database(db_path: str):
+    Initializes the asynchronous connection pool to the PostgreSQL database.
+    This should be called once when the application starts.
     """
-    Initializes the database by creating all necessary tables from the schema.
-
-    Args:
-        db_path: The file path to the SQLite database.
-    """
-    conn = get_db_connection(db_path)
-    if not conn:
+    global _db_pool
+    if _db_pool:
+        logger.warning("Database pool already initialized.")
         return
-
     try:
-        with conn:
-            conn.executescript(DB_SCHEMA)
-        logger.info("Database initialized successfully.")
-    except sqlite3.Error as e:
-        logger.critical(f"Failed to initialize database schema: {e}", exc_info=True)
-    finally:
-        if conn:
-            conn.close()
+        _db_pool = await asyncpg.create_pool(dsn=dsn, min_size=5, max_size=20)
+        logger.info("Database connection pool initialized successfully.")
+    except Exception as e:
+        logger.critical(f"Failed to initialize database connection pool: {e}", exc_info=True)
+        raise
 
-# --- Synchronization Functions ---
-
-def sync_providers(db_path: str, provider_names_from_config: List[str]):
+async def close_db_pool():
     """
-    Synchronizes the providers table with the list of providers from the config file.
+    Closes the database connection pool gracefully.
+    This should be called once when the application shuts down.
     """
-    conn = get_db_connection(db_path)
-    if not conn:
-        return
+    global _db_pool
+    if _db_pool:
+        await _db_pool.close()
+        _db_pool = None
+        logger.info("Database connection pool closed.")
 
-    try:
-        with conn:
-            cursor = conn.execute("SELECT name FROM providers")
-            providers_in_db = {row['name'] for row in cursor.fetchall()}
-            
-            new_providers = set(provider_names_from_config) - providers_in_db
-            
-            if new_providers:
-                to_insert = [(name,) for name in new_providers]
-                conn.executemany("INSERT INTO providers (name) VALUES (?)", to_insert)
-                logger.info(f"SYNC: Added {len(new_providers)} new providers to the database: {new_providers}")
-
-    except sqlite3.Error as e:
-        logger.error(f"Failed to sync providers: {e}", exc_info=True)
-    finally:
-        if conn:
-            conn.close()
-
-def sync_keys_for_provider(db_path: str, provider_name: str, keys_from_file: Set[str], provider_models: List[str]):
+def get_pool() -> Pool:
     """
-    Synchronizes the api_keys and key_model_status tables for a specific provider.
+    Retrieves the initialized database connection pool.
     """
-    conn = get_db_connection(db_path)
-    if not conn:
-        return
-
-    try:
-        with conn:
-            # 1. Get provider ID
-            cursor = conn.execute("SELECT id FROM providers WHERE name = ?", (provider_name,))
-            provider_row = cursor.fetchone()
-            if not provider_row:
-                logger.error(f"SYNC: Provider '{provider_name}' not found. Run provider sync first.")
-                return
-            provider_id = provider_row['id']
-
-            # 2. Get keys for this provider from DB
-            cursor = conn.execute("SELECT id, key_value FROM api_keys WHERE provider_id = ?", (provider_id,))
-            keys_in_db = {row['key_value']: row['id'] for row in cursor.fetchall()}
-            db_key_values = set(keys_in_db.keys())
-
-            # 3. Add new keys to api_keys table
-            new_keys_to_add = keys_from_file - db_key_values
-            if new_keys_to_add:
-                to_insert = [(provider_id, key) for key in new_keys_to_add]
-                conn.executemany("INSERT INTO api_keys (provider_id, key_value) VALUES (?, ?)", to_insert)
-                logger.info(f"SYNC: Added {len(new_keys_to_add)} new keys for provider '{provider_name}'.")
-                # Refresh the keys_in_db map to include the newly inserted keys with their IDs
-                cursor = conn.execute("SELECT id, key_value FROM api_keys WHERE provider_id = ?", (provider_id,))
-                keys_in_db = {row['key_value']: row['id'] for row in cursor.fetchall()}
-
-            # 4. Remove old keys from api_keys table
-            keys_to_remove = db_key_values - keys_from_file
-            if keys_to_remove:
-                ids_to_remove = [keys_in_db[val] for val in keys_to_remove]
-                conn.executemany("DELETE FROM api_keys WHERE id = ?", [(id,) for id in ids_to_remove])
-                logger.info(f"SYNC: Removed {len(keys_to_remove)} obsolete keys for provider '{provider_name}'.")
-
-            # 5. Sync key_model_status table
-            cursor = conn.execute("SELECT id FROM api_keys WHERE provider_id = ?", (provider_id,))
-            current_key_ids = {row['id'] for row in cursor.fetchall()}
-
-            if not current_key_ids:
-                return
-            
-            placeholders = ','.join('?' for _ in current_key_ids)
-            cursor = conn.execute(f"SELECT key_id, model_name FROM key_model_status WHERE key_id IN ({placeholders})", tuple(current_key_ids))
-            model_statuses_in_db = {(row['key_id'], row['model_name']) for row in cursor.fetchall()}
-            
-            models_to_add = []
-            initial_check_time = datetime.utcnow().isoformat()
-            for key_id in current_key_ids:
-                for model_name in provider_models:
-                    if (key_id, model_name) not in model_statuses_in_db:
-                        models_to_add.append((key_id, model_name, 'untested', initial_check_time))
-            
-            if models_to_add:
-                conn.executemany(
-                    "INSERT INTO key_model_status (key_id, model_name, status, next_check_time) VALUES (?, ?, ?, ?)",
-                    models_to_add
-                )
-                logger.info(f"SYNC: Added {len(models_to_add)} new model status records for provider '{provider_name}'.")
-
-    except sqlite3.Error as e:
-        logger.error(f"Failed to sync keys for provider '{provider_name}': {e}", exc_info=True)
-    finally:
-        if conn:
-            conn.close()
+    if _db_pool is None:
+        raise RuntimeError("Database pool has not been initialized. Call init_db_pool() first.")
+    return _db_pool
 
 
-def sync_proxies_for_provider(db_path: str, provider_name: str, proxies_from_file: Set[str]):
+# --- Component 3: Repositories ---
+
+class ProviderRepository:
     """
-    Synchronizes the proxies and provider_proxy_status tables for a specific provider.
+    Manages data access for the 'providers' table.
     """
-    conn = get_db_connection(db_path)
-    if not conn:
-        return
+    def __init__(self, pool: Pool):
+        self._pool = pool
 
-    try:
-        with conn:
-            # 1. Get provider ID
-            cursor = conn.execute("SELECT id FROM providers WHERE name = ?", (provider_name,))
-            provider_row = cursor.fetchone()
-            if not provider_row:
-                logger.error(f"SYNC: Provider '{provider_name}' not found for proxy sync.")
-                return
-            provider_id = provider_row['id']
+    async def sync(self, provider_names_from_config: List[str]):
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                rows = await conn.fetch("SELECT name FROM providers")
+                providers_in_db = {row['name'] for row in rows}
+                
+                new_providers = set(provider_names_from_config) - providers_in_db
+                
+                if new_providers:
+                    to_insert = [(name,) for name in new_providers]
+                    await conn.copy_records_to_table('providers', records=to_insert, columns=['name'])
+                    logger.info(f"SYNC: Added {len(new_providers)} new providers to the database: {new_providers}")
 
-            # 2. Sync global `proxies` table
-            cursor = conn.execute("SELECT id, address FROM proxies")
-            proxies_in_db = {row['address']: row['id'] for row in cursor.fetchall()}
-            new_proxies = proxies_from_file - set(proxies_in_db.keys())
+    async def get_id_map(self) -> Dict[str, int]:
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch("SELECT id, name FROM providers")
+            return {row['name']: row['id'] for row in rows}
 
-            if new_proxies:
-                conn.executemany("INSERT INTO proxies (address) VALUES (?)", [(p,) for p in new_proxies])
-                logger.info(f"SYNC: Added {len(new_proxies)} new proxies to the global pool.")
-                # Refresh the mapping to include new proxy IDs
-                cursor = conn.execute("SELECT id, address FROM proxies")
-                proxies_in_db = {row['address']: row['id'] for row in cursor.fetchall()}
-
-            # 3. Sync `provider_proxy_status` table
-            proxy_ids_from_file = {proxies_in_db[addr] for addr in proxies_from_file if addr in proxies_in_db}
-
-            cursor = conn.execute("SELECT proxy_id FROM provider_proxy_status WHERE provider_id = ?", (provider_id,))
-            linked_proxy_ids_in_db = {row['proxy_id'] for row in cursor.fetchall()}
-
-            # Add new links
-            ids_to_link = proxy_ids_from_file - linked_proxy_ids_in_db
-            if ids_to_link:
-                initial_check_time = datetime.utcnow().isoformat()
-                to_insert = [(pid, provider_id, 'untested', initial_check_time) for pid in ids_to_link]
-                conn.executemany(
-                    "INSERT INTO provider_proxy_status (proxy_id, provider_id, status, next_check_time) VALUES (?, ?, ?, ?)",
-                    to_insert
-                )
-                logger.info(f"SYNC: Linked {len(ids_to_link)} new proxies to provider '{provider_name}'.")
-            
-            # Remove old links
-            ids_to_unlink = linked_proxy_ids_in_db - proxy_ids_from_file
-            if ids_to_unlink:
-                conn.executemany("DELETE FROM provider_proxy_status WHERE provider_id = ? AND proxy_id = ?", 
-                                 [(provider_id, pid) for pid in ids_to_unlink])
-                logger.info(f"SYNC: Unlinked {len(ids_to_unlink)} obsolete proxies from provider '{provider_name}'.")
-
-    except sqlite3.Error as e:
-        logger.error(f"Failed to sync proxies for provider '{provider_name}': {e}", exc_info=True)
-    finally:
-        if conn:
-            conn.close()
-
-# --- Operational Functions ---
-
-def update_key_model_status(db_path: str, key_id: int, model_name: str, status: str, next_check_time: datetime, status_code: Optional[int], response_time: float, error_message: str):
+class KeyRepository:
     """
-    Updates the status of a key-model pair based on pre-computed values.
+    Manages data access for 'api_keys' and 'key_model_status' tables.
+    Contains the core logic for syncing, checking, and updating keys.
     """
-    conn = get_db_connection(db_path)
-    if not conn:
-        return
+    def __init__(self, pool: Pool, config: Config):
+        self._pool = pool
+        self._config = config
 
-    assert status in VALID_STATUSES, f"Attempted to write invalid status '{status}' to the database!"
-            
-    try:
-        with conn:
-            conn.execute(
-                """
-                UPDATE key_model_status
-                SET status = ?, last_checked = ?, next_check_time = ?,
-                    status_code = ?, response_time = ?, error_message = ?
-                WHERE key_id = ? AND model_name = ?
-                """,
-                (
-                    status,
-                    datetime.utcnow().isoformat(),
-                    next_check_time.isoformat(),
-                    status_code,
-                    response_time,
-                    error_message[:1000], # Truncate message to avoid db errors
-                    key_id,
-                    model_name
-                )
-            )
+    async def sync(self, provider_name: str, keys_from_file: Set[str], provider_id: int, provider_models: List[str]):
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                # 1. Get keys for this provider from DB
+                rows = await conn.fetch("SELECT id, key_value FROM api_keys WHERE provider_id = $1", provider_id)
+                keys_in_db = {row['key_value']: row['id'] for row in rows}
+                db_key_values = set(keys_in_db.keys())
 
-            if status == ErrorReason.INVALID_KEY.value:
-                conn.execute("UPDATE api_keys SET is_dead = TRUE WHERE id = ?", (key_id,))
-                logger.info(f"FLAGGED: Key ID {key_id} marked as dead due to invalid key error.")
+                # 2. Add new keys to api_keys table
+                new_keys_to_add = list(keys_from_file - db_key_values)
+                if new_keys_to_add:
+                    to_insert = [(provider_id, key) for key in new_keys_to_add]
+                    await conn.copy_records_to_table('api_keys', records=to_insert, columns=['provider_id', 'key_value'])
+                    logger.info(f"SYNC: Added {len(new_keys_to_add)} new keys for provider '{provider_name}'.")
 
-    except sqlite3.Error as e:
-        logger.error(f"Failed to update status for key_id {key_id}, model '{model_name}': {e}", exc_info=True)
-    finally:
-        if conn:
-            conn.close()
+                # 3. Remove old keys from api_keys table
+                keys_to_remove = db_key_values - keys_from_file
+                if keys_to_remove:
+                    ids_to_remove = [keys_in_db[val] for val in keys_to_remove]
+                    await conn.execute("DELETE FROM api_keys WHERE id = ANY($1::int[])", ids_to_remove)
+                    logger.info(f"SYNC: Removed {len(keys_to_remove)} obsolete keys for provider '{provider_name}'.")
 
+                # 4. Sync key_model_status table
+                rows = await conn.fetch("SELECT id FROM api_keys WHERE provider_id = $1", provider_id)
+                current_key_ids = {row['id'] for row in rows}
+                
+                if not current_key_ids:
+                    return
 
-def get_keys_to_check(db_path: str) -> List[Dict[str, Any]]:
-    """
-    Retrieves all key-model pairs that are due for a health check, excluding dead keys.
-    """
-    conn = get_db_connection(db_path)
-    if not conn:
-        return []
+                rows = await conn.fetch("SELECT key_id, model_name FROM key_model_status WHERE key_id = ANY($1::int[])", list(current_key_ids))
+                model_statuses_in_db = {(row['key_id'], row['model_name']) for row in rows}
+                
+                models_to_add = []
+                initial_check_time = datetime.utcnow()
+                for key_id in current_key_ids:
+                    for model_name in provider_models:
+                        if (key_id, model_name) not in model_statuses_in_db:
+                            models_to_add.append((key_id, model_name, 'untested', initial_check_time))
+                
+                if models_to_add:
+                    await conn.copy_records_to_table('key_model_status', records=models_to_add, columns=['key_id', 'model_name', 'status', 'next_check_time'])
+                    logger.info(f"SYNC: Added {len(models_to_add)} new model status records for provider '{provider_name}'.")
 
-    results = []
-    try:
-        now_str = datetime.utcnow().isoformat()
-        cursor = conn.execute(
-            """
-            SELECT
-                k.id AS key_id,
-                k.key_value,
-                p.name AS provider_name,
-                s.model_name AS model_name
-            FROM api_keys AS k
-            JOIN key_model_status AS s ON k.id = s.key_id
-            JOIN providers AS p ON k.provider_id = p.id
-            WHERE k.is_dead = FALSE AND s.next_check_time <= ?
-            """,
-            (now_str,)
-        )
-        results = [dict(row) for row in cursor.fetchall()]
-    except sqlite3.Error as e:
-        logger.error(f"Failed to get keys to check: {e}", exc_info=True)
-    finally:
-        if conn:
-            conn.close()
-    return results
+    async def get_keys_to_check(self) -> List[Dict[str, Any]]:
+        query = """
+        SELECT
+            k.id AS key_id,
+            k.key_value,
+            p.name AS provider_name,
+            s.model_name AS model_name
+        FROM api_keys AS k
+        JOIN key_model_status AS s ON k.id = s.key_id
+        JOIN providers AS p ON k.provider_id = p.id
+        WHERE k.is_dead = FALSE AND s.next_check_time <= NOW() AT TIME ZONE 'utc'
+        """
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(query)
+        
+        results = []
+        checked_keys_for_shared_providers = set()
+        
+        for row in rows:
+            provider_name = row['provider_name']
+            provider_conf = self._config.providers.get(provider_name)
 
-def get_available_key(db_path: str, provider_name: str, model_name: str) -> Optional[Dict[str, Any]]:
-    """
-    Finds a random, available (VALID) key for a given provider and model.
-    """
-    conn = get_db_connection(db_path)
-    if not conn:
-        return None
+            if provider_conf and provider_conf.shared_key_status:
+                key_id = row['key_id']
+                if key_id in checked_keys_for_shared_providers:
+                    continue
+                
+                if row['model_name'] == provider_conf.default_model:
+                    results.append(dict(row))
+                    checked_keys_for_shared_providers.add(key_id)
+            else:
+                results.append(dict(row))
+        return results
 
-    result = None
-    try:
-        cursor = conn.execute(
-            """
+    async def update_status(self, key_id: int, model_name: str, provider_name: str, result: CheckResult, next_check_time: datetime):
+        status_str = 'valid' if result.ok else result.error_reason.value
+        
+        # --- ADDED: Application-level data integrity check ---
+        # This assert ensures that we never attempt to write an unsupported status string,
+        # preventing data corruption and immediately highlighting logical errors in the calling code.
+        assert status_str in VALID_STATUSES, f"Attempted to write invalid status '{status_str}' to the database!"
+
+        provider_config = self._config.providers.get(provider_name)
+        
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                if provider_config and provider_config.shared_key_status:
+                    await conn.execute(
+                        """
+                        UPDATE key_model_status
+                        SET status = $1, last_checked = NOW() AT TIME ZONE 'utc', next_check_time = $2,
+                            status_code = $3, response_time = $4, error_message = $5
+                        WHERE key_id = $6
+                        """,
+                        status_str, next_check_time, result.status_code, result.response_time,
+                        result.message[:1000], key_id
+                    )
+                    logger.info(f"PROPAGATED status for key ID {key_id} to '{status_str}' for all its models.")
+                else:
+                    await conn.execute(
+                        """
+                        UPDATE key_model_status
+                        SET status = $1, last_checked = NOW() AT TIME ZONE 'utc', next_check_time = $2,
+                            status_code = $3, response_time = $4, error_message = $5
+                        WHERE key_id = $6 AND model_name = $7
+                        """,
+                        status_str, next_check_time, result.status_code, result.response_time,
+                        result.message[:1000], key_id, model_name
+                    )
+
+                if result.error_reason == ErrorReason.INVALID_KEY:
+                    await conn.execute("UPDATE api_keys SET is_dead = TRUE WHERE id = $1", key_id)
+                    logger.info(f"FLAGGED: Key ID {key_id} marked as dead due to invalid key error.")
+
+    async def get_available_key(self, provider_name: str, model_name: str) -> Optional[Dict[str, Any]]:
+        query = """
             SELECT
                 k.id AS key_id,
                 k.key_value
             FROM api_keys AS k
             JOIN key_model_status AS s ON k.id = s.key_id
             JOIN providers AS p ON k.provider_id = p.id
-            WHERE k.is_dead = FALSE AND p.name = ? AND s.model_name = ? AND s.status = 'VALID'
+            WHERE k.is_dead = FALSE AND p.name = $1 AND s.model_name = $2 AND s.status = 'valid'
             ORDER BY RANDOM()
             LIMIT 1
-            """,
-            (provider_name, model_name)
-        )
-        row = cursor.fetchone()
-        if row:
-            result = dict(row)
-    except sqlite3.Error as e:
-        logger.error(f"Failed to get available key for '{provider_name}' - '{model_name}': {e}", exc_info=True)
-    finally:
-        if conn:
-            conn.close()
-    return result
-
-def get_status_summary(db_path: str) -> List[Dict[str, Any]]:
-    """
-    Retrieves an aggregated summary of key statuses grouped by provider, model, and status.
-    This function is designed to be used by the statistics logger service.
-    """
-    conn = get_db_connection(db_path)
-    if not conn:
-        return []
-
-    results = []
-    try:
-        cursor = conn.execute(
             """
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(query, provider_name, model_name)
+        return dict(row) if row else None
+
+    async def get_status_summary(self) -> List[Dict[str, Any]]:
+        query = """
             SELECT
                 p.name AS provider,
                 s.model_name AS model,
@@ -418,60 +305,62 @@ def get_status_summary(db_path: str) -> List[Dict[str, Any]]:
             GROUP BY p.name, s.model_name, s.status
             ORDER BY p.name, s.model_name, s.status
             """
-        )
-        results = [dict(row) for row in cursor.fetchall()]
-    except sqlite3.Error as e:
-        logger.error(f"Failed to get status summary from database: {e}", exc_info=True)
-    finally:
-        if conn:
-            conn.close()
-    return results
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(query)
+        return [dict(row) for row in rows]
 
-# --- Maintenance Functions ---
-
-def amnesty_dead_keys(db_path: str, provider_name: Optional[str] = None):
-    """
-    Resets the 'is_dead' flag for keys, giving them a second chance to be re-validated.
-    """
-    conn = get_db_connection(db_path)
-    if not conn:
-        return
+class ProxyRepository:
+    def __init__(self, pool: Pool):
+        self._pool = pool
     
-    try:
-        with conn:
+    async def sync(self, provider_name: str, proxies_from_file: Set[str], provider_id: int):
+         pass
+
+
+# --- Component 4: Facade ---
+
+class DatabaseManager:
+    """
+    A facade class that provides a single point of access to all repository objects.
+    """
+    def __init__(self, config: Config):
+        pool = get_pool()
+        self.providers = ProviderRepository(pool)
+        self.keys = KeyRepository(pool, config)
+        self.proxies = ProxyRepository(pool)
+
+    async def initialize_schema(self):
+        """Creates all database tables if they don't exist."""
+        try:
+            pool = get_pool()
+            async with pool.acquire() as conn:
+                await conn.execute(DB_SCHEMA)
+            logger.info("Database schema initialized successfully.")
+        except Exception as e:
+            logger.critical(f"Failed to initialize database schema: {e}", exc_info=True)
+            raise
+
+    async def run_amnesty(self, provider_name: Optional[str] = None):
+        """Grants amnesty to all 'dead' keys, giving them a second chance."""
+        pool = get_pool()
+        async with pool.acquire() as conn:
             if provider_name:
-                cursor = conn.execute("SELECT id FROM providers WHERE name = ?", (provider_name,))
-                provider_row = cursor.fetchone()
-                if provider_row:
-                    provider_id = provider_row['id']
-                    cursor = conn.execute("UPDATE api_keys SET is_dead = FALSE WHERE is_dead = TRUE AND provider_id = ?", (provider_id,))
-                    logger.info(f"MAINTENANCE: Amnesty granted for 'dead' keys of provider '{provider_name}'. {cursor.rowcount} keys reset.")
+                provider_id_row = await conn.fetchrow("SELECT id FROM providers WHERE name = $1", provider_name)
+                if provider_id_row:
+                    provider_id = provider_id_row['id']
+                    status = await conn.execute("UPDATE api_keys SET is_dead = FALSE WHERE is_dead = TRUE AND provider_id = $1", provider_id)
+                    logger.info(f"MAINTENANCE: Amnesty for '{provider_name}'. {status.split()[-1]} keys reset.")
                 else:
                     logger.warning(f"MAINTENANCE: Provider '{provider_name}' not found for amnesty.")
             else:
-                cursor = conn.execute("UPDATE api_keys SET is_dead = FALSE WHERE is_dead = TRUE")
-                logger.info(f"MAINTENANCE: Global amnesty granted for all 'dead' keys. {cursor.rowcount} keys reset.")
+                status = await conn.execute("UPDATE api_keys SET is_dead = FALSE WHERE is_dead = TRUE")
+                logger.info(f"MAINTENANCE: Global amnesty for all 'dead' keys. {status.split()[-1]} keys reset.")
 
-    except sqlite3.Error as e:
-        logger.error(f"Failed during key amnesty: {e}", exc_info=True)
-    finally:
-        if conn:
-            conn.close()
+    async def run_vacuum(self):
+        """Executes the VACUUM command to optimize the database."""
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            logger.info("MAINTENANCE: Starting database VACUUM operation...")
+            await conn.execute("VACUUM;")
+            logger.info("MAINTENANCE: Database VACUUM completed successfully.")
 
-def vacuum_database(db_path: str):
-    """
-    Executes the VACUUM command to rebuild and optimize the database file.
-    """
-    conn = get_db_connection(db_path)
-    if not conn:
-        return
-    
-    try:
-        logger.info("MAINTENANCE: Starting database VACUUM operation...")
-        conn.execute("VACUUM;")
-        logger.info("MAINTENANCE: Database VACUUM completed successfully.")
-    except sqlite3.Error as e:
-        logger.error(f"VACUUM operation failed: {e}", exc_info=True)
-    finally:
-        if conn:
-            conn.close()
