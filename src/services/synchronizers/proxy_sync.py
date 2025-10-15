@@ -40,42 +40,60 @@ def _read_proxies_from_file(path: str) -> Set[str]:
 
 class ProxySyncer(IResourceSyncer):
     """
-    A concrete implementation of IResourceSyncer for synchronizing proxies for stealth mode.
+    A concrete implementation of IResourceSyncer for synchronizing proxies.
+    This syncer specifically targets providers configured to use 'stealth' mode.
     """
 
     def sync(self, config: Config, db_path: str):
         """
         Performs a full synchronization cycle for proxies.
 
-        It iterates through all providers, checks if stealth mode is enabled,
-        reads their proxy list from disk, and syncs them with the database.
+        It iterates through all providers, checks if 'stealth' proxy mode is enabled,
+        reads their proxy list from disk, and syncs them with the database. Providers
+        using 'none' or 'static' modes are ignored by this syncer.
         """
         logger.info("Starting proxy synchronization cycle...")
 
         for provider_name, provider_config in config.providers.items():
-            if not provider_config.enabled:
-                logger.debug(f"Provider '{provider_name}' is disabled. Skipping proxy sync.")
-                continue
+            try:
+                if not provider_config.enabled:
+                    logger.debug(f"Provider '{provider_name}' is disabled. Skipping proxy sync.")
+                    continue
 
-            # The logic here will depend on the final config structure.
-            # Assuming a structure like: proxy_config.mode == "stealth"
-            # For now, we use the existing structure for simplicity.
-            if not provider_config.proxy_config.enabled or not provider_config.proxy_config.proxy_list_path:
-                logger.debug(f"Stealth mode is not enabled or proxy_list_path is not set for '{provider_name}'. Skipping.")
-                continue
+                proxy_conf = provider_config.proxy_config
+                
+                # This is the core logic fix: we only act if the mode is 'stealth'.
+                if proxy_conf.mode != 'stealth':
+                    logger.debug(
+                        f"Provider '{provider_name}' is not in 'stealth' mode (mode: '{proxy_conf.mode}'). "
+                        "Skipping proxy pool sync."
+                    )
+                    continue
 
-            logger.info(f"Syncing proxies for provider: '{provider_name}'")
+                # The config validator should ensure this path exists if mode is 'stealth',
+                # but we check again for robustness.
+                if not proxy_conf.pool_list_path:
+                    logger.warning(
+                        f"Provider '{provider_name}' is in 'stealth' mode but 'pool_list_path' is not set. "
+                        "Cannot sync proxies."
+                    )
+                    continue
 
-            proxies_from_file = _read_proxies_from_file(provider_config.proxy_config.proxy_list_path)
-            if not proxies_from_file:
-                logger.warning(f"No proxies found in file '{provider_config.proxy_config.proxy_list_path}' for provider '{provider_name}'.")
+                logger.info(f"Syncing proxies for provider '{provider_name}' (stealth mode).")
 
-            database.sync_proxies_for_provider(
-                db_path=db_path,
-                provider_name=provider_name,
-                proxies_from_file=proxies_from_file
-            )
+                proxies_from_file = _read_proxies_from_file(proxy_conf.pool_list_path)
+                logger.info(f"Found {len(proxies_from_file)} unique proxies in '{proxy_conf.pool_list_path}' for provider '{provider_name}'.")
+                
+                database.sync_proxies_for_provider(
+                    db_path=db_path,
+                    provider_name=provider_name,
+                    proxies_from_file=proxies_from_file
+                )
+            
+            except Exception as e:
+                # Isolate failures: an error with one provider should not stop the entire sync cycle.
+                logger.error(f"An unexpected error occurred while syncing proxies for provider '{provider_name}': {e}", exc_info=True)
 
-            logger.info(f"Database sync for proxies of provider '{provider_name}' is not yet implemented. Found {len(proxies_from_file)} proxies.")
 
         logger.info("Proxy synchronization cycle finished.")
+
