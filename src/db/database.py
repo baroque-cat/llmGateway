@@ -15,8 +15,8 @@ logger = logging.getLogger(__name__)
 # --- Data Integrity Contract ---
 # Create a set of all valid string values for the status field.
 # This acts as a programmatic guard against writing invalid data.
-# 'VALID' and 'UNTESTED' are special statuses not present in ErrorReason.
-VALID_STATUSES = {reason.value for reason in ErrorReason} | {'VALID', 'UNTESTED'}
+# 'valid' and 'untested' are special statuses not present in ErrorReason.
+VALID_STATUSES = {reason.value for reason in ErrorReason} | {'valid', 'untested'}
 
 
 # This constant defines the entire database schema in one place.
@@ -207,7 +207,7 @@ def sync_keys_for_provider(db_path: str, provider_name: str, keys_from_file: Set
             for key_id in current_key_ids:
                 for model_name in provider_models:
                     if (key_id, model_name) not in model_statuses_in_db:
-                        models_to_add.append((key_id, model_name, 'UNTESTED', initial_check_time))
+                        models_to_add.append((key_id, model_name, 'untested', initial_check_time))
             
             if models_to_add:
                 conn.executemany(
@@ -263,7 +263,7 @@ def sync_proxies_for_provider(db_path: str, provider_name: str, proxies_from_fil
             ids_to_link = proxy_ids_from_file - linked_proxy_ids_in_db
             if ids_to_link:
                 initial_check_time = datetime.utcnow().isoformat()
-                to_insert = [(pid, provider_id, 'UNTESTED', initial_check_time) for pid in ids_to_link]
+                to_insert = [(pid, provider_id, 'untested', initial_check_time) for pid in ids_to_link]
                 conn.executemany(
                     "INSERT INTO provider_proxy_status (proxy_id, provider_id, status, next_check_time) VALUES (?, ?, ?, ?)",
                     to_insert

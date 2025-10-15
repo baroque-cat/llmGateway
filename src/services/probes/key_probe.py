@@ -116,8 +116,8 @@ class KeyProbe(IResourceProbe):
         # Calculate when this key-model pair should be checked next.
         next_check_time = self._calculate_next_check_time(provider_config.health_policy, result)
         
-        # Determine the status string: 'VALID' on success, or the error reason on failure.
-        status_str = 'VALID' if result.ok else result.error_reason.value
+        # Determine the status string: 'valid' on success, or the error reason on failure.
+        status_str = 'valid' if result.ok else result.error_reason.value
         
         logger.info(
             f"Updating status for key ID {key_id}, model '{model_name}': "
