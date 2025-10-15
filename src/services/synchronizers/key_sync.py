@@ -7,27 +7,15 @@ from typing import Set, List
 
 from src.config.schemas import Config
 from src.core.types import IResourceSyncer
-from src.db import database
+from src.db.database import DatabaseManager
 
-# Initialize a logger for this module.
-# The logger's output will be configured by the main application entry point.
 logger = logging.getLogger(__name__)
 
 
 def _read_keys_from_directory(path: str) -> Set[str]:
     """
     Reads all files in a specified directory, extracts API keys, and returns them as a unique set.
-
-    This function is designed to be robust:
-    - It handles various separators (spaces, commas, newlines) using regex.
-    - It automatically removes duplicate keys by using a set.
-    - It gracefully handles cases where the directory does not exist.
-
-    Args:
-        path: The path to the directory containing key files.
-
-    Returns:
-        A set of unique, non-empty API key strings found in the files.
+    This function performs synchronous file I/O, which is acceptable for this periodic task.
     """
     if not os.path.exists(path) or not os.path.isdir(path):
         logger.warning(f"Key directory not found or is not a directory: '{path}'. Skipping.")
@@ -41,9 +29,7 @@ def _read_keys_from_directory(path: str) -> Set[str]:
                 try:
                     with open(filepath, "r", encoding="utf-8") as f:
                         content = f.read()
-                        # Split content by any whitespace or comma, which handles most user formats.
                         keys_in_file = re.split(r'[\s,]+', content)
-                        # Filter out any empty strings that may result from splitting and add to the set.
                         cleaned_keys = {key for key in keys_in_file if key}
                         all_keys.update(cleaned_keys)
                 except Exception as e:
@@ -56,48 +42,59 @@ def _read_keys_from_directory(path: str) -> Set[str]:
 
 class KeySyncer(IResourceSyncer):
     """
-    A concrete implementation of IResourceSyncer for synchronizing API keys.
+    A concrete implementation of IResourceSyncer for synchronizing API keys (Async Version).
     """
 
-    def sync(self, config: Config, db_path: str):
+    async def sync(self, config: Config, db_manager: DatabaseManager):
         """
-        Performs a full synchronization cycle for API keys.
-
-        It iterates through all configured providers, reads their respective key files
-        from disk, and calls the database synchronization function to align the DB state.
+        Performs a full synchronization cycle for API keys using the async DatabaseManager.
         """
         logger.info("Starting API key synchronization cycle...")
 
+        try:
+            # Fetch the provider name-to-ID mapping once at the beginning for efficiency.
+            provider_id_map = await db_manager.providers.get_id_map()
+        except Exception as e:
+            logger.critical(f"Failed to fetch provider ID map from database. Aborting key sync cycle. Error: {e}", exc_info=True)
+            return
+
         for provider_name, provider_config in config.providers.items():
-            if not provider_config.enabled:
-                logger.debug(f"Provider '{provider_name}' is disabled in config. Skipping key sync.")
-                continue
+            try:
+                if not provider_config.enabled:
+                    logger.debug(f"Provider '{provider_name}' is disabled in config. Skipping key sync.")
+                    continue
 
-            # Check if keys_path is configured for this provider.
-            if not provider_config.keys_path:
-                logger.warning(f"No 'keys_path' configured for provider '{provider_name}'. Skipping key sync.")
-                continue
+                if not provider_config.keys_path:
+                    logger.warning(f"No 'keys_path' configured for provider '{provider_name}'. Skipping key sync.")
+                    continue
 
-            logger.info(f"Syncing keys for provider: '{provider_name}'")
+                provider_id = provider_id_map.get(provider_name)
+                if provider_id is None:
+                    logger.error(f"Provider '{provider_name}' not found in the database. It may not have been synced yet. Skipping.")
+                    continue
+                
+                logger.info(f"Syncing keys for provider: '{provider_name}' (ID: {provider_id})")
 
-            # Step 1: Read all unique keys from the specified directory.
-            keys_from_file = _read_keys_from_directory(provider_config.keys_path)
-            logger.info(f"Found {len(keys_from_file)} unique keys in '{provider_config.keys_path}' for provider '{provider_name}'.")
+                # Step 1: Read keys from the specified directory (sync I/O).
+                keys_from_file = _read_keys_from_directory(provider_config.keys_path)
+                logger.info(f"Found {len(keys_from_file)} unique keys in '{provider_config.keys_path}' for provider '{provider_name}'.")
 
-            # Step 2: Aggregate all models supported by this provider from the config.
-            all_provider_models: List[str] = [
-                model
-                for model_list in provider_config.models.values()
-                for model in model_list
-            ]
+                # Step 2: Aggregate all models for this provider from the config.
+                all_provider_models: List[str] = [
+                    model
+                    for model_list in provider_config.models.values()
+                    for model in model_list
+                ]
 
-            # Step 3: Call the database function to perform the actual synchronization.
-            database.sync_keys_for_provider(
-                db_path=db_path,
-                provider_name=provider_name,
-                keys_from_file=keys_from_file,
-                provider_models=all_provider_models
-            )
+                # Step 3: Call the async database repository method to perform synchronization.
+                await db_manager.keys.sync(
+                    provider_name=provider_name,
+                    keys_from_file=keys_from_file,
+                    provider_id=provider_id,
+                    provider_models=all_provider_models
+                )
+            except Exception as e:
+                # Isolate failures to prevent one provider from halting the entire sync process.
+                logger.error(f"An unexpected error occurred while syncing keys for provider '{provider_name}': {e}", exc_info=True)
 
         logger.info("API key synchronization cycle finished.")
-

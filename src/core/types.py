@@ -16,6 +16,7 @@ import requests
 
 from src.config.schemas import Config
 from src.core.models import CheckResult
+from src.db.database import DatabaseManager  # --- MODIFIED: Import DatabaseManager ---
 
 
 class IProvider(ABC):
@@ -87,7 +88,7 @@ class IProvider(ABC):
 
 class IResourceSyncer(ABC):
     """
-    Abstract Base Class (Interface) for all resource synchronizers.
+    Abstract Base Class (Interface) for all resource synchronizers (Async Version).
 
     This contract defines a universal interface for any service that synchronizes
     resources (like API keys, proxies) from a source (e.g., config files)
@@ -96,12 +97,12 @@ class IResourceSyncer(ABC):
     """
 
     @abstractmethod
-    def sync(self, config: Config, db_path: str):
+    async def sync(self, config: Config, db_manager: DatabaseManager):
         """
-        Executes one full synchronization cycle for the specific resource type.
+        Executes one full synchronization cycle for the specific resource type. (Async)
 
         Args:
             config: The application's loaded configuration object.
-            db_path: The file path to the SQLite database.
+            db_manager: An instance of the DatabaseManager for async DB access.
         """
         pass
