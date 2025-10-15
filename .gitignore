@@ -1,2 +1,3 @@
 .env
 .envrs
+config/providers.yaml
