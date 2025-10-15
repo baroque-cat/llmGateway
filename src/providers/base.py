@@ -2,10 +2,8 @@
 
 from abc import abstractmethod
 from typing import List, Optional, Dict, Tuple
-from urllib.parse import urlparse
 
-from flask import Request
-import requests
+import httpx  # --- MODIFIED: Import httpx instead of requests ---
 
 from src.core.types import IProvider
 from src.core.models import CheckResult
@@ -14,7 +12,8 @@ from src.config.schemas import ProviderConfig
 
 class AIBaseProvider(IProvider):
     """
-    Abstract Base Class for all AI service providers.
+    Abstract Base Class for all AI service providers (Async and Framework-Agnostic).
+
     It enforces the IProvider contract and provides a common structure
     and helper methods for all concrete provider implementations.
     """
@@ -33,17 +32,18 @@ class AIBaseProvider(IProvider):
         self.name = provider_name
         self.config = config
 
-    def _prepare_proxy_headers(self, token: str, incoming_headers: dict) -> dict:
+    def _prepare_proxy_headers(self, token: str, incoming_headers: Dict) -> Dict:
         """
-        Prepares headers for the outbound proxy request.
+        Prepares headers for the outbound proxy request from a dictionary.
 
         This method cleans the incoming headers by removing sensitive or problematic
-        ones (like authentication from the client to our gateway) and merges them
-        with the provider-specific headers required for upstream authentication.
+        ones and merges them with the provider-specific headers required for
+        upstream authentication. It now operates on a simple dictionary, making it
+        framework-agnostic.
 
         Args:
             token: The API token for the upstream service.
-            incoming_headers: The headers from the client's request.
+            incoming_headers: A dictionary of headers from the client's request.
 
         Returns:
             A dictionary of cleaned and prepared headers for the outbound request.
@@ -52,16 +52,21 @@ class AIBaseProvider(IProvider):
         cleaned_headers = {k.lower(): v for k, v in incoming_headers.items()}
         
         # Headers to remove:
-        # - host: requests will set this correctly based on the target URL.
+        # - host: httpx will set this correctly based on the target URL.
         # - authorization, x-goog-api-key: These are client->gateway auth headers;
         #   we must remove them to replace with our gateway->provider auth.
-        headers_to_remove = ['host', 'authorization', 'x-goog-api-key']
+        # - content-length, content-type: httpx handles these automatically.
+        headers_to_remove = [
+            'host', 'authorization', 'x-goog-api-key',
+            'content-length', 'content-type'
+        ]
         for h in headers_to_remove:
             cleaned_headers.pop(h, None)
         
         # Get provider-specific headers (e.g., {'Authorization': 'Bearer ...'})
         provider_headers = self._get_headers(token) or {}
         # Merge our provider auth headers into the cleaned client headers.
+        # Provider headers take precedence in case of a key collision.
         cleaned_headers.update({k.lower(): v for k, v in provider_headers.items()})
         
         return cleaned_headers
@@ -81,9 +86,9 @@ class AIBaseProvider(IProvider):
         raise NotImplementedError
 
     @abstractmethod
-    def check(self, token: str, **kwargs) -> CheckResult:
+    async def check(self, token: str, **kwargs) -> CheckResult:
         """
-        Checks if an API token is valid for this provider.
+        Checks if an API token is valid for this provider. (Async)
         This must be implemented by concrete provider classes.
 
         Args:
@@ -96,9 +101,9 @@ class AIBaseProvider(IProvider):
         raise NotImplementedError
 
     @abstractmethod
-    def inspect(self, token: str, **kwargs) -> List[str]:
+    async def inspect(self, token: str, **kwargs) -> List[str]:
         """
-        Inspects the capabilities associated with a token, such as available models.
+        Inspects the capabilities associated with a token. (Async)
         This must be implemented by concrete provider classes.
 
         Args:
@@ -111,10 +116,11 @@ class AIBaseProvider(IProvider):
         raise NotImplementedError
     
     @abstractmethod
-    def proxy_request(self, token: str, request: Request) -> Tuple[requests.Response, CheckResult]:
+    async def proxy_request(
+        self, token: str, method: str, headers: Dict, path: str, content: bytes
+    ) -> Tuple[httpx.Response, CheckResult]:
         """
-        Proxies an incoming client request to the target API provider.
+        Proxies an incoming client request to the target API provider. (Async)
         This must be implemented by concrete provider classes.
         """
         raise NotImplementedError
-

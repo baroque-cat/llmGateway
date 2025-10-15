@@ -9,32 +9,30 @@ ensuring a modular and extensible architecture.
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 
-from flask import Request
-import requests
+import httpx  # --- MODIFIED: Import httpx for async responses ---
 
 from src.config.schemas import Config
 from src.core.models import CheckResult
-from src.db.database import DatabaseManager  # --- MODIFIED: Import DatabaseManager ---
+from src.db.database import DatabaseManager
 
 
 class IProvider(ABC):
     """
-    The core provider interface (contract).
+    The core provider interface (contract) - Async and Framework-Agnostic.
 
-    This abstract base class defines the essential methods that every
-    AI service provider must implement. It ensures that the core system
-    can interact with any provider in a uniform way, without needing to
-    know the specifics of its API.
+    This abstract base class defines the essential async methods that every
+    AI service provider must implement. It is designed to be completely
+    independent of any web framework (like Flask or FastAPI).
     """
 
     @abstractmethod
-    def check(self, token: str, **kwargs) -> CheckResult:
+    async def check(self, token: str, **kwargs) -> CheckResult:
         """
-        Checks if an API token is valid for this provider.
+        Checks if an API token is valid for this provider. (Async)
 
-        This method should perform a lightweight test request to determine
+        This method should perform a lightweight, non-blocking test request to determine
         the token's status (valid, invalid, no quota, etc.).
 
         Args:
@@ -42,14 +40,14 @@ class IProvider(ABC):
             **kwargs: Optional provider-specific arguments (e.g., model for testing).
 
         Returns:
-            CheckResult: A structured object containing the result of the validation.
+            A CheckResult object containing the result of the validation.
         """
         pass
 
     @abstractmethod
-    def inspect(self, token: str, **kwargs) -> List[str]:
+    async def inspect(self, token: str, **kwargs) -> List[str]:
         """
-        Inspects the capabilities associated with a token, such as available models.
+        Inspects the capabilities associated with a token. (Async)
 
         This method queries the provider's API to list the models or other
         resources accessible with the given token.
@@ -59,29 +57,34 @@ class IProvider(ABC):
             **kwargs: Optional provider-specific arguments.
 
         Returns:
-            List[str]: A list of available model names.
+            A list of available model names.
         """
         pass
 
     @abstractmethod
-    def proxy_request(self, token: str, request: Request) -> Tuple[requests.Response, CheckResult]:
+    async def proxy_request(
+        self, token: str, method: str, headers: Dict, path: str, content: bytes
+    ) -> Tuple[httpx.Response, CheckResult]:
         """
-        Proxies an incoming client request to the target API provider.
+        Proxies an incoming client request to the target API provider. (Async)
 
-        This method is the core of the real-time proxying functionality. It is responsible
-        for transforming the incoming Flask request into an outbound request to the
-        actual LLM provider, handling provider-specific authentication and URL structuring.
+        This method is framework-agnostic. It takes primitive data types
+        (method, headers, path, content) instead of a framework-specific
+        Request object, making it universally usable.
 
         Args:
             token: A valid API key/token to be used for the outbound request.
-            request: The original incoming Flask request object from the client.
+            method: The HTTP method of the original request (e.g., "POST").
+            headers: A dictionary of headers from the original request.
+            path: The URL path of the original request.
+            content: The raw byte content (body) of the original request.
 
         Returns:
             A tuple containing:
-            1. The raw `requests.Response` object from the upstream provider.
-               This object should be created with `stream=True` to support streaming.
-            2. A `CheckResult` object generated from the response, which will be used
-               by the proxy service to update the key's status in the database.
+            1. The raw `httpx.Response` object from the upstream provider.
+               This object supports streaming via async iterators.
+            2. A `CheckResult` object generated from the response, which can be used
+               by the gateway service to update the key's status.
         """
         pass
 
