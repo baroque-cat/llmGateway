@@ -8,7 +8,7 @@ import sys
 # when running a script from the project root.
 sys.path.insert(0, './src')
 
-from llmGateway.background_worker import run_worker
+from src.services.background_worker import run_worker
 
 def main():
     """
