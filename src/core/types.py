@@ -11,7 +11,7 @@ ensuring a modular and extensible architecture.
 from abc import ABC, abstractmethod
 from typing import List, Tuple, Dict
 
-import httpx  # --- MODIFIED: Import httpx for async responses ---
+import httpx
 
 from src.config.schemas import Config
 from src.core.models import CheckResult
@@ -20,15 +20,16 @@ from src.db.database import DatabaseManager
 
 class IProvider(ABC):
     """
-    The core provider interface (contract) - Async and Framework-Agnostic.
+    The core provider interface (contract) - Async, Framework-Agnostic, and DI-ready.
 
     This abstract base class defines the essential async methods that every
     AI service provider must implement. It is designed to be completely
-    independent of any web framework (like Flask or FastAPI).
+    independent of any web framework and relies on Dependency Injection for
+    receiving shared resources like the HTTP client.
     """
 
     @abstractmethod
-    async def check(self, token: str, **kwargs) -> CheckResult:
+    async def check(self, client: httpx.AsyncClient, token: str, **kwargs) -> CheckResult:
         """
         Checks if an API token is valid for this provider. (Async)
 
@@ -36,6 +37,7 @@ class IProvider(ABC):
         the token's status (valid, invalid, no quota, etc.).
 
         Args:
+            client: An instance of httpx.AsyncClient for making the request.
             token: The API token/key to validate.
             **kwargs: Optional provider-specific arguments (e.g., model for testing).
 
@@ -45,7 +47,7 @@ class IProvider(ABC):
         pass
 
     @abstractmethod
-    async def inspect(self, token: str, **kwargs) -> List[str]:
+    async def inspect(self, client: httpx.AsyncClient, token: str, **kwargs) -> List[str]:
         """
         Inspects the capabilities associated with a token. (Async)
 
@@ -53,6 +55,7 @@ class IProvider(ABC):
         resources accessible with the given token.
 
         Args:
+            client: An instance of httpx.AsyncClient for making the request.
             token: The API token/key for authentication.
             **kwargs: Optional provider-specific arguments.
 
@@ -63,16 +66,16 @@ class IProvider(ABC):
 
     @abstractmethod
     async def proxy_request(
-        self, token: str, method: str, headers: Dict, path: str, content: bytes
+        self, client: httpx.AsyncClient, token: str, method: str, headers: Dict, path: str, content: bytes
     ) -> Tuple[httpx.Response, CheckResult]:
         """
         Proxies an incoming client request to the target API provider. (Async)
 
         This method is framework-agnostic. It takes primitive data types
-        (method, headers, path, content) instead of a framework-specific
-        Request object, making it universally usable.
+        and an httpx client, making it universally usable.
 
         Args:
+            client: An instance of httpx.AsyncClient for making the request.
             token: A valid API key/token to be used for the outbound request.
             method: The HTTP method of the original request (e.g., "POST").
             headers: A dictionary of headers from the original request.
@@ -82,9 +85,7 @@ class IProvider(ABC):
         Returns:
             A tuple containing:
             1. The raw `httpx.Response` object from the upstream provider.
-               This object supports streaming via async iterators.
-            2. A `CheckResult` object generated from the response, which can be used
-               by the gateway service to update the key's status.
+            2. A `CheckResult` object generated from the response.
         """
         pass
 
@@ -94,9 +95,7 @@ class IResourceSyncer(ABC):
     Abstract Base Class (Interface) for all resource synchronizers (Async Version).
 
     This contract defines a universal interface for any service that synchronizes
-    resources (like API keys, proxies) from a source (e.g., config files)
-    to a destination (e.g., the database). The background worker will use this
-    contract to run all sync tasks polymorphically.
+    resources from a source to a destination.
     """
 
     @abstractmethod
