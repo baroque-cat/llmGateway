@@ -16,23 +16,18 @@ logger = logging.getLogger(__name__)
 class KeyProbe(IResourceProbe):
     """
     A concrete implementation of IResourceProbe for checking API key health (Async Version).
-    This probe is responsible for testing key validity against provider APIs,
-    respecting proxy configurations, using the async DatabaseManager.
     """
 
     async def _get_resources_to_check(self) -> List[Dict[str, Any]]:
         """
-        Fetches key-model pairs due for a health check from the database. (Async)
+        Fetches key-model pairs due for a health check from the database.
         """
         return await self.db_manager.keys.get_keys_to_check()
 
     async def _check_resource(self, resource: Dict[str, Any]) -> CheckResult:
         """
-        Checks a single API key against a specific model. (Async)
-        This is a placeholder for a truly async check. In a fully async system,
-        the provider's `check` method would also be a coroutine using `httpx`.
-        For now, we run the synchronous `requests` call in a separate thread
-        to avoid blocking the main asyncio event loop.
+        Checks a single API key against a specific model by calling the provider.
+        This is now a fully async operation.
         """
         provider_name = resource['provider_name']
         key_value = resource['key_value']
@@ -53,22 +48,20 @@ class KeyProbe(IResourceProbe):
         if proxy_config.mode == 'static':
             proxy_address = proxy_config.static_url
         elif proxy_config.mode == 'stealth':
-            logger.warning(f"Stealth mode for '{provider_name}' is not yet implemented. No proxy will be used.")
+            logger.warning(f"Stealth mode for '{provider_name}' is not yet fully implemented. No proxy will be used for probe.")
             # In the future: proxy_address = await self.db_manager.proxies.get_available_proxy(...)
 
         try:
             provider_instance = get_provider(provider_name, provider_config)
             
-            # --- CRITICAL: Run blocking I/O in an executor ---
-            # The provider's `check` method uses the synchronous `requests` library.
-            # To avoid blocking the asyncio event loop, we must run it in a thread pool.
-            loop = asyncio.get_running_loop()
-            result = await loop.run_in_executor(
-                None,  # Use the default ThreadPoolExecutor
-                provider_instance.check,
-                key_value,
-                model_name,
-                proxy_address
+            # --- CRITICAL CHANGE: Direct await call, no more run_in_executor ---
+            # The provider's `check` method is now a coroutine and can be awaited directly.
+            # We pass the long-lived http_client down to the provider.
+            result = await provider_instance.check(
+                client=self.http_client,
+                token=key_value,
+                model=model_name,
+                proxy=proxy_address
             )
             return result
 
@@ -82,7 +75,7 @@ class KeyProbe(IResourceProbe):
 
     async def _update_resource_status(self, resource: Dict[str, Any], result: CheckResult):
         """
-        Updates the key's status in the database using the DatabaseManager. (Async)
+        Updates the key's status in the database using the DatabaseManager.
         """
         key_id = resource['key_id']
         model_name = resource['model_name']
@@ -105,14 +98,14 @@ class KeyProbe(IResourceProbe):
         await self.db_manager.keys.update_status(
             key_id=key_id,
             model_name=model_name,
-            provider_name=provider_name, # Pass provider_name for shared_key_status logic
+            provider_name=provider_name,
             result=result,
             next_check_time=next_check_time
         )
 
     def _calculate_next_check_time(self, policy: HealthPolicyConfig, result: CheckResult) -> datetime:
         """
-        Calculates the next check time based on the health policy. (No changes needed)
+        Calculates the next check time based on the health policy.
         """
         now = datetime.utcnow()
         if result.ok:

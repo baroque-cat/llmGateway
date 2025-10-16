@@ -3,6 +3,8 @@
 import logging
 from typing import Dict, Type, List
 
+import httpx
+
 from src.config.schemas import Config
 from src.core.probes import IResourceProbe
 from src.db.database import DatabaseManager
@@ -16,17 +18,18 @@ _PROBE_CLASSES: Dict[str, Type[IResourceProbe]] = {
     "keys": KeyProbe,
 }
 
-def get_all_probes(config: Config, db_manager: DatabaseManager) -> List[IResourceProbe]:
+def get_all_probes(config: Config, db_manager: DatabaseManager, http_client: httpx.AsyncClient) -> List[IResourceProbe]:
     """
     Factory function to create instances of all registered probes (Async Version).
 
     This function iterates through the probe registry, instantiates each probe
-    with the necessary configuration and the DatabaseManager instance, and returns
-    them as a list.
+    with all necessary dependencies (config, db_manager, http_client), and
+    returns them as a list.
 
     Args:
         config: The main application configuration object.
         db_manager: An instance of the DatabaseManager.
+        http_client: A long-lived instance of httpx.AsyncClient.
 
     Returns:
         A list of initialized probe instances.
@@ -34,7 +37,11 @@ def get_all_probes(config: Config, db_manager: DatabaseManager) -> List[IResourc
     all_probes: List[IResourceProbe] = []
     for probe_name, probe_class in _PROBE_CLASSES.items():
         try:
-            instance = probe_class(config=config, db_manager=db_manager)
+            instance = probe_class(
+                config=config, 
+                db_manager=db_manager, 
+                http_client=http_client
+            )
             all_probes.append(instance)
         except Exception as e:
             logger.error(f"Failed to initialize probe '{probe_name}': {e}", exc_info=True)
