@@ -1,136 +1,147 @@
 # src/services/background_worker.py
 
 import logging
+import os
+import asyncio
+import httpx
 
-from apscheduler.schedulers.blocking import BlockingScheduler
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-# --- Centralized Configuration and Service Imports ---
 from src.config.loader import load_config
 from src.config.logging_config import setup_logging
+from src.config.schemas import Config
 from src.db import database
-from src.services.probes import get_all_probes # Use factory instead of direct import
-from src.services.synchronizers import get_all_syncers # Use factory
+from src.db.database import DatabaseManager
+from src.services.probes import get_all_probes
+from src.services.synchronizers import get_all_syncers
 from src.services.statistics_logger import StatisticsLogger
 from src.services import maintenance
 
-# --- Constants ---
-# These paths are centralized for easy modification.
-# For production environments, consider sourcing these from environment variables.
-DB_PATH = "data/llm_gateway.db"
+# This path is now only used as a default for the config loader.
 CONFIG_PATH = "config/providers.yaml"
 
-
-def run_worker():
+def _setup_directories(config: Config):
     """
-    The main function for the background worker service.
-    
-    This function orchestrates all background tasks, including resource synchronization,
-    health probes, and database maintenance, using a scheduler.
+    Ensures that all necessary directories specified in the config exist.
+    Creates them if they don't.
     """
-
-    # --- Step 1: Load Configuration ---
-    # This is the first and most critical step. If config fails, nothing else can run.
-    try:
-        config = load_config(CONFIG_PATH)
-    except Exception as e:
-        # Use a basic print here because logging is not yet configured.
-        print(f"[CRITICAL] Configuration failed to load from '{CONFIG_PATH}': {e}")
-        return
-
-    # --- Step 2: Setup Centralized Logging ---
-    # Once the config is loaded, we can set up logging for the rest of the application.
-    setup_logging(config)
     logger = logging.getLogger(__name__)
+    logger.info("Checking and setting up required directories...")
+    
+    paths_to_check = {
+        config.logging.summary_log_path,
+    }
+    
+    for provider in config.providers.values():
+        if provider.enabled:
+            if provider.keys_path:
+                paths_to_check.add(provider.keys_path)
+            if provider.proxy_config.mode == 'stealth' and provider.proxy_config.pool_list_path:
+                paths_to_check.add(provider.proxy_config.pool_list_path)
 
-    logger.info("--- Starting LLM Gateway Background Worker ---")
-    logger.info(f"Loaded configuration from '{CONFIG_PATH}'. Debug mode: {config.debug}")
-
-    # --- Step 3: Initialize Database Schema ---
-    # Ensure all tables and indexes exist before any operations are performed.
-    logger.info(f"Initializing database schema at '{DB_PATH}'...")
-    database.initialize_database(DB_PATH)
-
-    # --- Step 4: Synchronize Providers ---
-    # CRITICAL FIX for race condition: Populate the 'providers' table before syncing
-    # any resources that depend on it (keys, proxies).
-    logger.info("Synchronizing providers from config to database...")
     try:
-        provider_names = list(config.providers.keys())
-        database.sync_providers(DB_PATH, provider_names)
+        for path in paths_to_check:
+            if path:
+                os.makedirs(path, exist_ok=True)
+                logger.debug(f"Directory ensured: '{path}'")
+        logger.info("Directory setup complete.")
+    except PermissionError as e:
+        logger.critical(f"Permission denied while creating directory: {e}. Please check file system permissions.")
+        raise
     except Exception as e:
-        logger.critical(f"Failed to synchronize providers with the database: {e}", exc_info=True)
-        return
+        logger.critical(f"An unexpected error occurred during directory setup: {e}")
+        raise
 
-    # --- Step 5: Initial Resource Synchronization ---
-    # Use the syncer factory to run all available synchronizers.
-    # This approach is modular and extensible.
-    logger.info("Performing initial synchronization of all resources...")
-    all_syncers = get_all_syncers()
-    if not all_syncers:
-        logger.warning("No resource synchronizers were found or initialized.")
-    else:
-        for syncer in all_syncers:
-            syncer_name = syncer.__class__.__name__
-            try:
-                logger.info(f"Running initial sync with {syncer_name}...")
-                syncer.sync(config, DB_PATH)
-            except Exception as e:
-                # Isolate failures: one failing syncer should not stop the worker from starting.
-                logger.error(f"An error occurred during initial sync with {syncer_name}: {e}", exc_info=True)
-    logger.info("Initial resource synchronization finished.")
-
-    # --- Step 6: Scheduler Setup ---
-    logger.info("Configuring and starting the scheduler...")
-    scheduler = BlockingScheduler(timezone="UTC")
-
-    # Instantiate services needed for scheduled jobs
-    stats_logger = StatisticsLogger(config, DB_PATH)
-
-    # --- Step 7: Add Jobs to Scheduler ---
-    
-    # Add all probe cycles using the probe factory
-    all_probes = get_all_probes(config, DB_PATH)
-    if not all_probes:
-        logger.warning("No resource probes were found. Health checks will not run.")
-    else:
-        for i, probe in enumerate(all_probes):
-            probe_name = probe.__class__.__name__
-            job_id = f"{probe_name}_cycle_{i}"
-            scheduler.add_job(probe.run_cycle, 'interval', minutes=1, id=job_id)
-            logger.info(f"Scheduled job: {probe_name} to run every 1 minute.")
-
-    # Add all sync cycles using the syncer factory
-    for i, syncer in enumerate(all_syncers):
-        syncer_name = syncer.__class__.__name__
-        job_id = f"{syncer_name}_cycle_{i}"
-        scheduler.add_job(syncer.sync, 'interval', minutes=5, args=[config, DB_PATH], id=job_id)
-        logger.info(f"Scheduled job: {syncer_name} to run every 5 minutes.")
-    
-    # Add the statistics logger job
-    scheduler.add_job(
-        stats_logger.run_cycle, 
-        'interval', 
-        minutes=config.logging.summary_interval_min, 
-        id='statistics_summary_cycle'
-    )
-    logger.info(f"Scheduled job: StatisticsLogger to run every {config.logging.summary_interval_min} minutes.")
-
-    # Add maintenance jobs
-    scheduler.add_job(maintenance.run_periodic_amnesty, 'cron', hour=4, minute=0, args=[DB_PATH], id='amnesty_dead_keys')
-    scheduler.add_job(maintenance.run_periodic_vacuum, 'cron', day_of_week='sun', hour=5, minute=0, args=[DB_PATH], id='vacuum_database')
-    logger.info("Scheduled maintenance jobs (amnesty and vacuum).")
-
-    logger.info("Scheduler configured. List of jobs:")
-    scheduler.print_jobs()
-    
+async def run_worker():
+    """
+    The main async function for the background worker service.
+    Orchestrates all background tasks in a non-blocking manner.
+    """
+    scheduler = None
     try:
-        # --- Step 8: Start the Scheduler ---
-        scheduler.start()
+        # --- Step 1: Load Configuration ---
+        config = load_config(CONFIG_PATH)
+
+        # --- Step 2: Setup Centralized Logging ---
+        setup_logging(config)
+        logger = logging.getLogger(__name__)
+
+        logger.info("--- Starting LLM Gateway Background Worker (Async) ---")
+        
+        # --- Step 3: Setup Directories ---
+        _setup_directories(config)
+
+        # --- Step 4: Initialize and Verify Database Connection ---
+        dsn = config.database.to_dsn()
+        await database.init_db_pool(dsn)
+        db_manager = DatabaseManager(config)
+        if not await db_manager.check_connection():
+            raise ConnectionError("Could not establish a valid connection to the database.")
+        
+        await db_manager.initialize_schema()
+        
+        # --- Step 5: Create Long-Lived HTTP Client ---
+        async with httpx.AsyncClient(timeout=30.0) as http_client:
+            logger.info("Long-lived HTTPX client created.")
+
+            # --- Step 6: Initial Resource Synchronization ---
+            await db_manager.providers.sync(list(config.providers.keys()))
+            all_syncers = get_all_syncers()
+            for syncer in all_syncers:
+                await syncer.sync(config, db_manager)
+            
+            logger.info("Initial resource synchronization finished.")
+
+            # --- Step 7: Instantiate Services with Dependencies ---
+            all_probes = get_all_probes(config, db_manager, http_client)
+            stats_logger = StatisticsLogger(config, db_manager)
+
+            # --- Step 8: Scheduler Setup ---
+            scheduler = AsyncIOScheduler(timezone="UTC")
+            
+            # Add probe jobs
+            for i, probe in enumerate(all_probes):
+                job_id = f"{probe.__class__.__name__}_cycle_{i}"
+                scheduler.add_job(probe.run_cycle, 'interval', minutes=1, id=job_id)
+
+            # Add sync jobs
+            for i, syncer in enumerate(all_syncers):
+                job_id = f"{syncer.__class__.__name__}_cycle_{i}"
+                scheduler.add_job(syncer.sync, 'interval', minutes=5, args=[config, db_manager], id=job_id)
+            
+            # Add statistics logger job
+            scheduler.add_job(stats_logger.run_cycle, 'interval', minutes=config.logging.summary_interval_min)
+
+            # Add maintenance jobs
+            scheduler.add_job(maintenance.run_periodic_amnesty, 'cron', hour=4, minute=0, args=[db_manager])
+            scheduler.add_job(maintenance.run_periodic_vacuum, 'cron', day_of_week='sun', hour=5, minute=0, args=[db_manager])
+
+            logger.info("Scheduler configured. List of jobs:")
+            scheduler.print_jobs()
+            
+            # --- Step 9: Start Scheduler and Run Indefinitely ---
+            scheduler.start()
+            
+            # This loop keeps the main coroutine alive.
+            while True:
+                await asyncio.sleep(3600)
+
     except (KeyboardInterrupt, SystemExit):
-        logger.info("Scheduler stopped by user. Shutting down...")
+        logger.info("Shutdown signal received.")
     except Exception as e:
-        logger.critical(f"A critical error occurred in the scheduler: {e}", exc_info=True)
+        # Catch exceptions during the critical setup phase.
+        # Logging might not be configured if config fails, so print as a fallback.
+        if 'logger' in locals():
+            logger.critical(f"A critical error occurred during worker setup or runtime: {e}", exc_info=True)
+        else:
+            print(f"[CRITICAL] A critical error occurred before logging was configured: {e}")
     finally:
-        if scheduler.running:
+        # --- Step 10: Graceful Shutdown ---
+        logger.info("Initiating graceful shutdown...")
+        if scheduler and scheduler.running:
             scheduler.shutdown()
-
+            logger.info("Scheduler shut down.")
+        
+        await database.close_db_pool()
+        # httpx.AsyncClient is closed automatically by the 'async with' statement.
+        logger.info("Worker has been shut down gracefully.")
