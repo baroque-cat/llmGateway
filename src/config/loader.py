@@ -10,14 +10,14 @@ from dotenv import load_dotenv
 
 from src.config.schemas import (
     Config, ProviderConfig, AccessControlConfig, HealthPolicyConfig, 
-    ProxyConfig, LoggingConfig, DatabaseConfig
+    ProxyConfig, LoggingConfig, DatabaseConfig, TimeoutConfig
 )
 from src.config.defaults import get_default_config
 
 logger = logging.getLogger(__name__)
 
 # Regex to find environment variable placeholders like ${VAR_NAME}
-ENV_VAR_PATTERN = re.compile(r"\$\{(?P<name>[A-Z0-9_]+)\}")
+ENV_VAR_PATTERN = re.compile(r"^\$\{(?P<name>[A-Z0-9_]+)\}$")
 
 def _resolve_env_vars(config_value: Any) -> Any:
     """
@@ -38,7 +38,7 @@ def _resolve_env_vars(config_value: Any) -> Any:
             if var_value is None:
                 raise ValueError(
                     f"Configuration error: Environment variable '{var_name}' is referenced "
-                    "in the config but is not set."
+                    "in the config but is not set. Please define it in your .env file or system environment."
                 )
             return var_value
     
@@ -50,6 +50,10 @@ def _validate_config(config: Config):
     Performs validation on the loaded configuration.
     """
     used_tokens: Set[str] = set()
+
+    if not config.providers:
+        logger.warning("No providers are defined in the configuration file.")
+        return
 
     for name, conf in config.providers.items():
         if conf.enabled:
@@ -96,8 +100,6 @@ def load_config(path: str = "config/providers.yaml") -> Config:
     Loads, resolves env variables, parses, and validates the configuration.
     If the file doesn't exist, it creates a default one.
     """
-    # This populates os.environ with variables from a .env file if it exists.
-    # It will not override existing system environment variables.
     if load_dotenv():
         logger.info("Loaded environment variables from .env file.")
 
@@ -110,10 +112,8 @@ def load_config(path: str = "config/providers.yaml") -> Config:
     with open(path, 'r', encoding='utf-8') as f:
         raw_config = yaml.safe_load(f) or {}
 
-    # --- NEW: Resolve environment variables before parsing ---
     resolved_config = _resolve_env_vars(raw_config)
 
-    # Parse global settings
     logging_data = resolved_config.get('logging', {})
     database_data = resolved_config.get('database', {})
     
@@ -123,11 +123,11 @@ def load_config(path: str = "config/providers.yaml") -> Config:
         logging=LoggingConfig(**logging_data),
     )
 
-    # Parse provider-specific settings
     for name, provider_data in resolved_config.get('providers', {}).items():
         access_data = provider_data.get('access_control', {})
         health_data = provider_data.get('health_policy', {})
         proxy_data = provider_data.get('proxy_config', {})
+        timeout_data = provider_data.get('timeouts', {}) # --- NEW
 
         provider_conf = ProviderConfig(
             provider_type=provider_data.get('provider_type', ''),
@@ -141,6 +141,7 @@ def load_config(path: str = "config/providers.yaml") -> Config:
             access_control=AccessControlConfig(**access_data),
             health_policy=HealthPolicyConfig(**health_data),
             proxy_config=ProxyConfig(**proxy_data),
+            timeouts=TimeoutConfig(**timeout_data), # --- NEW
         )
         app_config.providers[name] = provider_conf
 

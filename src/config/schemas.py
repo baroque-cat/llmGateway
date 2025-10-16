@@ -24,7 +24,7 @@ class HealthPolicyConfig:
     on_invalid_key_days: int = 10
     on_other_error_hr: int = 1
     batch_size: int = 30
-    batch_delay_sec: int = 30
+    batch_delay_sec: int = 15
 
 @dataclass
 class ProxyConfig:
@@ -34,6 +34,18 @@ class ProxyConfig:
     mode: str = "none"
     static_url: Optional[str] = None
     pool_list_path: Optional[str] = None
+
+# --- NEW DATACLASS ---
+@dataclass
+class TimeoutConfig:
+    """
+    Defines granular timeout settings for httpx requests.
+    All values are in seconds.
+    """
+    connect: float = 5.0
+    read: float = 20.0
+    write: float = 10.0
+    pool: float = 5.0
 
 @dataclass
 class ProviderConfig:
@@ -46,8 +58,6 @@ class ProviderConfig:
     api_base_url: str = ""
     default_model: str = ""
     
-    # If true, the probe will only test the 'default_model'. The resulting status
-    # will be propagated to all other models for that key.
     shared_key_status: bool = False
     
     models: Dict[str, List[str]] = field(default_factory=dict)
@@ -55,6 +65,9 @@ class ProviderConfig:
     access_control: AccessControlConfig = field(default_factory=AccessControlConfig)
     health_policy: HealthPolicyConfig = field(default_factory=HealthPolicyConfig)
     proxy_config: ProxyConfig = field(default_factory=ProxyConfig)
+    
+    # --- NEW FIELD ---
+    timeouts: TimeoutConfig = field(default_factory=TimeoutConfig)
 
 
 @dataclass
@@ -76,7 +89,7 @@ class DatabaseConfig:
     host: str = "localhost"
     port: int = 5432
     user: str = "llm_gateway"
-    password: str = ""  # Should be loaded from .env
+    password: str = ""
     dbname: str = "llmgateway"
 
     def to_dsn(self) -> str:
@@ -91,8 +104,6 @@ class Config:
     The main configuration object for the entire application.
     """
     debug: bool = False
-    
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
-    
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     providers: Dict[str, ProviderConfig] = field(default_factory=dict)

@@ -15,8 +15,9 @@ def get_default_config() -> Dict[str, Any]:
             "host": "localhost",
             "port": 5432,
             "user": "llm_gateway",
-            # It's highly recommended to use an environment variable for the password.
-            # Example: password: "${DB_PASSWORD}"
+            # This value is expected to be loaded from an environment variable.
+            # Create a .env file in the project root with the line:
+            # DB_PASSWORD="your_super_secret_password"
             "password": "${DB_PASSWORD}",
             "dbname": "llmgateway",
         },
@@ -46,6 +47,10 @@ def get_default_config() -> Dict[str, Any]:
                     ],
                 },
                 "access_control": {
+                    # This is the authentication token your client application will use
+                    # to access the gateway for this specific provider.
+                    # It's recommended to load it from a .env file:
+                    # GEMINI_DEFAULT_TOKEN="gp-..."
                     "gateway_access_token": "${GEMINI_DEFAULT_TOKEN}",
                 },
 
@@ -58,13 +63,21 @@ def get_default_config() -> Dict[str, Any]:
                     "on_invalid_key_days": 10,
                     "on_other_error_hr": 1,
                     "batch_size": 30,
-                    "batch_delay_sec": 30,
+                    "batch_delay_sec": 15,
                 },
 
                 "proxy_config": {
                     "mode": "none",
                     "static_url": None,
                     "pool_list_path": "proxies/gemini/",
+                },
+
+                # --- NEW SECTION ---
+                "timeouts": {
+                    "connect": 5.0,
+                    "read": 20.0,
+                    "write": 10.0,
+                    "pool": 5.0,
                 },
             },
         },
