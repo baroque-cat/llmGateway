@@ -1,20 +1,19 @@
 # src/providers/impl/openai_like.py
 
-from typing import Dict, List, Optional, Tuple
-import requests
-import time
 import logging
-from flask import Request
+from typing import Dict, List, Optional, Tuple
 
-from src.core.models import CheckResult
+import httpx
+
 from src.core.enums import ErrorReason
+from src.core.models import CheckResult
 from src.providers.base import AIBaseProvider
 
 logger = logging.getLogger(__name__)
 
 class OpenAILikeProvider(AIBaseProvider):
     """
-    Provider for OpenAI-compatible APIs (e.g., OpenAI, DeepSeek, Groq).
+    Provider for OpenAI-compatible APIs (e.g., OpenAI, DeepSeek) (Async Version).
     """
 
     def _get_headers(self, token: str) -> Optional[Dict[str, str]]:
@@ -25,20 +24,13 @@ class OpenAILikeProvider(AIBaseProvider):
             return None
         return {
             "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
 
-    def check(self, token: str, model: str, proxy: Optional[str] = None) -> CheckResult:
+    async def check(self, client: httpx.AsyncClient, token: str, model: str, proxy: Optional[str] = None) -> CheckResult:
         """
-        Checks the validity of an API token by making a lightweight test request.
-        
-        Args:
-            token: The API token to validate.
-            model: The specific model name to use for the check.
-            proxy: (Optional) The proxy URL to use for the request.
+        Checks the validity of an API token by making an async, lightweight test request.
         """
-        start_time = time.time()
-        
         log_proxy_msg = f"via proxy '{proxy}'" if proxy else "directly"
         logger.debug(f"Checking OpenAI-like key ending '...{token[-4:]}' for model '{model}' {log_proxy_msg}.")
 
@@ -54,62 +46,110 @@ class OpenAILikeProvider(AIBaseProvider):
         payload = {
             "model": model,
             "messages": [{"role": "user", "content": "Hello"}],
-            "max_tokens": 1
+            "max_tokens": 1,
         }
-        
-        # Prepare proxies dictionary for the requests library
-        proxies_dict = {"http": proxy, "https": proxy} if proxy else None
+
+        timeout_config = self.config.timeouts
+        timeout = httpx.Timeout(
+            connect=timeout_config.connect,
+            read=timeout_config.read,
+            write=timeout_config.write,
+            pool=timeout_config.pool
+        )
         
         try:
-            response = requests.post(
-                api_url, 
-                headers=headers, 
-                json=payload, 
-                timeout=15,
-                proxies=proxies_dict
+            response = await client.post(
+                api_url,
+                headers=headers,
+                json=payload,
+                timeout=timeout,
+                proxies=proxy
             )
+            response.raise_for_status()
+            
+            return CheckResult.success(response_time=response.elapsed.total_seconds(), status_code=response.status_code)
+
+        except httpx.TimeoutException:
+            return CheckResult.fail(ErrorReason.TIMEOUT, "Request timed out", timeout.read, 408)
+        except httpx.ProxyError as e:
+            return CheckResult.fail(ErrorReason.NETWORK_ERROR, f"Proxy error: {e}", status_code=503)
+        except httpx.ConnectError as e:
+            return CheckResult.fail(ErrorReason.NETWORK_ERROR, f"Connection error: {e}", status_code=503)
+        except httpx.HTTPStatusError as e:
+            response = e.response
             status_code = response.status_code
             response_text = response.text
-        except requests.exceptions.Timeout:
-            return CheckResult.fail(ErrorReason.TIMEOUT, "Request timed out", time.time() - start_time, 408)
-        except requests.exceptions.ProxyError as e:
-            return CheckResult.fail(ErrorReason.NETWORK_ERROR, f"Proxy error: {e}", time.time() - start_time, 503)
-        except requests.exceptions.RequestException as e:
-            return CheckResult.fail(ErrorReason.NETWORK_ERROR, str(e), time.time() - start_time, 503)
+            response_time = response.elapsed.total_seconds()
 
-        response_time = time.time() - start_time
+            if status_code in [401, 403]:
+                return CheckResult.fail(ErrorReason.INVALID_KEY, response_text, response_time, status_code)
+            elif status_code == 429:
+                return CheckResult.fail(ErrorReason.RATE_LIMITED, response_text, response_time, status_code)
+            elif status_code >= 500:
+                return CheckResult.fail(ErrorReason.SERVER_ERROR, response_text, response_time, status_code)
+            else:
+                return CheckResult.fail(ErrorReason.UNKNOWN, response_text, response_time, status_code)
+        except httpx.RequestError as e:
+            return CheckResult.fail(ErrorReason.NETWORK_ERROR, str(e), status_code=503)
 
-        if status_code == 200:
-            return CheckResult.success(response_time=response_time, status_code=status_code)
-        elif status_code in [401, 403]:
-            return CheckResult.fail(ErrorReason.INVALID_KEY, response_text, response_time, status_code)
-        elif status_code == 429:
-            return CheckResult.fail(ErrorReason.RATE_LIMITED, response_text, response_time, status_code)
-        elif status_code >= 500:
-            return CheckResult.fail(ErrorReason.SERVER_ERROR, response_text, response_time, status_code)
-        else:
-            return CheckResult.fail(ErrorReason.UNKNOWN, response_text, response_time, status_code)
-
-    def inspect(self, token: str, **kwargs) -> List[str]:
+    async def inspect(self, client: httpx.AsyncClient, token: str, **kwargs) -> List[str]:
         """
         Inspects and returns a list of available models from configuration.
         """
         logger.debug(f"Inspecting models for provider '{self.name}' by reading from config.")
         return self.config.models.get("llm", [])
     
-    def proxy_request(self, token: str, request: Request) -> Tuple[requests.Response, CheckResult]:
+    async def proxy_request(
+        self, client: httpx.AsyncClient, token: str, method: str, headers: Dict, path: str, content: bytes
+    ) -> Tuple[httpx.Response, CheckResult]:
         """
-        (STUB) Proxies an incoming client request to the target API provider.
+        Proxies the incoming request to an OpenAI-like API with streaming support.
         """
-        logger.warning("proxy_request for OpenAILikeProvider is not yet implemented.")
+        base_url = self.config.api_base_url.rstrip('/')
+        upstream_url = f"{base_url}/{path.lstrip('/')}"
         
-        dummy_response = requests.Response()
-        dummy_response.status_code = 501
-        dummy_response._content = b'{"error": "Proxy functionality not yet implemented for this provider."}'
+        proxy_headers = self._prepare_proxy_headers(token, headers)
         
-        check_result = CheckResult.fail(
-            ErrorReason.SERVER_ERROR,
-            "Proxy functionality not implemented.",
-            status_code=501
+        timeout_config = self.config.timeouts
+        timeout = httpx.Timeout(
+            connect=timeout_config.connect,
+            read=timeout_config.read,
+            write=timeout_config.write,
+            pool=timeout_config.pool
         )
-        return dummy_response, check_result
+        
+        try:
+            upstream_request = client.build_request(
+                method=method,
+                url=upstream_url,
+                headers=proxy_headers,
+                content=content,
+                timeout=timeout,
+            )
+            upstream_response = await client.send(upstream_request, stream=True)
+            
+            status_code = upstream_response.status_code
+            response_time = upstream_response.elapsed.total_seconds()
+            
+            if upstream_response.is_success:
+                check_result = CheckResult.success(response_time=response_time, status_code=status_code)
+            else:
+                response_text = await upstream_response.aread()
+                if status_code in [401, 403]:
+                    reason = ErrorReason.INVALID_KEY
+                elif status_code == 429:
+                    reason = ErrorReason.RATE_LIMITED
+                elif status_code >= 500:
+                    reason = ErrorReason.SERVER_ERROR
+                else:
+                    reason = ErrorReason.UNKNOWN
+
+                check_result = CheckResult.fail(reason, response_text.decode(), response_time, status_code)
+
+        except httpx.RequestError as e:
+            error_message = f"Upstream request failed: {e}"
+            logger.error(error_message)
+            check_result = CheckResult.fail(ErrorReason.NETWORK_ERROR, error_message, status_code=503)
+            upstream_response = httpx.Response(503, content=error_message.encode())
+            
+        return upstream_response, check_result
