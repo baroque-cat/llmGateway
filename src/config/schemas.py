@@ -20,47 +20,38 @@ class HealthPolicyConfig:
     on_overload_min: int = 60
     on_no_quota_hr: int = 24
     on_rate_limit_min: int = 180
-    on_server_error_min: int = 10
+    on_server_error_min: int = 30
     on_invalid_key_days: int = 10
     on_other_error_hr: int = 1
-    batch_size: int = 30  # Number of keys to check in a single batch.
-    batch_delay_sec: int = 15  # Delay in seconds between batches for the same provider.
+    batch_size: int = 30
+    batch_delay_sec: int = 30
 
 @dataclass
 class ProxyConfig:
     """
     Configuration for proxy usage, supporting multiple operational modes.
     """
-    # Defines the proxy mode:
-    # 'none': (Default) Direct connection, no proxy is used.
-    # 'static': A single, fixed proxy is used for all requests for this provider.
-    # 'stealth': A pool of proxies is used, with health checks and rotation (future implementation).
     mode: str = "none"
-
-    # The URL for the proxy when mode is 'static'.
-    # e.g., "http://user:pass@host:port" or "socks5://host:port"
     static_url: Optional[str] = None
-
-    # The file path to the list of proxies when mode is 'stealth'.
     pool_list_path: Optional[str] = None
 
 @dataclass
 class ProviderConfig:
     """
     Configuration for a single LLM provider instance.
-    This structure holds all settings specific to one named provider instance,
-    such as paths, URLs, model lists, and behavioral policies.
     """
     provider_type: str = ""
     enabled: bool = False
     keys_path: str = ""
     api_base_url: str = ""
     default_model: str = ""
+    
+    # If true, the probe will only test the 'default_model'. The resulting status
+    # will be propagated to all other models for that key.
+    shared_key_status: bool = False
+    
     models: Dict[str, List[str]] = field(default_factory=dict)
     
-    # Nested configuration objects for better structure and clarity.
-    # default_factory is used to ensure each ProviderConfig instance gets
-    # a unique, mutable instance of these config objects.
     access_control: AccessControlConfig = field(default_factory=AccessControlConfig)
     health_policy: HealthPolicyConfig = field(default_factory=HealthPolicyConfig)
     proxy_config: ProxyConfig = field(default_factory=ProxyConfig)
@@ -71,30 +62,37 @@ class LoggingConfig:
     """
     Global configuration for the statistics and logging system.
     """
-    # The directory where summary .jsonl log files will be stored.
     summary_log_path: str = "logs/summary/"
-    
-    # The interval in minutes for generating a summary report.
     summary_interval_min: int = 60
-    
-    # The maximum size in megabytes for a single summary log file before rotation.
     summary_log_max_size_mb: int = 5
-    
-    # The number of old (rotated) summary log files to keep.
     summary_log_backup_count: int = 3
 
+@dataclass
+class DatabaseConfig:
+    """
+    Configuration for the PostgreSQL database connection.
+    It is strongly recommended to load 'user' and 'password' from environment variables.
+    """
+    host: str = "localhost"
+    port: int = 5432
+    user: str = "llm_gateway"
+    password: str = ""  # Should be loaded from .env
+    dbname: str = "llmgateway"
+
+    def to_dsn(self) -> str:
+        """
+        Constructs a PostgreSQL Data Source Name (DSN) string from the config.
+        """
+        return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.dbname}"
 
 @dataclass
 class Config:
     """
     The main configuration object for the entire application.
-    It aggregates configurations for all provider instances and global settings.
     """
-    # Global debug mode flag. If true, enables verbose operational logging to stdout.
     debug: bool = False
-
-    # Nested configuration for the logging system.
+    
+    database: DatabaseConfig = field(default_factory=DatabaseConfig)
+    
     logging: LoggingConfig = field(default_factory=LoggingConfig)
-
-    # Dictionary of all configured provider instances, keyed by their unique name.
     providers: Dict[str, ProviderConfig] = field(default_factory=dict)
