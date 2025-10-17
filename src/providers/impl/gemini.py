@@ -27,12 +27,13 @@ class GeminiProvider(AIBaseProvider):
             "Content-Type": "application/json",
         }
 
-    async def check(self, client: httpx.AsyncClient, token: str, model: str, proxy: Optional[str] = None) -> CheckResult:
+    # --- REFACTORED: Method signature changed to remove the 'proxy' parameter ---
+    async def check(self, client: httpx.AsyncClient, token: str, model: str) -> CheckResult:
         """
         Checks the validity of a Gemini API token by making an async, lightweight test request.
         """
-        log_proxy_msg = f"via proxy '{proxy}'" if proxy else "directly"
-        logger.debug(f"Checking Gemini key ending '...{token[-4:]}' for model '{model}' {log_proxy_msg}.")
+        # --- REFACTORED: Proxy-related logging is removed as the provider is now proxy-agnostic ---
+        logger.debug(f"Checking Gemini key ending '...{token[-4:]}' for model '{model}'.")
 
         headers = self._get_headers(token)
         if not headers:
@@ -55,12 +56,14 @@ class GeminiProvider(AIBaseProvider):
         )
         
         try:
+            # --- REFACTORED: The 'proxies' argument is removed from the call. ---
+            # This is the core fix for the original TypeError. The 'client' object
+            # is now expected to be pre-configured with a proxy if needed.
             response = await client.post(
                 api_url,
                 headers=headers,
                 json=payload,
-                timeout=timeout,
-                proxies=proxy # httpx can take proxy URL directly
+                timeout=timeout
             )
             response.raise_for_status()
             
@@ -74,7 +77,7 @@ class GeminiProvider(AIBaseProvider):
         except httpx.ConnectError as e:
             return CheckResult.fail(ErrorReason.NETWORK_ERROR, f"Connection error: {e}", status_code=503)
         except httpx.HTTPStatusError as e:
-            # Handle non-2xx responses
+            # --- UNCHANGED: Error handling logic is preserved as requested ---
             response = e.response
             status_code = response.status_code
             response_text = response.text
@@ -106,6 +109,7 @@ class GeminiProvider(AIBaseProvider):
     ) -> Tuple[httpx.Response, CheckResult]:
         """
         Proxies the incoming request to the Gemini API with streaming support.
+        (No changes needed in this method)
         """
         base_url = self.config.api_base_url.rstrip('/')
         upstream_url = f"{base_url}/{path.lstrip('/')}"

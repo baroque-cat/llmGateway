@@ -79,6 +79,10 @@ class AIBaseProvider(IProvider):
     async def check(self, client: httpx.AsyncClient, token: str, **kwargs) -> CheckResult:
         """
         (Abstract) Checks if an API token is valid for this provider. (Async)
+        
+        REFACTORED: The signature is now aligned with the IProvider interface,
+        and no longer contains the 'proxy' parameter. The client provided is
+        expected to be pre-configured by the HttpClientFactory.
         """
         raise NotImplementedError
 
@@ -97,3 +101,4 @@ class AIBaseProvider(IProvider):
         (Abstract) Proxies an incoming client request to the target API provider. (Async)
         """
         raise NotImplementedError
+

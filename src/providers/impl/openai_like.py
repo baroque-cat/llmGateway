@@ -26,13 +26,14 @@ class OpenAILikeProvider(AIBaseProvider):
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
         }
-
-    async def check(self, client: httpx.AsyncClient, token: str, model: str, proxy: Optional[str] = None) -> CheckResult:
+    
+    # --- REFACTORED: Method signature changed to remove the 'proxy' parameter ---
+    async def check(self, client: httpx.AsyncClient, token: str, model: str) -> CheckResult:
         """
         Checks the validity of an API token by making an async, lightweight test request.
         """
-        log_proxy_msg = f"via proxy '{proxy}'" if proxy else "directly"
-        logger.debug(f"Checking OpenAI-like key ending '...{token[-4:]}' for model '{model}' {log_proxy_msg}.")
+        # --- REFACTORED: Proxy-related logging is removed ---
+        logger.debug(f"Checking OpenAI-like key ending '...{token[-4:]}' for model '{model}'.")
 
         headers = self._get_headers(token)
         if not headers:
@@ -58,12 +59,12 @@ class OpenAILikeProvider(AIBaseProvider):
         )
         
         try:
+            # --- REFACTORED: The 'proxies' argument is removed from the call ---
             response = await client.post(
                 api_url,
                 headers=headers,
                 json=payload,
-                timeout=timeout,
-                proxies=proxy
+                timeout=timeout
             )
             response.raise_for_status()
             
@@ -76,6 +77,7 @@ class OpenAILikeProvider(AIBaseProvider):
         except httpx.ConnectError as e:
             return CheckResult.fail(ErrorReason.NETWORK_ERROR, f"Connection error: {e}", status_code=503)
         except httpx.HTTPStatusError as e:
+            # --- UNCHANGED: Error handling logic is preserved as requested ---
             response = e.response
             status_code = response.status_code
             response_text = response.text
@@ -104,6 +106,7 @@ class OpenAILikeProvider(AIBaseProvider):
     ) -> Tuple[httpx.Response, CheckResult]:
         """
         Proxies the incoming request to an OpenAI-like API with streaming support.
+        (No changes needed in this method)
         """
         base_url = self.config.api_base_url.rstrip('/')
         upstream_url = f"{base_url}/{path.lstrip('/')}"
