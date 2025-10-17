@@ -27,7 +27,7 @@ class KeyProbe(IResourceProbe):
     async def _check_resource(self, resource: Dict[str, Any]) -> CheckResult:
         """
         Checks a single API key against a specific model by calling the provider.
-        This is now a fully async operation.
+        This method now delegates HTTP client creation to the HttpClientFactory.
         """
         provider_name = resource['provider_name']
         key_value = resource['key_value']
@@ -42,26 +42,27 @@ class KeyProbe(IResourceProbe):
             logger.error(msg)
             return CheckResult.fail(ErrorReason.BAD_REQUEST, msg)
 
-        proxy_address: Optional[str] = None
-        proxy_config = provider_config.proxy_config
-
-        if proxy_config.mode == 'static':
-            proxy_address = proxy_config.static_url
-        elif proxy_config.mode == 'stealth':
-            logger.warning(f"Stealth mode for '{provider_name}' is not yet fully implemented. No proxy will be used for probe.")
-            # In the future: proxy_address = await self.db_manager.proxies.get_available_proxy(...)
-
+        # --- REFACTORED: The entire proxy logic block is removed. ---
+        # The responsibility for creating a correctly configured client (with or without
+        # a proxy) is now fully delegated to the HttpClientFactory. This simplifies
+        # the probe's logic and adheres to the Single Responsibility Principle.
+        
         try:
+            # --- ADDED: Get the appropriate client from the factory ---
+            # This is the new, centralized way to obtain a client. The factory will
+            # return a cached, pre-configured client based on the provider's config.
+            client = await self.client_factory.get_client_for_provider(provider_name)
+
             provider_instance = get_provider(provider_name, provider_config)
             
-            # --- CRITICAL CHANGE: Direct await call, no more run_in_executor ---
-            # The provider's `check` method is now a coroutine and can be awaited directly.
-            # We pass the long-lived http_client down to the provider.
+            # --- REFACTORED: The call to `check` is simplified ---
+            # We pass the client obtained from the factory.
+            # CRITICAL: The `proxy=...` argument is removed, fixing the original TypeError.
+            # The provider's `check` method will be updated to no longer accept it.
             result = await provider_instance.check(
-                client=self.http_client,
+                client=client,
                 token=key_value,
                 model=model_name,
-                proxy=proxy_address
             )
             return result
 
@@ -76,6 +77,7 @@ class KeyProbe(IResourceProbe):
     async def _update_resource_status(self, resource: Dict[str, Any], result: CheckResult):
         """
         Updates the key's status in the database using the DatabaseManager.
+        (No changes needed here as its logic is independent of HTTP client creation.)
         """
         key_id = resource['key_id']
         model_name = resource['model_name']
@@ -106,6 +108,7 @@ class KeyProbe(IResourceProbe):
     def _calculate_next_check_time(self, policy: HealthPolicyConfig, result: CheckResult) -> datetime:
         """
         Calculates the next check time based on the health policy.
+        (No changes needed here.)
         """
         now = datetime.utcnow()
         if result.ok:
@@ -124,3 +127,4 @@ class KeyProbe(IResourceProbe):
             return now + timedelta(minutes=policy.on_server_error_min)
         else:
             return now + timedelta(hours=policy.on_other_error_hr)
+
