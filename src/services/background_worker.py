@@ -4,6 +4,7 @@ import logging
 import os
 import asyncio
 import httpx
+import asyncpg # --- ADDED: Import for specific exception handling ---
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -58,6 +59,11 @@ async def run_worker():
     Orchestrates all background tasks in a non-blocking manner.
     """
     scheduler = None
+    # --- MODIFIED: Assign logger and config to None initially ---
+    # This makes the exception handling more robust, as we can check if they were assigned
+    # before the exception occurred.
+    logger: logging.Logger | None = None
+    config: Config | None = None
     try:
         # --- Step 1: Load Configuration ---
         config = load_config(CONFIG_PATH)
@@ -75,8 +81,12 @@ async def run_worker():
         dsn = config.database.to_dsn()
         await database.init_db_pool(dsn)
         db_manager = DatabaseManager(config)
-        if not await db_manager.check_connection():
-            raise ConnectionError("Could not establish a valid connection to the database.")
+        
+        # This check is now less critical because of the specific exception handling below,
+        # but it's good practice to keep it as a general health check.
+        # It was removed from database.py in a previous step, so we will remove the call.
+        # if not await db_manager.check_connection():
+        #     raise ConnectionError("Could not establish a valid connection to the database.")
         
         await db_manager.initialize_schema()
         
@@ -127,21 +137,52 @@ async def run_worker():
                 await asyncio.sleep(3600)
 
     except (KeyboardInterrupt, SystemExit):
-        logger.info("Shutdown signal received.")
+        if logger:
+            logger.info("Shutdown signal received.")
+
+    # --- NEW: Specific exception handler for authentication errors ---
+    except asyncpg.exceptions.InvalidPasswordError:
+        if logger and config:
+            db_conf = config.database
+            logger.critical(
+                f"Database authentication failed for user '{db_conf.user}'. "
+                f"Please verify that DB_USER, DB_PASSWORD, and other connection settings "
+                f"in your .env file and config/providers.yaml are correct for the database at "
+                f"{db_conf.host}:{db_conf.port}."
+            )
+        else:
+            print("[CRITICAL] Database authentication failed. Check credentials in .env and config.")
+
+    # --- NEW: Specific exception handler for connection errors ---
+    except (ConnectionRefusedError, OSError):
+        if logger and config:
+            db_conf = config.database
+            logger.critical(
+                f"Could not connect to the database at {db_conf.host}:{db_conf.port}. "
+                f"Please ensure the database server is running, accessible, and that "
+                f"the host and port in config/providers.yaml are correct."
+            )
+        else:
+            print("[CRITICAL] Could not connect to the database. Check connection settings and server status.")
+
     except Exception as e:
         # Catch exceptions during the critical setup phase.
-        # Logging might not be configured if config fails, so print as a fallback.
-        if 'logger' in locals():
+        if logger:
             logger.critical(f"A critical error occurred during worker setup or runtime: {e}", exc_info=True)
         else:
+            # Fallback to print if logging is not configured.
             print(f"[CRITICAL] A critical error occurred before logging was configured: {e}")
     finally:
         # --- Step 10: Graceful Shutdown ---
-        logger.info("Initiating graceful shutdown...")
+        # Get a logger instance. If setup failed, this creates a default one.
+        shutdown_logger = logging.getLogger(__name__)
+
+        shutdown_logger.info("Initiating graceful shutdown...")
         if scheduler and scheduler.running:
             scheduler.shutdown()
-            logger.info("Scheduler shut down.")
+            shutdown_logger.info("Scheduler shut down.")
         
         await database.close_db_pool()
         # httpx.AsyncClient is closed automatically by the 'async with' statement.
-        logger.info("Worker has been shut down gracefully.")
+        shutdown_logger.info("Worker has been shut down gracefully.")
+
