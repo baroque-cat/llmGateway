@@ -340,6 +340,27 @@ class DatabaseManager:
             logger.critical(f"Failed to initialize database schema: {e}", exc_info=True)
             raise
 
+    async def check_connection(self) -> bool:
+        """
+        Performs a simple query to verify that the database connection is alive and valid.
+        This acts as a health check during application startup.
+
+        Returns:
+            True if the connection is successful, False otherwise.
+        """
+        try:
+            pool = get_pool()
+            # Acquire a connection from the pool. This checks network, auth, etc.
+            async with pool.acquire() as conn:
+                # Execute the simplest and fastest possible query.
+                result = await conn.fetchval('SELECT 1')
+                # If the query returns 1, the connection is healthy.
+                return result == 1
+        except Exception as e:
+            # Catch any exception during connection or query execution.
+            logger.error(f"Database connection check failed: {e}")
+            return False
+
     async def run_amnesty(self, provider_name: Optional[str] = None):
         """Grants amnesty to all 'dead' keys, giving them a second chance."""
         pool = get_pool()
@@ -363,4 +384,3 @@ class DatabaseManager:
             logger.info("MAINTENANCE: Starting database VACUUM operation...")
             await conn.execute("VACUUM;")
             logger.info("MAINTENANCE: Database VACUUM completed successfully.")
-
