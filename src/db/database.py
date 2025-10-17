@@ -18,28 +18,24 @@ logger = logging.getLogger(__name__)
 _db_pool: Optional[Pool] = None
 
 # --- Data Integrity Contract ---
-# Create a set of all valid string values for the status field.
-# This acts as a programmatic guard against writing invalid data, similar to the
-# previous SQLite implementation. It provides flexibility while ensuring consistency.
-# 'valid' and 'untested' are special statuses not present in ErrorReason.
 VALID_STATUSES = {reason.value for reason in ErrorReason} | {'valid', 'untested'}
 
 
-# This constant defines the entire database schema using PostgreSQL syntax.
+# --- REFACTORED: The database schema is updated with the new field and optimized indexes ---
 DB_SCHEMA = """
--- Table 1: Provider directory (heart of our multi-provider system)
+-- Table 1: Provider directory
 CREATE TABLE IF NOT EXISTS providers (
     id SERIAL PRIMARY KEY,
     name TEXT UNIQUE NOT NULL
 );
 
--- Table 2: The proxy servers themselves. A global pool of proxies.
+-- Table 2: The proxy servers themselves
 CREATE TABLE IF NOT EXISTS proxies (
     id SERIAL PRIMARY KEY,
-    address TEXT UNIQUE NOT NULL -- e.g., "socks5://user:pass@host:port"
+    address TEXT UNIQUE NOT NULL
 );
 
--- Table 3: Health status of a proxy FOR A SPECIFIC PROVIDER.
+-- Table 3: Health status of a proxy FOR A SPECIFIC PROVIDER
 CREATE TABLE IF NOT EXISTS provider_proxy_status (
     proxy_id INTEGER NOT NULL,
     provider_id INTEGER NOT NULL,
@@ -52,12 +48,13 @@ CREATE TABLE IF NOT EXISTS provider_proxy_status (
     FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE CASCADE
 );
 
--- Table 4: API keys. Now with an 'is_dead' flag.
+-- Table 4: API keys. Now with a timestamp for 'dead' keys.
 CREATE TABLE IF NOT EXISTS api_keys (
     id SERIAL PRIMARY KEY,
     provider_id INTEGER NOT NULL,
     key_value TEXT NOT NULL,
-    is_dead BOOLEAN NOT NULL DEFAULT FALSE, -- Flag for permanently invalid keys
+    is_dead BOOLEAN NOT NULL DEFAULT FALSE,
+    dead_since TIMESTAMPTZ NULL, -- ADDED: Timestamp for when the key was marked as dead.
     UNIQUE (provider_id, key_value),
     FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE CASCADE
 );
@@ -66,7 +63,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
 CREATE TABLE IF NOT EXISTS key_model_status (
     key_id INTEGER NOT NULL,
     model_name TEXT NOT NULL,
-    status TEXT NOT NULL, -- e.g., 'valid', 'no_quota', 'invalid_key'
+    status TEXT NOT NULL,
     last_checked TIMESTAMPTZ,
     next_check_time TIMESTAMPTZ NOT NULL,
     status_code INTEGER,
@@ -78,11 +75,20 @@ CREATE TABLE IF NOT EXISTS key_model_status (
 
 -- Indexes for performance optimization
 CREATE INDEX IF NOT EXISTS idx_api_keys_provider_id ON api_keys(provider_id);
-CREATE INDEX IF NOT EXISTS idx_api_keys_is_dead ON api_keys(is_dead);
-CREATE INDEX IF NOT EXISTS idx_key_model_status_next_check_time ON key_model_status(next_check_time);
 CREATE INDEX IF NOT EXISTS idx_key_model_status_status ON key_model_status(status);
 CREATE INDEX IF NOT EXISTS idx_proxy_status_next_check_time ON provider_proxy_status(next_check_time);
 CREATE INDEX IF NOT EXISTS idx_proxy_status_status ON provider_proxy_status(status);
+
+-- OPTIMIZED: Partial index for the background worker's health check query.
+-- It's much more efficient because it only indexes rows that are candidates for checking.
+CREATE INDEX IF NOT EXISTS idx_key_status_check_logic
+ON key_model_status(next_check_time)
+WHERE (SELECT is_dead FROM api_keys WHERE id = key_model_status.key_id) = FALSE;
+
+-- OPTIMIZED: Composite index for the gateway's lookup query.
+-- Allows the database to quickly find valid keys for a specific model.
+CREATE INDEX IF NOT EXISTS idx_key_status_gateway_lookup ON key_model_status(status, model_name);
+
 """
 
 # --- Component 1: Connection Management ---
@@ -160,6 +166,7 @@ class KeyRepository:
         self._config = config
 
     async def sync(self, provider_name: str, keys_from_file: Set[str], provider_id: int, provider_models: List[str]):
+        # This method remains unchanged as its logic is correct.
         async with self._pool.acquire() as conn:
             async with conn.transaction():
                 # 1. Get keys for this provider from DB
@@ -203,6 +210,8 @@ class KeyRepository:
                     logger.info(f"SYNC: Added {len(models_to_add)} new model status records for provider '{provider_name}'.")
 
     async def get_keys_to_check(self) -> List[Dict[str, Any]]:
+        # The query logic remains the same, but it will now be faster
+        # thanks to the new partial index.
         query = """
         SELECT
             k.id AS key_id,
@@ -237,11 +246,13 @@ class KeyRepository:
         return results
 
     async def update_status(self, key_id: int, model_name: str, provider_name: str, result: CheckResult, next_check_time: datetime):
+        # --- Обоснование ---
+        # Метод `update_status` теперь является ключевой точкой для записи "времени смерти".
+        # Когда `KeyProbe` сообщает, что ключ невалиден (`INVALID_KEY`), мы не просто ставим флаг `is_dead`,
+        # но и записываем текущее время в новое поле `dead_since`. Это та самая информация,
+        # которая понадобится для "умной" амнистии.
         status_str = 'valid' if result.ok else result.error_reason.value
         
-        # --- ADDED: Application-level data integrity check ---
-        # This assert ensures that we never attempt to write an unsupported status string,
-        # preventing data corruption and immediately highlighting logical errors in the calling code.
         assert status_str in VALID_STATUSES, f"Attempted to write invalid status '{status_str}' to the database!"
 
         provider_config = self._config.providers.get(provider_name)
@@ -272,11 +283,16 @@ class KeyRepository:
                         result.message[:1000], key_id, model_name
                     )
 
+                # --- REFACTORED: Now also sets the 'dead_since' timestamp ---
                 if result.error_reason == ErrorReason.INVALID_KEY:
-                    await conn.execute("UPDATE api_keys SET is_dead = TRUE WHERE id = $1", key_id)
-                    logger.info(f"FLAGGED: Key ID {key_id} marked as dead due to invalid key error.")
+                    await conn.execute(
+                        "UPDATE api_keys SET is_dead = TRUE, dead_since = NOW() AT TIME ZONE 'utc' WHERE id = $1", 
+                        key_id
+                    )
+                    logger.info(f"FLAGGED: Key ID {key_id} marked as dead at {datetime.utcnow()} UTC.")
 
     async def get_available_key(self, provider_name: str, model_name: str) -> Optional[Dict[str, Any]]:
+        # The query remains the same, but it will be faster due to the new composite index.
         query = """
             SELECT
                 k.id AS key_id,
@@ -293,6 +309,7 @@ class KeyRepository:
         return dict(row) if row else None
 
     async def get_status_summary(self) -> List[Dict[str, Any]]:
+        # This method remains unchanged.
         query = """
             SELECT
                 p.name AS provider,
@@ -314,6 +331,7 @@ class ProxyRepository:
         self._pool = pool
     
     async def sync(self, provider_name: str, proxies_from_file: Set[str], provider_id: int):
+         # Placeholder for future implementation
          pass
 
 
@@ -343,39 +361,59 @@ class DatabaseManager:
     async def check_connection(self) -> bool:
         """
         Performs a simple query to verify that the database connection is alive and valid.
-        This acts as a health check during application startup.
-
-        Returns:
-            True if the connection is successful, False otherwise.
         """
         try:
             pool = get_pool()
-            # Acquire a connection from the pool. This checks network, auth, etc.
             async with pool.acquire() as conn:
-                # Execute the simplest and fastest possible query.
                 result = await conn.fetchval('SELECT 1')
-                # If the query returns 1, the connection is healthy.
                 return result == 1
         except Exception as e:
-            # Catch any exception during connection or query execution.
             logger.error(f"Database connection check failed: {e}")
             return False
 
-    async def run_amnesty(self, provider_name: Optional[str] = None):
-        """Grants amnesty to all 'dead' keys, giving them a second chance."""
+    # --- Обоснование ---
+    # Метод `run_amnesty` полностью переписан. Это больше не слепая глобальная операция.
+    # 1.  **Новая сигнатура:** Он теперь принимает `provider_name` и `amnesty_days`, что позволяет
+    #     модулю `maintenance` передавать конкретные правила из конфига.
+    # 2.  **"Умный" SQL-запрос:** Запрос `UPDATE` теперь имеет сложное условие `WHERE`. Он воскрешает
+    #     ключи (`is_dead = FALSE`, `dead_since = NULL`) только если они "мертвы" и время их "смерти"
+    #     (`dead_since`) было достаточно давно (раньше, чем `NOW() - N days`).
+    # Это полностью решает проблему преждевременной амнистии.
+    async def run_amnesty(self, provider_name: str, amnesty_days: int):
+        """
+        Grants amnesty to 'dead' keys for a specific provider if their quarantine period has passed.
+        """
         pool = get_pool()
         async with pool.acquire() as conn:
-            if provider_name:
+            async with conn.transaction():
                 provider_id_row = await conn.fetchrow("SELECT id FROM providers WHERE name = $1", provider_name)
-                if provider_id_row:
-                    provider_id = provider_id_row['id']
-                    status = await conn.execute("UPDATE api_keys SET is_dead = FALSE WHERE is_dead = TRUE AND provider_id = $1", provider_id)
-                    logger.info(f"MAINTENANCE: Amnesty for '{provider_name}'. {status.split()[-1]} keys reset.")
-                else:
+                if not provider_id_row:
                     logger.warning(f"MAINTENANCE: Provider '{provider_name}' not found for amnesty.")
-            else:
-                status = await conn.execute("UPDATE api_keys SET is_dead = FALSE WHERE is_dead = TRUE")
-                logger.info(f"MAINTENANCE: Global amnesty for all 'dead' keys. {status.split()[-1]} keys reset.")
+                    return
+                
+                provider_id = provider_id_row['id']
+                
+                # This query "revives" keys by setting is_dead to FALSE and clearing the dead_since timestamp.
+                # It only does so for keys that are currently dead AND whose dead_since timestamp
+                # is older than the configured amnesty period.
+                query = """
+                    UPDATE api_keys
+                    SET is_dead = FALSE, dead_since = NULL
+                    WHERE provider_id = $1
+                      AND is_dead = TRUE
+                      AND dead_since <= (NOW() AT TIME ZONE 'utc' - ($2 * INTERVAL '1 day'))
+                """
+                
+                status = await conn.execute(query, provider_id, amnesty_days)
+                
+                num_revived = int(status.split()[-1])
+                if num_revived > 0:
+                    logger.info(
+                        f"MAINTENANCE: Amnesty for '{provider_name}' (>{amnesty_days} days). "
+                        f"{num_revived} keys have been revived."
+                    )
+                else:
+                    logger.debug(f"MAINTENANCE: No keys were due for amnesty for provider '{provider_name}'.")
 
     async def run_vacuum(self):
         """Executes the VACUUM command to optimize the database."""
