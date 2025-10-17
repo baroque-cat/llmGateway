@@ -21,7 +21,6 @@ _db_pool: Optional[Pool] = None
 VALID_STATUSES = {reason.value for reason in ErrorReason} | {'valid', 'untested'}
 
 
-# --- REFACTORED: The database schema is updated with the new field and optimized indexes ---
 DB_SCHEMA = """
 -- Table 1: Provider directory
 CREATE TABLE IF NOT EXISTS providers (
@@ -54,7 +53,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
     provider_id INTEGER NOT NULL,
     key_value TEXT NOT NULL,
     is_dead BOOLEAN NOT NULL DEFAULT FALSE,
-    dead_since TIMESTAMPTZ NULL, -- ADDED: Timestamp for when the key was marked as dead.
+    dead_since TIMESTAMPTZ NULL, -- Timestamp for when the key was marked as dead.
     UNIQUE (provider_id, key_value),
     FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE CASCADE
 );
@@ -79,14 +78,14 @@ CREATE INDEX IF NOT EXISTS idx_key_model_status_status ON key_model_status(statu
 CREATE INDEX IF NOT EXISTS idx_proxy_status_next_check_time ON provider_proxy_status(next_check_time);
 CREATE INDEX IF NOT EXISTS idx_proxy_status_status ON provider_proxy_status(status);
 
--- OPTIMIZED: Partial index for the background worker's health check query.
--- It's much more efficient because it only indexes rows that are candidates for checking.
-CREATE INDEX IF NOT EXISTS idx_key_status_check_logic
-ON key_model_status(next_check_time)
-WHERE (SELECT is_dead FROM api_keys WHERE id = key_model_status.key_id) = FALSE;
+-- REFACTORED: The problematic partial index with a subquery has been removed.
+-- It is replaced by a simple index on next_check_time. This allows the schema
+-- to initialize correctly. The filtering of dead keys will now be handled by the
+-- SELECT query's JOIN and WHERE clause, which is less performant but works.
+CREATE INDEX IF NOT EXISTS idx_key_status_next_check_time ON key_model_status(next_check_time);
 
 -- OPTIMIZED: Composite index for the gateway's lookup query.
--- Allows the database to quickly find valid keys for a specific model.
+-- This index is correct and remains unchanged.
 CREATE INDEX IF NOT EXISTS idx_key_status_gateway_lookup ON key_model_status(status, model_name);
 
 """
@@ -166,7 +165,7 @@ class KeyRepository:
         self._config = config
 
     async def sync(self, provider_name: str, keys_from_file: Set[str], provider_id: int, provider_models: List[str]):
-        # This method remains unchanged as its logic is correct.
+        # This method's logic is correct and requires no changes.
         async with self._pool.acquire() as conn:
             async with conn.transaction():
                 # 1. Get keys for this provider from DB
@@ -210,8 +209,9 @@ class KeyRepository:
                     logger.info(f"SYNC: Added {len(models_to_add)} new model status records for provider '{provider_name}'.")
 
     async def get_keys_to_check(self) -> List[Dict[str, Any]]:
-        # The query logic remains the same, but it will now be faster
-        # thanks to the new partial index.
+        # The query logic is correct and remains unchanged.
+        # The WHERE k.is_dead = FALSE clause is now responsible for filtering,
+        # albeit less efficiently than a partial index.
         query = """
         SELECT
             k.id AS key_id,
@@ -246,11 +246,6 @@ class KeyRepository:
         return results
 
     async def update_status(self, key_id: int, model_name: str, provider_name: str, result: CheckResult, next_check_time: datetime):
-        # --- Обоснование ---
-        # Метод `update_status` теперь является ключевой точкой для записи "времени смерти".
-        # Когда `KeyProbe` сообщает, что ключ невалиден (`INVALID_KEY`), мы не просто ставим флаг `is_dead`,
-        # но и записываем текущее время в новое поле `dead_since`. Это та самая информация,
-        # которая понадобится для "умной" амнистии.
         status_str = 'valid' if result.ok else result.error_reason.value
         
         assert status_str in VALID_STATUSES, f"Attempted to write invalid status '{status_str}' to the database!"
@@ -283,7 +278,7 @@ class KeyRepository:
                         result.message[:1000], key_id, model_name
                     )
 
-                # --- REFACTORED: Now also sets the 'dead_since' timestamp ---
+                # This logic is correct and remains unchanged.
                 if result.error_reason == ErrorReason.INVALID_KEY:
                     await conn.execute(
                         "UPDATE api_keys SET is_dead = TRUE, dead_since = NOW() AT TIME ZONE 'utc' WHERE id = $1", 
@@ -292,7 +287,7 @@ class KeyRepository:
                     logger.info(f"FLAGGED: Key ID {key_id} marked as dead at {datetime.utcnow()} UTC.")
 
     async def get_available_key(self, provider_name: str, model_name: str) -> Optional[Dict[str, Any]]:
-        # The query remains the same, but it will be faster due to the new composite index.
+        # This query is correct and remains unchanged.
         query = """
             SELECT
                 k.id AS key_id,
@@ -309,7 +304,7 @@ class KeyRepository:
         return dict(row) if row else None
 
     async def get_status_summary(self) -> List[Dict[str, Any]]:
-        # This method remains unchanged.
+        # This method is correct and remains unchanged.
         query = """
             SELECT
                 p.name AS provider,
@@ -371,14 +366,6 @@ class DatabaseManager:
             logger.error(f"Database connection check failed: {e}")
             return False
 
-    # --- Обоснование ---
-    # Метод `run_amnesty` полностью переписан. Это больше не слепая глобальная операция.
-    # 1.  **Новая сигнатура:** Он теперь принимает `provider_name` и `amnesty_days`, что позволяет
-    #     модулю `maintenance` передавать конкретные правила из конфига.
-    # 2.  **"Умный" SQL-запрос:** Запрос `UPDATE` теперь имеет сложное условие `WHERE`. Он воскрешает
-    #     ключи (`is_dead = FALSE`, `dead_since = NULL`) только если они "мертвы" и время их "смерти"
-    #     (`dead_since`) было достаточно давно (раньше, чем `NOW() - N days`).
-    # Это полностью решает проблему преждевременной амнистии.
     async def run_amnesty(self, provider_name: str, amnesty_days: int):
         """
         Grants amnesty to 'dead' keys for a specific provider if their quarantine period has passed.
@@ -393,9 +380,7 @@ class DatabaseManager:
                 
                 provider_id = provider_id_row['id']
                 
-                # This query "revives" keys by setting is_dead to FALSE and clearing the dead_since timestamp.
-                # It only does so for keys that are currently dead AND whose dead_since timestamp
-                # is older than the configured amnesty period.
+                # This query is correct and remains unchanged.
                 query = """
                     UPDATE api_keys
                     SET is_dead = FALSE, dead_since = NULL
