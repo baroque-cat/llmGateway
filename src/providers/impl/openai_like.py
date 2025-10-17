@@ -13,7 +13,8 @@ logger = logging.getLogger(__name__)
 
 class OpenAILikeProvider(AIBaseProvider):
     """
-    Provider for OpenAI-compatible APIs (e.g., OpenAI, DeepSeek) (Async Version).
+    Provider for OpenAI-compatible APIs (e.g., OpenAI, DeepSeek). (Async Version).
+    This class serves as a versatile base for providers that follow the OpenAI API format.
     """
 
     def _get_headers(self, token: str) -> Optional[Dict[str, str]]:
@@ -26,13 +27,36 @@ class OpenAILikeProvider(AIBaseProvider):
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
         }
-    
-    # --- REFACTORED: Method signature changed to remove the 'proxy' parameter ---
+
+    def _map_status_code_to_reason(self, status_code: int) -> ErrorReason:
+        """
+        Maps an HTTP status code to a standardized ErrorReason enum.
+        Subclasses can override this method to handle provider-specific error codes.
+
+        Args:
+            status_code: The HTTP status code from the response.
+
+        Returns:
+            The corresponding ErrorReason.
+        """
+        if status_code in [401, 403]:
+            return ErrorReason.INVALID_KEY
+        if status_code == 402:
+            return ErrorReason.NO_QUOTA
+        if status_code == 429:
+            return ErrorReason.RATE_LIMITED
+        if status_code == 503:
+            # This must be checked before the generic >= 500 case.
+            return ErrorReason.OVERLOADED
+        if status_code >= 500:
+            return ErrorReason.SERVER_ERROR
+        
+        return ErrorReason.UNKNOWN
+
     async def check(self, client: httpx.AsyncClient, token: str, model: str) -> CheckResult:
         """
         Checks the validity of an API token by making an async, lightweight test request.
         """
-        # --- REFACTORED: Proxy-related logging is removed ---
         logger.debug(f"Checking OpenAI-like key ending '...{token[-4:]}' for model '{model}'.")
 
         headers = self._get_headers(token)
@@ -59,7 +83,6 @@ class OpenAILikeProvider(AIBaseProvider):
         )
         
         try:
-            # --- REFACTORED: The 'proxies' argument is removed from the call ---
             response = await client.post(
                 api_url,
                 headers=headers,
@@ -77,20 +100,15 @@ class OpenAILikeProvider(AIBaseProvider):
         except httpx.ConnectError as e:
             return CheckResult.fail(ErrorReason.NETWORK_ERROR, f"Connection error: {e}", status_code=503)
         except httpx.HTTPStatusError as e:
-            # --- UNCHANGED: Error handling logic is preserved as requested ---
+            # Refactored: Use the centralized mapping method for consistent error handling.
             response = e.response
-            status_code = response.status_code
-            response_text = response.text
-            response_time = response.elapsed.total_seconds()
-
-            if status_code in [401, 403]:
-                return CheckResult.fail(ErrorReason.INVALID_KEY, response_text, response_time, status_code)
-            elif status_code == 429:
-                return CheckResult.fail(ErrorReason.RATE_LIMITED, response_text, response_time, status_code)
-            elif status_code >= 500:
-                return CheckResult.fail(ErrorReason.SERVER_ERROR, response_text, response_time, status_code)
-            else:
-                return CheckResult.fail(ErrorReason.UNKNOWN, response_text, response_time, status_code)
+            reason = self._map_status_code_to_reason(response.status_code)
+            return CheckResult.fail(
+                reason=reason,
+                message=response.text,
+                response_time=response.elapsed.total_seconds(),
+                status_code=response.status_code
+            )
         except httpx.RequestError as e:
             return CheckResult.fail(ErrorReason.NETWORK_ERROR, str(e), status_code=503)
 
@@ -106,7 +124,6 @@ class OpenAILikeProvider(AIBaseProvider):
     ) -> Tuple[httpx.Response, CheckResult]:
         """
         Proxies the incoming request to an OpenAI-like API with streaming support.
-        (No changes needed in this method)
         """
         base_url = self.config.api_base_url.rstrip('/')
         upstream_url = f"{base_url}/{path.lstrip('/')}"
@@ -137,16 +154,9 @@ class OpenAILikeProvider(AIBaseProvider):
             if upstream_response.is_success:
                 check_result = CheckResult.success(response_time=response_time, status_code=status_code)
             else:
+                # Refactored: Use the centralized mapping method here as well for consistency.
                 response_text = await upstream_response.aread()
-                if status_code in [401, 403]:
-                    reason = ErrorReason.INVALID_KEY
-                elif status_code == 429:
-                    reason = ErrorReason.RATE_LIMITED
-                elif status_code >= 500:
-                    reason = ErrorReason.SERVER_ERROR
-                else:
-                    reason = ErrorReason.UNKNOWN
-
+                reason = self._map_status_code_to_reason(status_code)
                 check_result = CheckResult.fail(reason, response_text.decode(), response_time, status_code)
 
         except httpx.RequestError as e:
