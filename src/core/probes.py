@@ -1,16 +1,13 @@
-# src/core/probes.py
-
 import asyncio
 import logging
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any
 from collections import defaultdict
 
-import httpx
-
 from src.config.schemas import Config
 from src.core.models import CheckResult
 from src.db.database import DatabaseManager
+from src.core.http_client_factory import HttpClientFactory
 
 logger = logging.getLogger(__name__)
 
@@ -28,18 +25,18 @@ class IResourceProbe(ABC):
     on asyncio for concurrent processing of providers.
     """
 
-    def __init__(self, config: Config, db_manager: DatabaseManager, http_client: httpx.AsyncClient):
+    def __init__(self, config: Config, db_manager: DatabaseManager, client_factory: HttpClientFactory):
         """
-        Initializes the probe with application configuration, DatabaseManager, and HTTP client.
+        Initializes the probe with dependencies.
 
         Args:
             config: The main application configuration object.
             db_manager: An instance of the DatabaseManager for async DB access.
-            http_client: A long-lived instance of httpx.AsyncClient.
+            client_factory: A factory for creating and managing httpx.AsyncClient instances.
         """
         self.config = config
         self.db_manager = db_manager
-        self.http_client = http_client
+        self.client_factory = client_factory  # REFACTORED: Use the factory instead of a single client.
         # A semaphore to limit the number of concurrently running provider batches.
         self.semaphore = asyncio.Semaphore(MAX_CONCURRENT_PROVIDERS)
 
