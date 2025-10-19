@@ -12,7 +12,8 @@ dependencies = [
     "apscheduler (>=3.11.0,<4.0.0)",
     "pyyaml (>=6.0.3,<7.0.0)",
     "httpx[http2] (>=0.28.1,<0.29.0)",
-    "python-dotenv (>=1.1.1,<2.0.0)"
+    "python-dotenv (>=1.1.1,<2.0.0)",
+    "pytest (>=8.4.2,<9.0.0)"
 ]
 
 

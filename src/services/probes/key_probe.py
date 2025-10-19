@@ -93,7 +93,7 @@ class KeyProbe(IResourceProbe):
         
         logger.info(
             f"Updating status for key ID {key_id}, model '{model_name}': "
-            f"Status -> {status_str}, "
+            f"Status -> [{status_str}], "
             f"Next check -> {next_check_time.strftime('%Y-%m-%d %H:%M:%S')}"
         )
 
