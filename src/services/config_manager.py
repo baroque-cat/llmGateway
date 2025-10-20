@@ -22,6 +22,7 @@ class ConfigManager:
         config_path: str = "config/providers.yaml",
         env_path: str = ".env",
         keys_base_path: str = "keys",
+        proxies_base_path: str = "proxies", # ADDED: For proxy pool directories
     ):
         """
         Initializes the ConfigManager.
@@ -30,10 +31,12 @@ class ConfigManager:
             config_path: Path to the main YAML configuration file.
             env_path: Path to the environment variables file.
             keys_base_path: Base path for storing API key files.
+            proxies_base_path: Base path for storing proxy list files.
         """
         self.config_path = config_path
         self.env_path = env_path
         self.keys_base_path = keys_base_path
+        self.proxies_base_path = proxies_base_path # ADDED
         
         # Initialize ruamel.yaml to preserve comments and formatting
         self.yaml = YAML()
@@ -122,7 +125,10 @@ class ConfigManager:
 
         # 3. Apply instance-specific customizations
         new_instance['provider_type'] = provider_type
-        new_instance['keys_path'] = os.path.join(self.keys_base_path, instance_name, '') # Ensure trailing slash
+        new_instance['keys_path'] = os.path.join(self.keys_base_path, instance_name, '')
+        
+        # FIXED: Customize the proxy_config.pool_list_path as well
+        new_instance['proxy_config']['pool_list_path'] = os.path.join(self.proxies_base_path, instance_name, '')
 
         token_var_name = f"{instance_name.upper().replace('-', '_')}_TOKEN"
         new_instance['access_control']['gateway_access_token'] = f"${{{token_var_name}}}"
@@ -131,16 +137,20 @@ class ConfigManager:
 
     def _create_related_directories(self, instance_name: str):
         """
-        Creates the 'keys' directory for the new instance.
+        Creates the 'keys' and 'proxies' directories for the new instance.
         """
-        try:
-            keys_dir = os.path.join(self.keys_base_path, instance_name)
-            os.makedirs(keys_dir, exist_ok=True)
-            print(f"Created directory: '{keys_dir}'")
-        except PermissionError:
-            print(f"Warning: Permission denied to create directory '{keys_dir}'. Please create it manually.", file=sys.stderr)
-        except Exception as e:
-            print(f"Warning: Could not create directory '{keys_dir}': {e}", file=sys.stderr)
+        dirs_to_create = [
+            os.path.join(self.keys_base_path, instance_name),
+            os.path.join(self.proxies_base_path, instance_name)
+        ]
+        for dir_path in dirs_to_create:
+            try:
+                os.makedirs(dir_path, exist_ok=True)
+                print(f"Ensured directory exists: '{dir_path}'")
+            except PermissionError:
+                print(f"Warning: Permission denied to create directory '{dir_path}'. Please create it manually.", file=sys.stderr)
+            except Exception as e:
+                print(f"Warning: Could not create directory '{dir_path}': {e}", file=sys.stderr)
 
     def _update_env_file(self, vars_to_add: List[str]):
         """
@@ -153,7 +163,6 @@ class ConfigManager:
         if os.path.exists(self.env_path):
             with open(self.env_path, 'r', encoding='utf-8') as f:
                 for line in f:
-                    # Capture variable names, ignoring comments and empty lines
                     match = re.match(r'^\s*([a-zA-Z0-9_]+)=', line)
                     if match:
                         existing_vars.add(match.group(1))
@@ -167,7 +176,9 @@ class ConfigManager:
         if vars_to_actually_add:
             try:
                 with open(self.env_path, 'a', encoding='utf-8') as f:
-                    f.write("\n# Added by llmGateway config manager\n")
+                    if os.path.getsize(self.env_path) > 0:
+                        f.write("\n")
+                    f.write("# Added by llmGateway config manager\n")
                     for var_line in vars_to_actually_add:
                         f.write(f"{var_line}\n")
                 print(f"Updated '{self.env_path}' with {len(vars_to_actually_add)} new variable placeholder(s). Please set their values.")
@@ -200,7 +211,6 @@ class ConfigManager:
                     self._create_related_directories(name)
                     
                     token_var = new_instance_config['access_control']['gateway_access_token']
-                    # Extract the variable name from "${VAR_NAME}"
                     var_name = token_var[2:-1]
                     env_vars_to_add.append(f'{var_name}=""')
                     
@@ -239,15 +249,17 @@ class ConfigManager:
         """
         config = self._load_config()
         
-        # Validate that all specified instances exist before proceeding
-        not_found = [name for name in names_to_remove if name not in config['providers']]
+        # Strip any whitespace from names, just in case
+        clean_names_to_remove = [name.strip() for name in names_to_remove]
+        
+        not_found = [name for name in clean_names_to_remove if name not in config['providers']]
         if not_found:
             print(f"Error: The following instance(s) were not found in the configuration: {', '.join(not_found)}", file=sys.stderr)
             sys.exit(1)
         
-        if self._confirm_removal(names_to_remove):
+        if self._confirm_removal(clean_names_to_remove):
             instances_removed_count = 0
-            for name in names_to_remove:
+            for name in clean_names_to_remove:
                 if name in config['providers']:
                     del config['providers'][name]
                     instances_removed_count += 1
@@ -256,4 +268,3 @@ class ConfigManager:
             print(f"\nSuccessfully removed {instances_removed_count} instance(s) from '{self.config_path}'.")
         else:
             print("Removal operation cancelled by user.")
-

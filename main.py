@@ -43,11 +43,12 @@ async def main():
               # Create multiple 'gemini' instances and one 'deepseek' instance
               python main.py config create gemini:gemini-personal,gemini-dev deepseek:deepseek-work
               
-              # Remove a single instance
-              python main.py config remove --provider_name=gemini-work
+              # Remove a single instance using the new unified syntax
+              # Note: The type ('gemini') is technically not needed for removal but is included for consistency.
+              python main.py config remove gemini:gemini-work
               
               # Remove multiple instances
-              python main.py config remove --provider_name=gemini-personal,deepseek-work
+              python main.py config remove gemini:gemini-personal,gemini-dev deepseek:deepseek-work
         ''')
     )
     config_subparsers = parser_config.add_subparsers(dest='action', required=True, help='Action to perform on the config')
@@ -60,12 +61,12 @@ async def main():
         help="Providers to create, in 'type:name1,name2' format."
     )
 
-    # --- Sub-command 'config remove' ---
+    # --- Sub-command 'config remove' (FIXED: Unified syntax) ---
     parser_remove = config_subparsers.add_parser('remove', help='Remove provider instances from the config.')
     parser_remove.add_argument(
-        '--provider_name', 
-        required=True, 
-        help="Comma-separated list of instance names to remove (e.g., 'gemini-work,deepseek-personal')."
+        'providers', 
+        nargs='+',
+        help="Providers to remove, in 'type:name1,name2' format for consistency."
     )
 
     args = parser.parse_args()
@@ -75,24 +76,29 @@ async def main():
             print("Starting the background worker service...")
             await run_worker()
         except FileNotFoundError as e:
-            # This is a specific catch for when the loader fails to find the config.
             print(f"\n[ERROR] {e}", file=sys.stderr)
             print("Please create a configuration file before running the worker.", file=sys.stderr)
             sys.exit(1)
         except Exception as e:
-            # Catch other potential startup errors
             print(f"\n[CRITICAL] A critical error prevented the worker from starting: {e}", file=sys.stderr)
             sys.exit(1)
             
     elif args.service == 'config':
-        # The config manager performs synchronous file I/O, so it's not awaited.
         manager = ConfigManager()
         if args.action == 'create':
             manager.create_instances(args.providers)
         elif args.action == 'remove':
-            # Split the comma-separated string into a list of names
-            names_to_remove = [name.strip() for name in args.provider_name.split(',')]
-            manager.remove_instances(names_to_remove)
+            # FIXED: New logic to parse the unified syntax for removal
+            all_names_to_remove = []
+            try:
+                for arg in args.providers:
+                    # We parse the argument to extract names, but ignore the type
+                    _provider_type, instance_names = manager._parse_provider_arg(arg)
+                    all_names_to_remove.extend(instance_names)
+                manager.remove_instances(all_names_to_remove)
+            except ValueError as e:
+                print(f"Error: {e}", file=sys.stderr)
+                sys.exit(1)
             
     else:
         print(f"Error: Unknown service '{args.service}'")
@@ -101,8 +107,6 @@ async def main():
 
 if __name__ == '__main__':
     try:
-        # asyncio.run() is suitable for CLI apps that may or may not run async code.
         asyncio.run(main())
     except KeyboardInterrupt:
         print("\nApplication shut down by user.")
-
