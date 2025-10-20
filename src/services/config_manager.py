@@ -15,14 +15,14 @@ from src.config.provider_templates import PROVIDER_TYPE_DEFAULTS
 class ConfigManager:
     """
     A service class to manage the providers.yaml configuration file programmatically.
-    It handles creation, deletion, and validation of provider instances.
+    It handles creation, deletion, listing, and validation of provider instances.
     """
     def __init__(
         self,
         config_path: str = "config/providers.yaml",
         env_path: str = ".env",
         keys_base_path: str = "keys",
-        proxies_base_path: str = "proxies", # ADDED: For proxy pool directories
+        proxies_base_path: str = "proxies",
     ):
         """
         Initializes the ConfigManager.
@@ -36,7 +36,7 @@ class ConfigManager:
         self.config_path = config_path
         self.env_path = env_path
         self.keys_base_path = keys_base_path
-        self.proxies_base_path = proxies_base_path # ADDED
+        self.proxies_base_path = proxies_base_path
         
         # Initialize ruamel.yaml to preserve comments and formatting
         self.yaml = YAML()
@@ -110,11 +110,9 @@ class ConfigManager:
         """
         Constructs the configuration dictionary for a new provider instance.
         """
-        # 1. Start with a deep copy of the generic base template
         base_template = get_default_config()['providers']['llm_provider_default']
         new_instance = copy.deepcopy(base_template)
 
-        # 2. Get and apply the provider-type-specific attributes
         if provider_type not in PROVIDER_TYPE_DEFAULTS:
             supported_types = ", ".join(PROVIDER_TYPE_DEFAULTS.keys())
             print(f"Error: Unsupported provider type '{provider_type}'. Supported types are: {supported_types}", file=sys.stderr)
@@ -123,11 +121,8 @@ class ConfigManager:
         type_specifics = PROVIDER_TYPE_DEFAULTS[provider_type]
         new_instance.update(type_specifics)
 
-        # 3. Apply instance-specific customizations
         new_instance['provider_type'] = provider_type
         new_instance['keys_path'] = os.path.join(self.keys_base_path, instance_name, '')
-        
-        # FIXED: Customize the proxy_config.pool_list_path as well
         new_instance['proxy_config']['pool_list_path'] = os.path.join(self.proxies_base_path, instance_name, '')
 
         token_var_name = f"{instance_name.upper().replace('-', '_')}_TOKEN"
@@ -200,12 +195,14 @@ class ConfigManager:
                 provider_type, instance_names = self._parse_provider_arg(arg)
                 for name in instance_names:
                     self._validate_instance_name(name)
-                    if name in config['providers']:
+                    if 'providers' in config and name in config['providers']:
                         print(f"Warning: Provider instance '{name}' already exists. Skipping.")
                         continue
                     
                     print(f"Creating instance '{name}' of type '{provider_type}'...")
                     new_instance_config = self._build_new_instance(provider_type, name)
+                    if 'providers' not in config:
+                        config['providers'] = {}
                     config['providers'][name] = new_instance_config
                     
                     self._create_related_directories(name)
@@ -249,9 +246,12 @@ class ConfigManager:
         """
         config = self._load_config()
         
-        # Strip any whitespace from names, just in case
         clean_names_to_remove = [name.strip() for name in names_to_remove]
         
+        if 'providers' not in config:
+            print(f"Error: The configuration file has no 'providers' section.", file=sys.stderr)
+            sys.exit(1)
+
         not_found = [name for name in clean_names_to_remove if name not in config['providers']]
         if not_found:
             print(f"Error: The following instance(s) were not found in the configuration: {', '.join(not_found)}", file=sys.stderr)
@@ -268,3 +268,29 @@ class ConfigManager:
             print(f"\nSuccessfully removed {instances_removed_count} instance(s) from '{self.config_path}'.")
         else:
             print("Removal operation cancelled by user.")
+
+    def list_instances(self):
+        """
+        Public method to list all configured provider instances.
+        """
+        if not os.path.exists(self.config_path):
+            print(f"Configuration file '{self.config_path}' not found. Nothing to list.")
+            print(f"You can create a new configuration using: python main.py config create <type>:<name>")
+            return
+
+        config = self._load_config()
+        providers = config.get('providers')
+
+        if not providers:
+            print(f"No provider instances found in '{self.config_path}'.")
+            return
+        
+        print(f"Found {len(providers)} provider instance(s) in '{self.config_path}':")
+        # Find the longest name for formatting
+        max_len = max(len(name) for name in providers.keys()) if providers else 0
+        
+        for name, details in sorted(providers.items()):
+            ptype = details.get('provider_type', 'N/A')
+            enabled = "enabled" if details.get('enabled', False) else "disabled"
+            print(f"  - {name:<{max_len}} (type: {ptype}, status: {enabled})")
+

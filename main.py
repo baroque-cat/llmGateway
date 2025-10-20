@@ -37,18 +37,17 @@ async def main():
         help='Manage the providers.yaml configuration file.',
         epilog=textwrap.dedent('''
             Examples:
+              # List all configured instances
+              python main.py config list
+
               # Create a single 'gemini' instance named 'gemini-work'
               python main.py config create gemini:gemini-work
 
-              # Create multiple 'gemini' instances and one 'deepseek' instance
+              # Create multiple instances at once
               python main.py config create gemini:gemini-personal,gemini-dev deepseek:deepseek-work
               
-              # Remove a single instance using the new unified syntax
-              # Note: The type ('gemini') is technically not needed for removal but is included for consistency.
-              python main.py config remove gemini:gemini-work
-              
-              # Remove multiple instances
-              python main.py config remove gemini:gemini-personal,gemini-dev deepseek:deepseek-work
+              # Remove one or more instances
+              python main.py config remove gemini:gemini-work deepseek:deepseek-work
         ''')
     )
     config_subparsers = parser_config.add_subparsers(dest='action', required=True, help='Action to perform on the config')
@@ -61,13 +60,17 @@ async def main():
         help="Providers to create, in 'type:name1,name2' format."
     )
 
-    # --- Sub-command 'config remove' (FIXED: Unified syntax) ---
+    # --- Sub-command 'config remove' ---
     parser_remove = config_subparsers.add_parser('remove', help='Remove provider instances from the config.')
     parser_remove.add_argument(
         'providers', 
         nargs='+',
         help="Providers to remove, in 'type:name1,name2' format for consistency."
     )
+    
+    # --- Sub-command 'config list' (NEW) ---
+    config_subparsers.add_parser('list', help='List all configured provider instances.')
+
 
     args = parser.parse_args()
 
@@ -88,17 +91,17 @@ async def main():
         if args.action == 'create':
             manager.create_instances(args.providers)
         elif args.action == 'remove':
-            # FIXED: New logic to parse the unified syntax for removal
             all_names_to_remove = []
             try:
                 for arg in args.providers:
-                    # We parse the argument to extract names, but ignore the type
                     _provider_type, instance_names = manager._parse_provider_arg(arg)
                     all_names_to_remove.extend(instance_names)
                 manager.remove_instances(all_names_to_remove)
             except ValueError as e:
                 print(f"Error: {e}", file=sys.stderr)
                 sys.exit(1)
+        elif args.action == 'list':
+            manager.list_instances()
             
     else:
         print(f"Error: Unknown service '{args.service}'")
@@ -110,3 +113,4 @@ if __name__ == '__main__':
         asyncio.run(main())
     except KeyboardInterrupt:
         print("\nApplication shut down by user.")
+
