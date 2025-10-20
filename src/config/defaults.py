@@ -10,10 +10,16 @@ def get_default_config() -> Dict[str, Any]:
     return {
         # --- GLOBAL SETTINGS ---
         "debug": False,
+
+        # --- WORKER SETTINGS ---
+        "worker": {
+            # Concurrency limit for the background worker's probes.
+            "max_concurrent_providers": 10,
+        },
         
         "database": {
             "host": "localhost",
-            "port": 5432,
+            "port": 5433,
             "user": "llm_gateway",
             # This value is expected to be loaded from an environment variable.
             # Create a .env file in the project root with the line:
@@ -30,30 +36,35 @@ def get_default_config() -> Dict[str, Any]:
         },
         
         # --- PROVIDER-SPECIFIC SETTINGS ---
+        # This section serves as a generic template for any new provider instance.
         "providers": {
-            "gemini_default": {
-                "provider_type": "gemini",
+            "llm_provider_default": {
+                # This will be overridden by the template (e.g., 'gemini', 'openai_like').
+                "provider_type": "placeholder_type", 
                 "enabled": True,
-                "keys_path": "keys/gemini/",
-                "api_base_url": "https://generativelanguage.googleapis.com",
-                "default_model": "gemini-2.5-flash",
+                # This path is customized by the config manager.
+                "keys_path": "keys/llm_provider_default/",
                 
-                "shared_key_status": False,
-                
+                # These fields are provider-specific and will be populated from provider_templates.py.
+                "api_base_url": "https://api.example.com/v1",
+                "default_model": "some-model-v1",
                 "models": {
                     "llm": [
-                        "gemini-2.5-flash",
-                        "gemini-2.5-pro",
+                        "some-model-v1",
+                        "some-model-v2-turbo",
                     ],
                 },
+                
+                "shared_key_status": False,
+
                 "access_control": {
                     # This is the authentication token your client application will use
                     # to access the gateway for this specific provider.
-                    # It's recommended to load it from a .env file:
-                    # GEMINI_DEFAULT_TOKEN="gp-..."
-                    "gateway_access_token": "${GEMINI_DEFAULT_TOKEN}",
+                    # It is customized by the config manager (e.g., ${GEMINI_WORK_TOKEN}).
+                    "gateway_access_token": "${LLM_PROVIDER_DEFAULT_TOKEN}",
                 },
 
+                # Policy for the background worker's health checks.
                 "health_policy": {
                     "on_success_hr": 2,
                     "on_overload_min": 60,
@@ -69,15 +80,43 @@ def get_default_config() -> Dict[str, Any]:
                 "proxy_config": {
                     "mode": "none",
                     "static_url": None,
-                    "pool_list_path": "proxies/gemini/",
+                    # This path is customized by the config manager.
+                    "pool_list_path": "proxies/llm_provider_default/",
                 },
-
-                # --- NEW SECTION ---
+                
                 "timeouts": {
                     "connect": 5.0,
                     "read": 20.0,
                     "write": 10.0,
                     "pool": 5.0,
+                },
+
+                # Policies applied only by the API Gateway during request processing.
+                "gateway_policy": {
+                    # Retry policies for failed requests.
+                    "retry": {
+                        "enabled": False,
+                        "on_key_error": {
+                            "attempts": 3,
+                        },
+                        "on_server_error": {
+                            "attempts": 5,
+                            "backoff_sec": 0.5,
+                            "backoff_factor": 2.0,
+                        },
+                    },
+                    # Circuit breaker to protect against cascading failures.
+                    "circuit_breaker": {
+                        "enabled": False,
+                        "mode": "auto_recovery", # manual_reset
+                        "failure_threshold": 20,
+                        "jitter_sec": 5,
+                        "backoff": {
+                            "base_duration_sec": 60,
+                            "max_duration_sec": 3600,
+                            "factor": 2.0,
+                        },
+                    },
                 },
             },
         },
