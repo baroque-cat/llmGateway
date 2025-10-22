@@ -14,7 +14,8 @@ from typing import List, Tuple, Dict
 import httpx
 
 from src.config.schemas import Config
-from src.core.models import CheckResult
+# --- NEW: Import the newly created data model ---
+from src.core.models import CheckResult, RequestDetails
 from src.db.database import DatabaseManager
 
 
@@ -27,6 +28,27 @@ class IProvider(ABC):
     independent of any web framework and relies on Dependency Injection for
     receiving shared resources like the HTTP client.
     """
+
+    # --- NEW: Abstract method for request parsing ---
+    @abstractmethod
+    async def parse_request_details(self, path: str, content: bytes) -> RequestDetails:
+        """
+        Parses the raw incoming request to extract provider-specific details.
+
+        This is a key method for the gateway's operation. It delegates the
+        complex task of understanding different API request formats (e.g.,
+        model in URL path vs. model in JSON body) to the specific provider
+        implementation.
+
+        Args:
+            path: The URL path of the original request (e.g., '/v1/chat/completions').
+            content: The raw byte content (body) of the original request.
+
+        Returns:
+            A RequestDetails object containing standardized information, like
+            the requested model name, that the gateway can understand and act upon.
+        """
+        pass
 
     @abstractmethod
     async def check(self, client: httpx.AsyncClient, token: str, **kwargs) -> CheckResult:

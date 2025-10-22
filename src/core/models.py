@@ -14,6 +14,18 @@ from src.core.enums import ErrorReason
 
 
 @dataclass
+class RequestDetails:
+    """
+    A data transfer object (DTO) that holds essential details parsed from an incoming request.
+    
+    This standardized structure is returned by a provider's `parse_request_details`
+    method, allowing the gateway to perform actions like model authorization
+    without needing to understand the provider-specific request format.
+    """
+    model_name: str
+
+
+@dataclass
 class CheckResult:
     """
     Represents the outcome of an API key validation check.
@@ -75,4 +87,3 @@ class CheckResult:
             "response_time": self.response_time,
             "status_code": self.status_code,
         }
-
