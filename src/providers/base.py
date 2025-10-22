@@ -6,7 +6,8 @@ from typing import List, Optional, Dict, Tuple
 import httpx
 
 from src.core.types import IProvider
-from src.core.models import CheckResult
+# --- NEW: Import the required data models ---
+from src.core.models import CheckResult, RequestDetails
 from src.config.schemas import ProviderConfig
 
 
@@ -61,6 +62,15 @@ class AIBaseProvider(IProvider):
         
         return cleaned_headers
 
+    # --- NEW: Abstract method from IProvider is now declared here ---
+    @abstractmethod
+    async def parse_request_details(self, path: str, content: bytes) -> RequestDetails:
+        """
+        (Abstract) Parses the raw incoming request to extract provider-specific details.
+        Must be implemented by subclasses.
+        """
+        raise NotImplementedError
+
     @abstractmethod
     def _get_headers(self, token: str) -> Optional[Dict[str, str]]:
         """
@@ -101,4 +111,3 @@ class AIBaseProvider(IProvider):
         (Abstract) Proxies an incoming client request to the target API provider. (Async)
         """
         raise NotImplementedError
-

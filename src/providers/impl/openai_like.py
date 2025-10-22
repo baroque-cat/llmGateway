@@ -1,12 +1,14 @@
 # src/providers/impl/openai_like.py
 
+import json
 import logging
 from typing import Dict, List, Optional, Tuple
 
 import httpx
 
 from src.core.enums import ErrorReason
-from src.core.models import CheckResult
+# --- NEW: Import the required data model ---
+from src.core.models import CheckResult, RequestDetails
 from src.providers.base import AIBaseProvider
 
 logger = logging.getLogger(__name__)
@@ -16,6 +18,51 @@ class OpenAILikeProvider(AIBaseProvider):
     Provider for OpenAI-compatible APIs (e.g., OpenAI, DeepSeek). (Async Version).
     This class serves as a versatile base for providers that follow the OpenAI API format.
     """
+
+    # --- NEW: Implementation of the abstract method from the base class ---
+    async def parse_request_details(self, path: str, content: bytes) -> RequestDetails:
+        """
+        Parses a JSON request body to extract the model name for OpenAI-like APIs.
+        This implementation ignores the URL path.
+
+        Args:
+            path: The URL path of the request (ignored).
+            content: The raw byte content (body) of the request, expected to be JSON.
+
+        Returns:
+            A RequestDetails object containing the extracted model name.
+
+        Raises:
+            ValueError: If the request body is not valid JSON, is not a dictionary,
+                        or is missing the 'model' field.
+        """
+        logger.debug(f"Parsing request details for provider '{self.name}'.")
+        try:
+            if not content:
+                raise ValueError("Request body is empty.")
+
+            # Decode bytes to string and then parse JSON
+            json_data = json.loads(content)
+
+            if not isinstance(json_data, dict):
+                raise TypeError("Request body JSON must be an object (dictionary).")
+
+            model_name = json_data.get("model")
+            if not model_name or not isinstance(model_name, str):
+                raise KeyError("Request body is missing a valid 'model' string field.")
+
+            logger.debug(f"Successfully parsed model '{model_name}' from request body.")
+            return RequestDetails(model_name=model_name)
+
+        except json.JSONDecodeError as e:
+            error_msg = f"Failed to parse request body as JSON: {e}"
+            logger.warning(error_msg)
+            raise ValueError(error_msg) from e
+        except (KeyError, TypeError) as e:
+            error_msg = f"Invalid request body structure: {e}"
+            logger.warning(error_msg)
+            raise ValueError(error_msg) from e
+
 
     def _get_headers(self, token: str) -> Optional[Dict[str, str]]:
         """
