@@ -1,7 +1,21 @@
 # src/config/schemas.py
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
+
+# --- NEW: Dataclass to hold detailed information for each model ---
+@dataclass
+class ModelInfo:
+    """
+    Represents the specific configuration for a single model within a provider.
+    This allows for a config-driven approach to handling multimodal APIs.
+    """
+    # The suffix appended to the provider's base URL to form the full endpoint.
+    # e.g., ":generateContent" for Gemini text, "/chat/completions" for OpenAI.
+    endpoint_suffix: str = ""
+    # The minimal, valid JSON payload required to perform a health check on this model.
+    test_payload: Dict[str, Any] = field(default_factory=dict)
+
 
 @dataclass
 class AccessControlConfig:
@@ -47,53 +61,36 @@ class TimeoutConfig:
     write: float = 10.0
     pool: float = 5.0
 
-# --- NEW: Configuration for Retry Policy ---
 @dataclass
 class RetryOnErrorConfig:
     """Defines retry behavior for a specific error category."""
-    # Number of retry attempts.
     attempts: int = 0
-    # Initial delay in seconds before the first retry.
     backoff_sec: float = 1.0
-    # Multiplier for exponential backoff (e.g., 2.0 for doubling the delay).
     backoff_factor: float = 2.0
 
 @dataclass
 class RetryPolicyConfig:
     """Container for the gateway's retry policies."""
-    # Master switch to enable or disable the retry mechanism.
     enabled: bool = False
-    # Policy for when an error is related to the API key (e.g., invalid, no quota).
     on_key_error: RetryOnErrorConfig = field(default_factory=RetryOnErrorConfig)
-    # Policy for when an error is transient and server-related (e.g., timeout, 5xx error).
     on_server_error: RetryOnErrorConfig = field(default_factory=RetryOnErrorConfig)
 
-# --- NEW: Configuration for Circuit Breaker ---
 @dataclass
 class BackoffConfig:
     """Configuration for the exponential backoff strategy of the circuit breaker."""
-    # Initial duration in seconds to keep the circuit open.
     base_duration_sec: int = 30
-    # Maximum duration to prevent excessively long waits.
-    max_duration_sec: int = 1800  # 30 minutes
-    # Multiplier for each subsequent opening of the circuit.
+    max_duration_sec: int = 1800
     factor: float = 2.0
 
 @dataclass
 class CircuitBreakerConfig:
     """Configuration for the circuit breaker mechanism."""
-    # Master switch to enable or disable the circuit breaker.
     enabled: bool = False
-    # Operating mode: 'auto_recovery' or 'manual_reset'.
     mode: str = 'auto_recovery'
-    # Number of consecutive failures to trigger opening the circuit.
     failure_threshold: int = 10
-    # Configuration for the backoff strategy.
     backoff: BackoffConfig = field(default_factory=BackoffConfig)
-    # Maximum random "jitter" in seconds added to the open duration to prevent thundering herd.
     jitter_sec: int = 5
 
-# --- NEW: Container for all Gateway-specific policies ---
 @dataclass
 class GatewayPolicyConfig:
     """Groups all policies applied by the API Gateway during request processing."""
@@ -113,15 +110,15 @@ class ProviderConfig:
     
     shared_key_status: bool = False
     
-    models: Dict[str, List[str]] = field(default_factory=dict)
+    # --- REFACTORED: The structure of 'models' has been changed. ---
+    # It is no longer a dict with a list of strings, but a dictionary mapping
+    # a model's name to its detailed configuration (ModelInfo).
+    models: Dict[str, ModelInfo] = field(default_factory=dict)
     
     access_control: AccessControlConfig = field(default_factory=AccessControlConfig)
     health_policy: HealthPolicyConfig = field(default_factory=HealthPolicyConfig)
     proxy_config: ProxyConfig = field(default_factory=ProxyConfig)
     timeouts: TimeoutConfig = field(default_factory=TimeoutConfig)
-
-    # --- NEW FIELD ---
-    # This clearly separates policies for the gateway from other settings.
     gateway_policy: GatewayPolicyConfig = field(default_factory=GatewayPolicyConfig)
 
 
@@ -139,7 +136,6 @@ class LoggingConfig:
 class DatabaseConfig:
     """
     Configuration for the PostgreSQL database connection.
-    It is strongly recommended to load 'user' and 'password' from environment variables.
     """
     host: str = "localhost"
     port: int = 5433
@@ -153,11 +149,9 @@ class DatabaseConfig:
         """
         return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.dbname}"
 
-# --- NEW: Configuration for the Background Worker ---
 @dataclass
 class WorkerConfig:
     """Global settings specifically for the background worker service."""
-    # Maximum number of providers to be processed concurrently by probes.
     max_concurrent_providers: int = 10
 
 @dataclass
@@ -169,7 +163,4 @@ class Config:
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     providers: Dict[str, ProviderConfig] = field(default_factory=dict)
-    
-    # --- NEW FIELD ---
-    # Centralizes worker-specific settings.
     worker: WorkerConfig = field(default_factory=WorkerConfig)
