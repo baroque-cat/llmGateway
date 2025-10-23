@@ -4,7 +4,8 @@ import os
 import logging
 from typing import Set
 
-from src.config.schemas import Config
+# REFACTORED: Import ConfigAccessor for dependency injection.
+from src.core.accessor import ConfigAccessor
 from src.core.types import IResourceSyncer
 from src.db.database import DatabaseManager
 
@@ -38,25 +39,35 @@ class ProxySyncer(IResourceSyncer):
     A concrete implementation of IResourceSyncer for synchronizing proxies (Async Version).
     This syncer targets providers configured to use 'stealth' mode.
     """
+    # REFACTORED: Added a constructor to accept dependencies, conforming to the new IResourceSyncer interface.
+    def __init__(self, accessor: ConfigAccessor, db_manager: DatabaseManager):
+        """
+        Initializes the ProxySyncer with its required dependencies.
 
-    async def sync(self, config: Config, db_manager: DatabaseManager):
+        Args:
+            accessor: An instance of ConfigAccessor for safe config access.
+            db_manager: An instance of the DatabaseManager for async DB access.
+        """
+        self.accessor = accessor
+        self.db_manager = db_manager
+
+    # REFACTORED: The 'sync' method no longer takes arguments.
+    async def sync(self):
         """
         Performs a full synchronization cycle for proxies using the async DatabaseManager.
         """
         logger.info("Starting proxy synchronization cycle...")
         
         try:
-            provider_id_map = await db_manager.providers.get_id_map()
+            # REFACTORED: Use the instance-level db_manager.
+            provider_id_map = await self.db_manager.providers.get_id_map()
         except Exception as e:
             logger.critical(f"Failed to fetch provider ID map from database. Aborting proxy sync cycle. Error: {e}", exc_info=True)
             return
 
-        for provider_name, provider_config in config.providers.items():
+        # REFACTORED: Use the accessor to iterate over only enabled providers.
+        for provider_name, provider_config in self.accessor.get_enabled_providers().items():
             try:
-                if not provider_config.enabled:
-                    logger.debug(f"Provider '{provider_name}' is disabled. Skipping proxy sync.")
-                    continue
-
                 proxy_conf = provider_config.proxy_config
                 
                 if proxy_conf.mode != 'stealth':
@@ -78,8 +89,9 @@ class ProxySyncer(IResourceSyncer):
                 proxies_from_file = _read_proxies_from_file(proxy_conf.pool_list_path)
                 logger.info(f"Found {len(proxies_from_file)} unique proxies in '{proxy_conf.pool_list_path}' for provider '{provider_name}'.")
                 
+                # REFACTORED: Use the instance-level db_manager.
                 # The actual sync logic will be in the repository method.
-                await db_manager.proxies.sync(
+                await self.db_manager.proxies.sync(
                     provider_name=provider_name,
                     proxies_from_file=proxies_from_file,
                     provider_id=provider_id

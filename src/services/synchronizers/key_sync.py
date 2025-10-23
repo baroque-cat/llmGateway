@@ -5,7 +5,8 @@ import re
 import logging
 from typing import Set, List
 
-from src.config.schemas import Config
+# REFACTORED: Import ConfigAccessor for dependency injection.
+from src.core.accessor import ConfigAccessor
 from src.core.types import IResourceSyncer
 from src.db.database import DatabaseManager
 
@@ -43,9 +44,24 @@ def _read_keys_from_directory(path: str) -> Set[str]:
 class KeySyncer(IResourceSyncer):
     """
     A concrete implementation of IResourceSyncer for synchronizing API keys (Async Version).
+    This class now follows the Dependency Injection pattern.
     """
 
-    async def sync(self, config: Config, db_manager: DatabaseManager):
+    # REFACTORED: Added a constructor to accept dependencies, conforming to the new IResourceSyncer interface.
+    def __init__(self, accessor: ConfigAccessor, db_manager: DatabaseManager):
+        """
+        Initializes the KeySyncer with its required dependencies.
+
+        Args:
+            accessor: An instance of ConfigAccessor for safe config access.
+            db_manager: An instance of the DatabaseManager for async DB access.
+        """
+        self.accessor = accessor
+        self.db_manager = db_manager
+
+    # REFACTORED: The 'sync' method no longer takes arguments.
+    # It now uses the dependencies injected via the constructor.
+    async def sync(self):
         """
         Performs a full synchronization cycle for API keys using the async DatabaseManager.
         """
@@ -53,17 +69,14 @@ class KeySyncer(IResourceSyncer):
 
         try:
             # Fetch the provider name-to-ID mapping once at the beginning for efficiency.
-            provider_id_map = await db_manager.providers.get_id_map()
+            provider_id_map = await self.db_manager.providers.get_id_map()
         except Exception as e:
             logger.critical(f"Failed to fetch provider ID map from database. Aborting key sync cycle. Error: {e}", exc_info=True)
             return
 
-        for provider_name, provider_config in config.providers.items():
+        # REFACTORED: Use the accessor to iterate over only enabled providers.
+        for provider_name, provider_config in self.accessor.get_enabled_providers().items():
             try:
-                if not provider_config.enabled:
-                    logger.debug(f"Provider '{provider_name}' is disabled in config. Skipping key sync.")
-                    continue
-
                 if not provider_config.keys_path:
                     logger.warning(f"No 'keys_path' configured for provider '{provider_name}'. Skipping key sync.")
                     continue
@@ -80,14 +93,13 @@ class KeySyncer(IResourceSyncer):
                 logger.info(f"Found {len(keys_from_file)} unique keys in '{provider_config.keys_path}' for provider '{provider_name}'.")
 
                 # Step 2: Aggregate all models for this provider from the config.
-                all_provider_models: List[str] = [
-                    model
-                    for model_list in provider_config.models.values()
-                    for model in model_list
-                ]
+                # REFACTORED AND FIXED: The config schema for 'models' is now a Dict[str, ModelInfo].
+                # We simply need to get the keys of this dictionary to get the model names.
+                all_provider_models: List[str] = list(provider_config.models.keys())
 
                 # Step 3: Call the async database repository method to perform synchronization.
-                await db_manager.keys.sync(
+                # REFACTORED: Use the instance-level db_manager.
+                await self.db_manager.keys.sync(
                     provider_name=provider_name,
                     keys_from_file=keys_from_file,
                     provider_id=provider_id,
@@ -98,3 +110,4 @@ class KeySyncer(IResourceSyncer):
                 logger.error(f"An unexpected error occurred while syncing keys for provider '{provider_name}': {e}", exc_info=True)
 
         logger.info("API key synchronization cycle finished.")
+
