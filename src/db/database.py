@@ -7,7 +7,9 @@ from datetime import datetime
 import asyncpg
 from asyncpg.pool import Pool
 
-from src.config.schemas import Config
+# REFACTORED: Import ConfigAccessor instead of the raw Config schema.
+# This is the central change for decoupling the database layer.
+from src.core.accessor import ConfigAccessor
 from src.core.models import CheckResult
 from src.core.enums import ErrorReason
 
@@ -160,9 +162,10 @@ class KeyRepository:
     Manages data access for 'api_keys' and 'key_model_status' tables.
     Contains the core logic for syncing, checking, and updating keys.
     """
-    def __init__(self, pool: Pool, config: Config):
+    # REFACTORED: The constructor now accepts ConfigAccessor for dependency injection.
+    def __init__(self, pool: Pool, accessor: ConfigAccessor):
         self._pool = pool
-        self._config = config
+        self.accessor = accessor
 
     async def sync(self, provider_name: str, keys_from_file: Set[str], provider_id: int, provider_models: List[str]):
         # This method's logic is correct and requires no changes.
@@ -209,9 +212,6 @@ class KeyRepository:
                     logger.info(f"SYNC: Added {len(models_to_add)} new model status records for provider '{provider_name}'.")
 
     async def get_keys_to_check(self) -> List[Dict[str, Any]]:
-        # The query logic is correct and remains unchanged.
-        # The WHERE k.is_dead = FALSE clause is now responsible for filtering,
-        # albeit less efficiently than a partial index.
         query = """
         SELECT
             k.id AS key_id,
@@ -231,7 +231,8 @@ class KeyRepository:
         
         for row in rows:
             provider_name = row['provider_name']
-            provider_conf = self._config.providers.get(provider_name)
+            # REFACTORED: Use the accessor to safely get provider configuration.
+            provider_conf = self.accessor.get_provider(provider_name)
 
             if provider_conf and provider_conf.shared_key_status:
                 key_id = row['key_id']
@@ -250,7 +251,8 @@ class KeyRepository:
         
         assert status_str in VALID_STATUSES, f"Attempted to write invalid status '{status_str}' to the database!"
 
-        provider_config = self._config.providers.get(provider_name)
+        # REFACTORED: Use the accessor to get provider configuration.
+        provider_config = self.accessor.get_provider(provider_name)
         
         async with self._pool.acquire() as conn:
             async with conn.transaction():
@@ -278,7 +280,6 @@ class KeyRepository:
                         result.message[:1000], key_id, model_name
                     )
 
-                # This logic is correct and remains unchanged.
                 if result.error_reason == ErrorReason.INVALID_KEY:
                     await conn.execute(
                         "UPDATE api_keys SET is_dead = TRUE, dead_since = NOW() AT TIME ZONE 'utc' WHERE id = $1", 
@@ -287,7 +288,6 @@ class KeyRepository:
                     logger.info(f"FLAGGED: Key ID {key_id} marked as dead at {datetime.utcnow()} UTC.")
 
     async def get_available_key(self, provider_name: str, model_name: str) -> Optional[Dict[str, Any]]:
-        # This query is correct and remains unchanged.
         query = """
             SELECT
                 k.id AS key_id,
@@ -304,7 +304,6 @@ class KeyRepository:
         return dict(row) if row else None
 
     async def get_status_summary(self) -> List[Dict[str, Any]]:
-        # This method is correct and remains unchanged.
         query = """
             SELECT
                 p.name AS provider,
@@ -336,10 +335,12 @@ class DatabaseManager:
     """
     A facade class that provides a single point of access to all repository objects.
     """
-    def __init__(self, config: Config):
+    # REFACTORED: The constructor now accepts ConfigAccessor.
+    def __init__(self, accessor: ConfigAccessor):
         pool = get_pool()
         self.providers = ProviderRepository(pool)
-        self.keys = KeyRepository(pool, config)
+        # REFACTORED: Pass the accessor to the KeyRepository.
+        self.keys = KeyRepository(pool, accessor)
         self.proxies = ProxyRepository(pool)
 
     async def initialize_schema(self):
@@ -380,7 +381,6 @@ class DatabaseManager:
                 
                 provider_id = provider_id_row['id']
                 
-                # This query is correct and remains unchanged.
                 query = """
                     UPDATE api_keys
                     SET is_dead = FALSE, dead_since = NULL
@@ -407,3 +407,4 @@ class DatabaseManager:
             logger.info("MAINTENANCE: Starting database VACUUM operation...")
             await conn.execute("VACUUM;")
             logger.info("MAINTENANCE: Database VACUUM completed successfully.")
+
