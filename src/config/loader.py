@@ -2,168 +2,176 @@
 
 import os
 import re
-import yaml
 import logging
-from typing import Set, Any, Dict, List
+from typing import Any, Dict, Type, TypeVar, get_type_hints, get_origin, get_args
+from dataclasses import is_dataclass, fields
 
+from ruamel.yaml import YAML
 from dotenv import load_dotenv
+from deepmerge import always_merger
 
-from src.config.schemas import (
-    Config, ProviderConfig, AccessControlConfig, HealthPolicyConfig,
-    ProxyConfig, LoggingConfig, DatabaseConfig, TimeoutConfig, WorkerConfig,
-    GatewayPolicyConfig, RetryPolicyConfig, RetryOnErrorConfig,
-    CircuitBreakerConfig, BackoffConfig,
-    # --- NEW: Import the new ModelInfo dataclass ---
-    ModelInfo
-)
+# Import schemas and default templates
+from src.config.schemas import Config, ProviderConfig
+from src.config.defaults import get_default_config
+from src.config.provider_templates import PROVIDER_TYPE_DEFAULTS
 
 logger = logging.getLogger(__name__)
 
+# This is a generic TypeVar used for our recursive dataclass conversion.
+# It allows for type hinting that returns the same type as the input class.
+T = TypeVar('T')
+
+# Regex to find environment variable placeholders like ${VAR_NAME}
 ENV_VAR_PATTERN = re.compile(r"^\$\{(?P<name>[A-Z0-9_]+)\}$")
 
-def _resolve_env_vars(config_value: Any) -> Any:
+class ConfigLoader:
     """
-    Recursively traverses a config structure and replaces ${VAR_NAME} placeholders.
+    Intelligently loads, merges, and parses the application's configuration
+    from a YAML file into type-safe dataclass objects.
     """
-    if isinstance(config_value, dict):
-        return {k: _resolve_env_vars(v) for k, v in config_value.items()}
-    
-    if isinstance(config_value, list):
-        return [_resolve_env_vars(item) for item in config_value]
 
-    if isinstance(config_value, str):
-        match = ENV_VAR_PATTERN.match(config_value)
-        if match:
-            var_name = match.group("name")
-            var_value = os.environ.get(var_name)
-            if var_value is None:
-                raise ValueError(
-                    f"Configuration error: Environment variable '{var_name}' is not set."
-                )
-            return var_value
-    
-    return config_value
+    def __init__(self, path: str = "config/providers.yaml"):
+        """
+        Initializes the ConfigLoader.
+        This aligns with Step 2 of the plan.
 
+        Args:
+            path: The path to the YAML configuration file.
+        """
+        self.config_path = path
+        self.yaml = YAML()
 
-def _validate_config(config: Config):
-    """
-    Performs comprehensive validation on the fully loaded configuration object.
-    """
-    used_tokens: Set[str] = set()
+    def load(self) -> Config:
+        """
+        Orchestrates the entire configuration loading process.
+        This is the main public method, as described in Step 2 of the plan.
+        """
+        # Step 1: Read and prepare raw data (Plan Step 3.1)
+        if not os.path.exists(self.config_path):
+            raise FileNotFoundError(f"Configuration file not found at '{self.config_path}'.")
 
-    if config.worker.max_concurrent_providers <= 0:
-        raise ValueError("'worker.max_concurrent_providers' must be a positive integer.")
+        # Load environment variables from a .env file if it exists.
+        if load_dotenv():
+            logger.info("Loaded environment variables from .env file.")
 
-    if not config.providers:
-        logger.warning("No providers are defined in the configuration file.")
-        return
+        with open(self.config_path, 'r', encoding='utf-8') as f:
+            user_config_raw = self.yaml.load(f) or {}
 
-    for name, conf in config.providers.items():
-        if not conf.enabled:
-            continue
+        # Step 2: Resolve environment variables (Plan Step 3.2)
+        user_config_resolved = self._resolve_env_vars(user_config_raw)
 
-        if not conf.provider_type:
-            raise ValueError(f"Provider '{name}': 'provider_type' is not set.")
-        if not conf.keys_path:
-            raise ValueError(f"Provider '{name}': 'keys_path' is not set.")
+        # Step 3 & 4: Build base config and merge (Plan Step 3.3 & 3.4)
+        final_config_dict = self._build_and_merge_config(user_config_resolved)
+
+        # Step 5: Convert the final dictionary to dataclass objects (Plan Step 3.5)
+        try:
+            app_config = self._dict_to_dataclass(Config, final_config_dict)
+        except (TypeError, ValueError) as e:
+            logger.error(f"Failed to parse configuration into dataclasses. Check for type mismatches in your YAML. Error: {e}")
+            raise TypeError(f"Configuration parsing error: {e}") from e
+
+        logger.info("Configuration loaded and parsed successfully.")
         
-        token = conf.access_control.gateway_access_token
-        if not token:
-            raise ValueError(f"Provider '{name}': 'gateway_access_token' is not set.")
-        if token in used_tokens:
-            raise ValueError(f"Duplicate 'gateway_access_token' found for provider '{name}'.")
-        used_tokens.add(token)
+        # Step 6: Return the result, ready for the validator (Plan Step 3.6)
+        return app_config
 
-        # --- NEW: Validation for model configuration integrity ---
-        # This ensures that if a default_model is specified, it actually exists
-        # in the models dictionary, preventing runtime errors.
-        if conf.default_model and conf.default_model not in conf.models:
-            raise ValueError(
-                f"Provider '{name}': The 'default_model' ('{conf.default_model}') "
-                f"is not defined in the 'models' section. Available models are: {list(conf.models.keys())}"
-            )
+    def _resolve_env_vars(self, config_value: Any) -> Any:
+        """
+        Recursively traverses a config structure and replaces ${VAR_NAME} placeholders.
+        This helper function implements the logic from Step 3.2 of the plan and
+        addresses a potential error scenario from the analysis.
+        """
+        if isinstance(config_value, dict):
+            return {k: self._resolve_env_vars(v) for k, v in config_value.items()}
         
-        proxy_conf = conf.proxy_config
-        valid_proxy_modes = {'none', 'static', 'stealth'}
-        if proxy_conf.mode not in valid_proxy_modes:
-            raise ValueError(f"Provider '{name}': Invalid proxy mode '{proxy_conf.mode}'.")
+        if isinstance(config_value, list):
+            return [self._resolve_env_vars(item) for item in config_value]
 
-        cb_conf = conf.gateway_policy.circuit_breaker
-        if cb_conf.enabled:
-            valid_cb_modes = {'auto_recovery', 'manual_reset'}
-            if cb_conf.mode not in valid_cb_modes:
-                raise ValueError(f"Provider '{name}': Invalid circuit breaker mode '{cb_conf.mode}'.")
+        if isinstance(config_value, str):
+            match = ENV_VAR_PATTERN.match(config_value)
+            if match:
+                var_name = match.group("name")
+                var_value = os.environ.get(var_name)
+                if var_value is None:
+                    raise ValueError(
+                        f"Configuration error: Environment variable '{var_name}' is not set, but is required by the config."
+                    )
+                return var_value
         
-        # Other validations remain the same...
+        return config_value
 
+    def _build_and_merge_config(self, user_config: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Constructs the full configuration dictionary by merging user-defined values
+        on top of layered defaults and templates. This is the core logic.
+        """
+        # Start with the absolute base defaults from schemas (via get_default_config)
+        base_config = get_default_config()
 
-def load_config(path: str = "config/providers.yaml") -> Config:
-    """
-    Loads, resolves env variables, parses, and validates the configuration.
-    """
-    if load_dotenv():
-        logger.info("Loaded environment variables from .env file.")
-
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"Configuration file not found at '{path}'.")
-
-    with open(path, 'r', encoding='utf-8') as f:
-        raw_config = yaml.safe_load(f) or {}
-
-    resolved_config = _resolve_env_vars(raw_config)
-
-    app_config = Config(
-        debug=resolved_config.get('debug', False),
-        database=DatabaseConfig(**resolved_config.get('database', {})),
-        logging=LoggingConfig(**resolved_config.get('logging', {})),
-        worker=WorkerConfig(**resolved_config.get('worker', {})),
-    )
-
-    for name, provider_data in resolved_config.get('providers', {}).items():
-        # --- REFACTORED: Parse the new structured 'models' dictionary ---
-        # Instead of passing the raw dictionary, we now iterate through it and
-        # create ModelInfo objects, ensuring the data conforms to our new schema.
-        models_from_yaml = provider_data.get('models', {})
-        models_map = {
-            model_name: ModelInfo(**model_data)
-            for model_name, model_data in models_from_yaml.items()
-        }
-
-        gateway_policy_data = provider_data.get('gateway_policy', {})
-        retry_data = gateway_policy_data.get('retry', {})
-        cb_data = gateway_policy_data.get('circuit_breaker', {})
+        # Merge user's global settings over the base defaults.
+        # This uses the 'always_merger' from the deepmerge library, as planned.
+        final_config = always_merger.merge(base_config, user_config)
         
-        gateway_policy = GatewayPolicyConfig(
-            retry=RetryPolicyConfig(
-                enabled=retry_data.get('enabled', False),
-                on_key_error=RetryOnErrorConfig(**retry_data.get('on_key_error', {})),
-                on_server_error=RetryOnErrorConfig(**retry_data.get('on_server_error', {}))
-            ),
-            circuit_breaker=CircuitBreakerConfig(
-                enabled=cb_data.get('enabled', False),
-                mode=cb_data.get('mode', 'auto_recovery'),
-                failure_threshold=cb_data.get('failure_threshold', 10),
-                jitter_sec=cb_data.get('jitter_sec', 5),
-                backoff=BackoffConfig(**cb_data.get('backoff', {}))
-            )
-        )
+        # Now, handle the providers section with special template-based logic.
+        final_providers = {}
+        user_providers = user_config.get('providers', {})
 
-        provider_conf = ProviderConfig(
-            provider_type=provider_data.get('provider_type', ''),
-            enabled=provider_data.get('enabled', True),
-            keys_path=provider_data.get('keys_path', ''),
-            api_base_url=provider_data.get('api_base_url', ''),
-            default_model=provider_data.get('default_model', ''),
-            shared_key_status=provider_data.get('shared_key_status', False),
-            models=models_map,  # Pass the parsed map of ModelInfo objects
-            access_control=AccessControlConfig(**provider_data.get('access_control', {})),
-            health_policy=HealthPolicyConfig(**provider_data.get('health_policy', {})),
-            proxy_config=ProxyConfig(**provider_data.get('proxy_config', {})),
-            timeouts=TimeoutConfig(**provider_data.get('timeouts', {})),
-            gateway_policy=gateway_policy,
-        )
-        app_config.providers[name] = provider_conf
+        for name, user_provider_conf in user_providers.items():
+            # This check handles a potential error we identified: missing provider_type.
+            provider_type = user_provider_conf.get('provider_type')
+            if not provider_type:
+                raise ValueError(f"Provider '{name}' must have a 'provider_type' defined in the configuration.")
 
-    _validate_config(app_config)
-    logger.info("Configuration loaded and validated successfully.")
-    return app_config
+            # 1. Start with the generic provider template from defaults.py
+            provider_base = get_default_config()['providers']['llm_provider_default']
+            
+            # 2. Merge the type-specific template from provider_templates.py
+            type_template = PROVIDER_TYPE_DEFAULTS.get(provider_type, {})
+            provider_base = always_merger.merge(provider_base, type_template)
+
+            # 3. Finally, merge the user's specific configuration for this instance.
+            # This handles all complex scenarios like partial overrides.
+            final_provider_instance = always_merger.merge(provider_base, user_provider_conf)
+            
+            final_providers[name] = final_provider_instance
+            
+        final_config['providers'] = final_providers
+        return final_config
+
+    def _dict_to_dataclass(self, dclass: Type[T], data: Dict[str, Any]) -> T:
+        """
+        Recursively converts a dictionary to a dataclass instance.
+        This is the "Improvement" identified in the planning phase, removing the need for
+        manual parsing of each nested object.
+        """
+        if not is_dataclass(dclass):
+            raise TypeError(f"Expected a dataclass type, but got {dclass}")
+
+        type_hints = get_type_hints(dclass)
+        field_data = {}
+
+        for f in fields(dclass):
+            if f.name in data:
+                field_value = data[f.name]
+                field_type = type_hints[f.name]
+                
+                origin_type = get_origin(field_type)
+                
+                if origin_type is dict:
+                    # Handle nested dictionaries of dataclasses, e.g., Dict[str, ModelInfo]
+                    item_type = get_args(field_type)[1]
+                    if is_dataclass(item_type):
+                        field_data[f.name] = {
+                            k: self._dict_to_dataclass(item_type, v)
+                            for k, v in field_value.items()
+                        }
+                    else:
+                        field_data[f.name] = field_value
+                elif is_dataclass(field_type):
+                    # Handle nested single dataclasses, e.g., HealthPolicyConfig
+                    field_data[f.name] = self._dict_to_dataclass(field_type, field_value)
+                else:
+                    # Handle primitive types
+                    field_data[f.name] = field_value
+        
+        return dclass(**field_data)
