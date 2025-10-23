@@ -1,8 +1,7 @@
 # src/services/probes/key_probe.py
 
-import asyncio
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from datetime import datetime, timedelta
 
 from src.core.probes import IResourceProbe
@@ -16,6 +15,7 @@ logger = logging.getLogger(__name__)
 class KeyProbe(IResourceProbe):
     """
     A concrete implementation of IResourceProbe for checking API key health (Async Version).
+    This class now uses ConfigAccessor for accessing configuration, inherited from IResourceProbe.
     """
 
     async def _get_resources_to_check(self) -> List[Dict[str, Any]]:
@@ -27,7 +27,7 @@ class KeyProbe(IResourceProbe):
     async def _check_resource(self, resource: Dict[str, Any]) -> CheckResult:
         """
         Checks a single API key against a specific model by calling the provider.
-        This method now delegates HTTP client creation to the HttpClientFactory.
+        It now uses the accessor to get provider configuration safely.
         """
         provider_name = resource['provider_name']
         key_value = resource['key_value']
@@ -36,29 +36,19 @@ class KeyProbe(IResourceProbe):
 
         logger.debug(f"Checking key (ID: {key_id}) for provider '{provider_name}', model '{model_name}'.")
 
-        provider_config = self.config.providers.get(provider_name)
-        if not provider_config:
-            msg = f"Provider '{provider_name}' not configured. Cannot check key ID {key_id}."
-            logger.error(msg)
-            return CheckResult.fail(ErrorReason.BAD_REQUEST, msg)
-
-        # --- REFACTORED: The entire proxy logic block is removed. ---
-        # The responsibility for creating a correctly configured client (with or without
-        # a proxy) is now fully delegated to the HttpClientFactory. This simplifies
-        # the probe's logic and adheres to the Single Responsibility Principle.
-        
         try:
-            # --- ADDED: Get the appropriate client from the factory ---
-            # This is the new, centralized way to obtain a client. The factory will
-            # return a cached, pre-configured client based on the provider's config.
+            # REFACTORED: Use the accessor to get provider config.
+            # get_provider_or_raise is used because a key from the DB must have a
+            # corresponding config. Its absence indicates a critical state mismatch.
+            provider_config = self.accessor.get_provider_or_raise(provider_name)
+
+            # Get the appropriate pre-configured HTTP client from the factory.
             client = await self.client_factory.get_client_for_provider(provider_name)
 
+            # Get the provider logic instance using the provider factory.
             provider_instance = get_provider(provider_name, provider_config)
             
-            # --- REFACTORED: The call to `check` is simplified ---
-            # We pass the client obtained from the factory.
-            # CRITICAL: The `proxy=...` argument is removed, fixing the original TypeError.
-            # The provider's `check` method will be updated to no longer accept it.
+            # The 'check' call is now clean, without any proxy-related logic.
             result = await provider_instance.check(
                 client=client,
                 token=key_value,
@@ -66,6 +56,10 @@ class KeyProbe(IResourceProbe):
             )
             return result
 
+        except KeyError as e:
+            # This specifically catches the error from get_provider_or_raise.
+            logger.error(f"Configuration mismatch: {e}. Cannot check key ID {key_id}.")
+            return CheckResult.fail(ErrorReason.BAD_REQUEST, str(e))
         except Exception as e:
             logger.error(
                 f"An unexpected exception occurred during check for key ID {key_id} "
@@ -77,15 +71,18 @@ class KeyProbe(IResourceProbe):
     async def _update_resource_status(self, resource: Dict[str, Any], result: CheckResult):
         """
         Updates the key's status in the database using the DatabaseManager.
-        (No changes needed here as its logic is independent of HTTP client creation.)
+        This now uses the accessor to retrieve health policies.
         """
         key_id = resource['key_id']
         model_name = resource['model_name']
         provider_name = resource['provider_name']
 
-        provider_config = self.config.providers.get(provider_name)
-        if not provider_config:
-            logger.error(f"Cannot update key status. Provider '{provider_name}' not found in config.")
+        try:
+            # REFACTORED: Use accessor to get provider config. A missing config
+            # here is a critical failure.
+            provider_config = self.accessor.get_provider_or_raise(provider_name)
+        except KeyError as e:
+            logger.error(f"Cannot update key status. {e}.")
             return
 
         next_check_time = self._calculate_next_check_time(provider_config.health_policy, result)
@@ -108,7 +105,7 @@ class KeyProbe(IResourceProbe):
     def _calculate_next_check_time(self, policy: HealthPolicyConfig, result: CheckResult) -> datetime:
         """
         Calculates the next check time based on the health policy.
-        (No changes needed here.)
+        (This method's internal logic is correct and does not need changes.)
         """
         now = datetime.utcnow()
         if result.ok:
