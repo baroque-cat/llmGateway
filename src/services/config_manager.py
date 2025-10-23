@@ -85,37 +85,47 @@ class ConfigManager:
         Constructs the configuration dictionary for a new provider instance.
         This is the core of the new create logic, as per Step 4 of the plan.
         """
-        # Step 1: Start with the generic provider template
+        # Step 1: Start with the generic provider template from defaults.py
         base_template = get_default_config()['providers']['llm_provider_default']
         full_instance_config = copy.deepcopy(base_template)
 
-        # Step 2: Merge the type-specific template
+        # Step 2: Merge the type-specific template from provider_templates.py
         if provider_type not in PROVIDER_TYPE_DEFAULTS:
             supported = ", ".join(PROVIDER_TYPE_DEFAULTS.keys())
             raise ValueError(f"Unsupported provider type '{provider_type}'. Supported: {supported}")
         
         type_specifics = PROVIDER_TYPE_DEFAULTS[provider_type]
-        # Using a simple update as templates are flat dictionaries
+        # Using a simple update as templates are flat dictionaries, but deepmerge would also work
         full_instance_config.update(type_specifics)
         
-        # Step 3: Customize paths and tokens
+        # Step 3: Customize paths and tokens for this specific instance
         full_instance_config['provider_type'] = provider_type
         full_instance_config['keys_path'] = os.path.join(self.keys_base_path, instance_name, '')
         full_instance_config['proxy_config']['pool_list_path'] = os.path.join(self.proxies_base_path, instance_name, '')
         token_var_name = f"{instance_name.upper().replace('-', '_')}_TOKEN"
         full_instance_config['access_control']['gateway_access_token'] = f"${{{token_var_name}}}"
         
-        # Step 4: Return either the full or minimal config based on the 'full' flag
+        # Step 4: Return either the full or the corrected minimal config based on the 'full' flag
         if full:
             return full_instance_config
         else:
-            # This implements the minimal config generation logic from the plan.
-            minimal_config = {
-                "provider_type": full_instance_config["provider_type"],
-                "enabled": full_instance_config["enabled"],
-                "keys_path": full_instance_config["keys_path"],
-                "access_control": full_instance_config["access_control"],
-            }
+            # --- REFACTORED LOGIC ---
+            # Instead of creating a hardcoded minimal dictionary, we now build a smart one.
+            # 1. Start with a copy of the provider-specific template. This includes
+            #    all essential, provider-specific fields like 'api_base_url',
+            #    'default_model', and the entire 'models' structure.
+            minimal_config = copy.deepcopy(PROVIDER_TYPE_DEFAULTS[provider_type])
+            
+            # 2. Add/overwrite the required, dynamically generated fields. We take these
+            #    from the 'full_instance_config' to ensure they are correctly customized
+            #    for this specific instance.
+            minimal_config["provider_type"] = full_instance_config["provider_type"]
+            minimal_config["enabled"] = full_instance_config["enabled"]
+            minimal_config["keys_path"] = full_instance_config["keys_path"]
+            minimal_config["access_control"] = full_instance_config["access_control"]
+            
+            # The result is a config that is clean and minimal, but contains all
+            # provider-specific fields that the user is likely to edit.
             return minimal_config
 
     def _create_related_directories(self, instance_config: Dict[str, Any]):
@@ -240,4 +250,3 @@ class ConfigManager:
             ptype = details.get('provider_type', 'N/A')
             status = "enabled" if details.get('enabled', False) else "disabled"
             print(f"  - {name:<{max_len}}  (type: {ptype}, status: {status})")
-
