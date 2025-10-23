@@ -3,9 +3,11 @@
 import logging
 import sys
 
-from src.config.schemas import Config
+# REFACTORED: Import ConfigAccessor instead of the raw Config schema.
+# This makes the function dependent on the safe interface, not the data structure.
+from src.core.accessor import ConfigAccessor
 
-def setup_logging(config: Config):
+def setup_logging(accessor: ConfigAccessor):
     """
     Configures the root logger for the entire application based on the global config.
 
@@ -13,12 +15,11 @@ def setup_logging(config: Config):
     It sets the logging level based on the debug flag and directs all logs to stdout.
 
     Args:
-        config: The loaded application configuration object.
+        accessor: The ConfigAccessor instance providing access to configuration.
     """
-    # Determine the logging level based on the global debug flag.
-    # If debug is true, we want detailed logs (DEBUG level).
-    # Otherwise, we use a more concise level (INFO).
-    log_level = logging.DEBUG if config.debug else logging.INFO
+    # REFACTORED: Use the accessor's method to determine the log level.
+    # This decouples the logging setup from the direct structure of the Config object.
+    log_level = logging.DEBUG if accessor.is_debug_mode() else logging.INFO
 
     # Define the format for log messages for consistency across the application.
     # Format includes timestamp, logger name, log level, and the message itself.
@@ -51,4 +52,3 @@ def setup_logging(config: Config):
 
     # A log message to confirm that logging has been successfully configured.
     logging.getLogger(__name__).info(f"Logging configured successfully. Level set to {logging.getLevelName(log_level)}.")
-
