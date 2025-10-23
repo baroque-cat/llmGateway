@@ -1,10 +1,14 @@
+# src/core/http_client_factory.py
+
 import logging
 import asyncio
 from typing import Dict
 
 import httpx
 
-from src.config.schemas import Config, ProviderConfig
+# REFACTORED: Import ConfigAccessor instead of the raw Config schema.
+from src.core.accessor import ConfigAccessor
+from src.config.schemas import ProviderConfig
 
 
 class HttpClientFactory:
@@ -19,20 +23,15 @@ class HttpClientFactory:
     prevent race conditions during client creation.
     """
 
-    def __init__(self, config: Config):
+    # REFACTORED: The constructor now accepts ConfigAccessor for dependency injection.
+    def __init__(self, accessor: ConfigAccessor):
         """
         Initializes the HttpClientFactory.
 
         Args:
-            config: The loaded application configuration object. This is a form
-                    of dependency injection, making the factory testable and
-                    decoupled from the configuration loading mechanism.
+            accessor: An instance of ConfigAccessor to safely access configuration values.
         """
-        # --- Step 1: Initialization from Plan ---
-        # This implements the constructor logic from our plan.
-        # It sets up the logger, the client cache, and the lock dictionary.
-        # Using dependency injection for `config` makes the class robust and testable.
-        self.config: Config = config
+        self.accessor: ConfigAccessor = accessor
         self.logger: logging.Logger = logging.getLogger(__name__)
         
         # The cache to store long-lived client instances.
@@ -48,9 +47,6 @@ class HttpClientFactory:
         """
         Determines the unique cache key based on the provider's proxy configuration.
         """
-        # --- Step 2: Cache Key Logic from Plan ---
-        # This private helper method implements the cache key determination logic.
-        # It's separated for clarity and reusability.
         proxy_config = provider_config.proxy_config
         if proxy_config.mode == 'none':
             # A constant key for all direct connections.
@@ -82,11 +78,9 @@ class HttpClientFactory:
         Raises:
             KeyError: If the provider_name is not found in the configuration.
         """
-        # --- Step 3: Main Logic from Plan ---
-        # This is the core method, implementing steps 1 through 6 of the plan.
-        provider_config = self.config.providers.get(provider_name)
-        if not provider_config:
-            raise KeyError(f"Configuration for provider '{provider_name}' not found.")
+        # REFACTORED: Use the accessor to get provider config. get_provider_or_raise
+        # is used here because a missing provider is a critical, unrecoverable error.
+        provider_config = self.accessor.get_provider_or_raise(provider_name)
 
         cache_key = self._get_cache_key_for_provider(provider_config)
 
@@ -110,9 +104,6 @@ class HttpClientFactory:
             if provider_config.proxy_config.mode == 'static':
                 proxy_url = provider_config.proxy_config.static_url
 
-            # --- Step 4: Client Creation from Plan ---
-            # Here we create the client as planned, enabling HTTP/2 and setting the proxy if needed.
-            # This directly follows httpx documentation for client instantiation [24, 25, 29].
             try:
                 client = httpx.AsyncClient(
                     http2=True,      # Enable HTTP/2 for better performance.
@@ -134,9 +125,6 @@ class HttpClientFactory:
         This should be called during application shutdown to ensure all
         underlying network connections are properly terminated.
         """
-        # --- Step 5: Shutdown Logic from Plan ---
-        # This implements the graceful shutdown. Using asyncio.gather
-        # is the most efficient way to close many async resources concurrently.
         if not self._clients:
             self.logger.info("No active HTTP clients to close.")
             return

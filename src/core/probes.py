@@ -1,20 +1,21 @@
+# src/core/probes.py
+
 import asyncio
 import logging
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any
 from collections import defaultdict
 
-from src.config.schemas import Config
+# REFACTORED: Import ConfigAccessor instead of Config.
+from src.core.accessor import ConfigAccessor
 from src.core.models import CheckResult
 from src.db.database import DatabaseManager
 from src.core.http_client_factory import HttpClientFactory
 
 logger = logging.getLogger(__name__)
 
-# --- Constants ---
-# Limits the number of providers that can be processed concurrently.
-# This prevents overwhelming the system or external APIs with too many parallel tasks.
-MAX_CONCURRENT_PROVIDERS = 10
+# REFACTORED: The hardcoded constant is removed.
+# The concurrency limit will now be read from the config.
 
 class IResourceProbe(ABC):
     """
@@ -25,20 +26,24 @@ class IResourceProbe(ABC):
     on asyncio for concurrent processing of providers.
     """
 
-    def __init__(self, config: Config, db_manager: DatabaseManager, client_factory: HttpClientFactory):
+    # REFACTORED: The constructor now accepts ConfigAccessor.
+    def __init__(self, accessor: ConfigAccessor, db_manager: DatabaseManager, client_factory: HttpClientFactory):
         """
         Initializes the probe with dependencies.
 
         Args:
-            config: The main application configuration object.
+            accessor: An instance of ConfigAccessor for safe config access.
             db_manager: An instance of the DatabaseManager for async DB access.
             client_factory: A factory for creating and managing httpx.AsyncClient instances.
         """
-        self.config = config
+        self.accessor = accessor
         self.db_manager = db_manager
-        self.client_factory = client_factory  # REFACTORED: Use the factory instead of a single client.
-        # A semaphore to limit the number of concurrently running provider batches.
-        self.semaphore = asyncio.Semaphore(MAX_CONCURRENT_PROVIDERS)
+        self.client_factory = client_factory
+        
+        # REFACTORED: The semaphore limit is now dynamically read from the worker config.
+        # This makes the probe's behavior configurable.
+        concurrency_limit = self.accessor.get_worker_concurrency()
+        self.semaphore = asyncio.Semaphore(concurrency_limit)
 
     async def run_cycle(self):
         """
@@ -87,7 +92,8 @@ class IResourceProbe(ABC):
         asyncio.current_task().set_name(provider_name)
 
         async with self.semaphore:
-            provider_config = self.config.providers.get(provider_name)
+            # REFACTORED: Use the accessor to get the provider configuration.
+            provider_config = self.accessor.get_provider(provider_name)
             if not provider_config:
                 logger.warning(f"No configuration found for provider '{provider_name}'. Skipping {len(resources)} resources.")
                 return

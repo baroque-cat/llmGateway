@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+# src/core/types.py
 
 """
 Core Types - Abstract Interfaces and Protocols.
@@ -13,8 +13,8 @@ from typing import List, Tuple, Dict
 
 import httpx
 
-from src.config.schemas import Config
-# --- NEW: Import the newly created data model ---
+# REFACTORED: Import ConfigAccessor to use it in the new interface contracts.
+from src.core.accessor import ConfigAccessor
 from src.core.models import CheckResult, RequestDetails
 from src.db.database import DatabaseManager
 
@@ -29,7 +29,6 @@ class IProvider(ABC):
     receiving shared resources like the HTTP client.
     """
 
-    # --- NEW: Abstract method for request parsing ---
     @abstractmethod
     async def parse_request_details(self, path: str, content: bytes) -> RequestDetails:
         """
@@ -120,13 +119,25 @@ class IResourceSyncer(ABC):
     resources from a source to a destination.
     """
 
+    # REFACTORED: Add an __init__ method to the contract for proper Dependency Injection.
+    # This enforces that all synchronizers are initialized with their dependencies.
     @abstractmethod
-    async def sync(self, config: Config, db_manager: DatabaseManager):
+    def __init__(self, accessor: ConfigAccessor, db_manager: DatabaseManager):
         """
-        Executes one full synchronization cycle for the specific resource type. (Async)
+        Initializes the syncer with necessary dependencies.
 
         Args:
-            config: The application's loaded configuration object.
+            accessor: An instance of ConfigAccessor for safe config access.
             db_manager: An instance of the DatabaseManager for async DB access.
+        """
+        pass
+
+    # REFACTORED: The sync method no longer takes arguments.
+    # It will use the dependencies injected via the constructor.
+    # This is a BREAKING CHANGE that improves the design.
+    @abstractmethod
+    async def sync(self):
+        """
+        Executes one full synchronization cycle for the specific resource type. (Async)
         """
         pass
