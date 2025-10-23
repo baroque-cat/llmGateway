@@ -7,7 +7,8 @@ import os
 from collections import defaultdict
 from datetime import datetime, timezone
 
-from src.config.schemas import Config
+# REFACTORED: Import ConfigAccessor to replace the direct dependency on Config.
+from src.core.accessor import ConfigAccessor
 from src.db.database import DatabaseManager
 
 # Get a logger for this module. The main application entry point will configure its output.
@@ -22,15 +23,16 @@ class StatisticsLogger:
     log files with built-in rotation.
     """
 
-    def __init__(self, config: Config, db_manager: DatabaseManager):
+    # REFACTORED: The constructor now accepts ConfigAccessor for proper dependency injection.
+    def __init__(self, accessor: ConfigAccessor, db_manager: DatabaseManager):
         """
         Initializes the StatisticsLogger.
 
         Args:
-            config: The loaded application configuration object.
+            accessor: An instance of ConfigAccessor for safe config access.
             db_manager: An instance of the DatabaseManager for async DB access.
         """
-        self.config = config
+        self.accessor = accessor
         self.db_manager = db_manager
         # A dictionary to cache the configured logger instances for each provider.
         self._loggers: dict[str, logging.Logger] = {}
@@ -40,14 +42,15 @@ class StatisticsLogger:
         """
         Dynamically configures individual loggers for each provider instance.
         This method uses RotatingFileHandler to manage log file size and backups
-        based on the global logging configuration. This part remains synchronous as it
-        deals with file system setup and logging configuration.
+        based on the global logging configuration.
         """
-        log_config = self.config.logging
+        # REFACTORED: Use the accessor to get logging configuration.
+        log_config = self.accessor.get_logging_config()
         log_dir = log_config.summary_log_path
         os.makedirs(log_dir, exist_ok=True)
 
-        for provider_name in self.config.providers:
+        # REFACTORED: Use the accessor to iterate over all providers.
+        for provider_name in self.accessor.get_all_providers():
             logger_name = f"summary.{provider_name}"
 
             if logger_name in self._loggers:
@@ -111,7 +114,6 @@ class StatisticsLogger:
                     if not summary_logger:
                          module_logger.error(f"Failed to setup logger for '{provider_name}'. Skipping.")
                          continue
-
 
                 for record in records:
                     log_entry = {
