@@ -1,4 +1,4 @@
-# src/config/defaults.py
+#!/usr/bin/env python3
 
 from typing import Any, Dict
 
@@ -50,20 +50,29 @@ def get_default_config() -> Dict[str, Any]:
                 
                 "models": {},
                 
-
                 "access_control": {
                     "gateway_access_token": "${LLM_PROVIDER_DEFAULT_TOKEN}",
                 },
 
                 # Policy for the background worker's health checks.
+                # REFACTORED: This section now perfectly matches the updated HealthPolicyConfig schema.
                 "health_policy": {
-                    "on_success_hr": 2,
-                    "on_overload_min": 60,
-                    "on_no_quota_hr": 24,
-                    "on_rate_limit_min": 180,
+                    # Intervals in Minutes
                     "on_server_error_min": 30,
-                    "on_invalid_key_days": 10,
+                    "on_overload_min": 60,
+                    # Intervals in Hours
                     "on_other_error_hr": 1,
+                    "on_success_hr": 2,
+                    "on_rate_limit_hr": 3,
+                    "on_no_quota_hr": 24,
+                    # Intervals in Days
+                    "on_invalid_key_days": 10,
+                    "on_no_access_days": 10,
+                    # Quarantine Policies
+                    "quarantine_after_days": 30,
+                    "quarantine_recheck_interval_days": 10,
+                    "stop_checking_after_days": 90,
+                    # Batching Configuration
                     "batch_size": 30,
                     "batch_delay_sec": 15,
                 },
@@ -112,4 +121,3 @@ def get_default_config() -> Dict[str, Any]:
             },
         },
     }
-

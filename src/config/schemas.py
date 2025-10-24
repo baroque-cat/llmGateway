@@ -1,4 +1,4 @@
-# src/config/schemas.py
+#!/usr/bin/env python3
 
 from dataclasses import dataclass, field
 from typing import Dict, Any, Optional
@@ -94,22 +94,31 @@ class CircuitBreakerConfig:
 class HealthPolicyConfig:
     """
     Defines the policy for the background worker's health checks.
-    All intervals are specified in the unit denoted by the field name.
+    The fields are ordered by the magnitude of their time units for clarity.
     """
-    # How long to wait (in hours) before re-checking a healthy key.
-    on_success_hr: int = 2
-    # How long to wait (in minutes) if the API is overloaded (e.g., 429 error).
-    on_overload_min: int = 60
-    # How long to wait (in hours) if a key has no quota left.
-    on_no_quota_hr: int = 24
-    # How long to wait (in minutes) if a rate limit is hit.
-    on_rate_limit_min: int = 180
-    # How long to wait (in minutes) after a 5xx server error.
+    # --- Intervals in Minutes (for short-term, recoverable errors) ---
     on_server_error_min: int = 30
-    # How long to wait (in days) before permanently disabling an invalid key.
-    on_invalid_key_days: int = 10
-    # How long to wait (in hours) for any other uncategorized error.
+    on_overload_min: int = 60
+
+    # --- Intervals in Hours (for medium-term issues) ---
     on_other_error_hr: int = 1
+    on_success_hr: int = 2
+    on_rate_limit_hr: int = 3
+    on_no_quota_hr: int = 24
+
+    # --- Intervals in Days (for long-term, persistent errors) ---
+    on_invalid_key_days: int = 10
+    on_no_access_days: int = 10
+
+    # --- Quarantine Policies (for managing chronically failing keys) ---
+    # How many days a key must be failing continuously before it is put into quarantine.
+    quarantine_after_days: int = 30
+    # How often (in days) to re-check a key that is in quarantine.
+    quarantine_recheck_interval_days: int = 10
+    # After how many days of continuous failure to stop checking the key altogether.
+    stop_checking_after_days: int = 90
+
+    # --- Batching Configuration (for controlling check request throughput) ---
     # How many keys to check in a single batch for this provider.
     batch_size: int = 30
     # Delay in seconds between batches to avoid overwhelming the API.
