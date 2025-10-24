@@ -46,21 +46,12 @@ def get_default_config() -> Dict[str, Any]:
                 # This path is customized by the config manager.
                 "keys_path": "keys/llm_provider_default/",
                 
-                # These fields are provider-specific and will be populated from provider_templates.py.
                 "api_base_url": "https://api.example.com/v1",
-                "default_model": "some-model-v1",
                 
-                # --- REFACTORED: The 'models' structure is now multimodal. ---
-                # It's a dictionary mapping model names to their specific configurations,
-                # aligning with the new ModelInfo schema.
                 "models": {},
                 
-                "shared_key_status": False,
 
                 "access_control": {
-                    # This is the authentication token your client application will use
-                    # to access the gateway for this specific provider.
-                    # It is customized by the config manager (e.g., ${GEMINI_WORK_TOKEN}).
                     "gateway_access_token": "${LLM_PROVIDER_DEFAULT_TOKEN}",
                 },
 

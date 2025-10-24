@@ -18,6 +18,8 @@ PROVIDER_TYPE_DEFAULTS = {
     "gemini": {
         "api_base_url": "https://generativelanguage.googleapis.com",
         "default_model": "gemini-2.5-flash",
+        "shared_key_status": False,
+
         
         # This new structure allows a single provider to handle different
         # model types (text, image, etc.) by reading its configuration.
@@ -36,7 +38,7 @@ PROVIDER_TYPE_DEFAULTS = {
                     "contents": [{"parts": [{"text": "Hello"}]}]
                 }
             },
-            "imagen-4.0-generate-001": {
+            "imagen-3.0-generate-002": {
                 # A different suffix is used for image generation models.
                 "endpoint_suffix": ":predict",
                 # The payload structure is also different for image models.
@@ -50,6 +52,7 @@ PROVIDER_TYPE_DEFAULTS = {
     "deepseek": {
         "api_base_url": "https://api.deepseek.com",
         "default_model": "deepseek-chat",
+        "shared_key_status": True,
         
         # For OpenAI-like APIs, the endpoint is often the same for all chat models.
         "models": {
