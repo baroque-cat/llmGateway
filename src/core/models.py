@@ -4,7 +4,8 @@
 Core Models - Fundamental Data Models for the Gateway.
 
 This module defines the core data models used throughout the application.
-These models represent the fundamental entities and data structures.
+These models represent the fundamental entities and data structures, ensuring
+type safety and clear contracts between different parts of the system.
 """
 
 from dataclasses import dataclass, field
@@ -13,14 +14,15 @@ from typing import Any, Optional
 from src.core.enums import ErrorReason
 
 
-@dataclass
+@dataclass(frozen=True)
 class RequestDetails:
     """
     A data transfer object (DTO) that holds essential details parsed from an incoming request.
     
-    This standardized structure is returned by a provider's `parse_request_details`
-    method, allowing the gateway to perform actions like model authorization
-    without needing to understand the provider-specific request format.
+    This standardized, immutable structure is returned by a provider's `parse_request_details`
+    method. It serves as a decoupling mechanism, allowing the gateway to perform
+    actions like model authorization without needing to understand the provider-specific
+    request format (e.g., model in URL path vs. model in JSON body).
     """
     model_name: str
 
@@ -28,11 +30,12 @@ class RequestDetails:
 @dataclass
 class CheckResult:
     """
-    Represents the outcome of an API key validation check.
+    Represents the outcome of an API health check or a proxied request attempt.
 
-    This structured object replaces simple boolean or status code returns,
-    providing detailed context about the check, including success status,
-    error information, and performance metrics.
+    This structured object is used by both the background worker ("Хранитель") for
+    health probing and the API gateway ("Проводник") for evaluating the result of
+    a live request. It provides detailed context, including success status,
+    error information, and performance metrics, replacing simple boolean returns.
     """
 
     available: bool
@@ -53,7 +56,7 @@ class CheckResult:
         """
         return cls(
             available=True,
-            error_reason=ErrorReason.UNKNOWN, # No error on success
+            error_reason=ErrorReason.UNKNOWN, # No error reason on success
             message=message,
             response_time=response_time,
             status_code=status_code,
@@ -87,3 +90,4 @@ class CheckResult:
             "response_time": self.response_time,
             "status_code": self.status_code,
         }
+

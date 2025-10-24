@@ -13,12 +13,12 @@ from typing import List, Tuple, Dict, Any, Set, TypedDict
 
 import httpx
 
-# REFACTORED: Import ConfigAccessor to use it in the new interface contracts.
+# Import the necessary data models and dependencies for type hints.
 from src.core.accessor import ConfigAccessor
 from src.core.models import CheckResult, RequestDetails
 from src.db.database import DatabaseManager
 
-# --- NEW: TypedDicts for Desired State ---
+# --- TypedDicts for Background Worker's Synchronization State ---
 # These structures provide type safety for the data collected during the
 # "Read Phase" of the background worker's synchronization cycle.
 
@@ -31,6 +31,8 @@ class ProviderProxyState(TypedDict):
     """Represents the desired state for proxies of a single provider."""
     proxies_from_files: Set[str]
 
+
+# --- Core Interfaces ---
 
 class IProvider(ABC):
     """
@@ -50,7 +52,7 @@ class IProvider(ABC):
         This is a key method for the gateway's operation. It delegates the
         complex task of understanding different API request formats (e.g.,
         model in URL path vs. model in JSON body) to the specific provider
-        implementation.
+        implementation. This is the cornerstone of the polymorphic gateway design.
 
         Args:
             path: The URL path of the original request (e.g., '/v1/chat/completions').
@@ -59,6 +61,9 @@ class IProvider(ABC):
         Returns:
             A RequestDetails object containing standardized information, like
             the requested model name, that the gateway can understand and act upon.
+        
+        Raises:
+            ValueError: If parsing fails due to invalid format or missing data.
         """
         pass
 
@@ -68,7 +73,8 @@ class IProvider(ABC):
         Checks if an API token is valid for this provider. (Async)
 
         This method should perform a lightweight, non-blocking test request to determine
-        the token's status (valid, invalid, no quota, etc.).
+        the token's status (valid, invalid, no quota, etc.). It is primarily
+        used by the background worker's KeyProbe.
 
         Args:
             client: An instance of httpx.AsyncClient for making the request.
@@ -106,7 +112,8 @@ class IProvider(ABC):
         Proxies an incoming client request to the target API provider. (Async)
 
         This method is framework-agnostic. It takes primitive data types
-        and an httpx client, making it universally usable.
+        and an httpx client, making it universally usable. It is the primary
+        workhorse method called by the API gateway.
 
         Args:
             client: An instance of httpx.AsyncClient for making the request.
@@ -118,8 +125,10 @@ class IProvider(ABC):
 
         Returns:
             A tuple containing:
-            1. The raw `httpx.Response` object from the upstream provider.
-            2. A `CheckResult` object generated from the response.
+            1. The raw `httpx.Response` object from the upstream provider,
+               which supports streaming the response body.
+            2. A `CheckResult` object generated from the response, used for
+               logging and decision-making (e.g., for the circuit breaker).
         """
         pass
 
@@ -129,7 +138,8 @@ class IResourceSyncer(ABC):
     Abstract Base Class (Interface) for all resource synchronizers (Async Version).
 
     This contract defines a universal interface for any service that synchronizes
-    resources from a source to a destination.
+    resources from a source (files, config) to a destination (database). It uses
+    the "apply state" pattern.
     """
 
     @abstractmethod
@@ -143,9 +153,6 @@ class IResourceSyncer(ABC):
         """
         pass
 
-    # REFACTORED: The 'sync' method is replaced with 'apply_state'.
-    # This new method takes a complete "desired state" snapshot and applies it to the
-    # database, making the syncer a "dumb" executor of a pre-calculated plan.
     @abstractmethod
     async def apply_state(self, provider_id_map: Dict[str, int], desired_state: Dict[str, Any]):
         """
