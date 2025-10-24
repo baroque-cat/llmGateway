@@ -183,7 +183,6 @@ async def run_worker():
         summary_interval = accessor.get_logging_config().summary_interval_min
         scheduler.add_job(stats_logger.run_cycle, 'interval', minutes=summary_interval)
 
-        scheduler.add_job(maintenance.run_periodic_amnesty, 'cron', hour=4, minute=0, args=[db_manager, accessor])
         scheduler.add_job(maintenance.run_periodic_vacuum, 'cron', day_of_week='sun', hour=5, minute=0, args=[db_manager])
 
         logger.info("Scheduler configured. List of jobs:")
