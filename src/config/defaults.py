@@ -53,16 +53,7 @@ def get_default_config() -> Dict[str, Any]:
                 # --- REFACTORED: The 'models' structure is now multimodal. ---
                 # It's a dictionary mapping model names to their specific configurations,
                 # aligning with the new ModelInfo schema.
-                "models": {
-                    "some-model-v1": {
-                        "endpoint_suffix": "/chat/completions",
-                        "test_payload": {"prompt": "hello"}
-                    },
-                    "some-model-v2-turbo": {
-                        "endpoint_suffix": "/chat/completions",
-                        "test_payload": {"prompt": "hello"}
-                    }
-                },
+                "models": {},
                 
                 "shared_key_status": False,
 
@@ -130,3 +121,4 @@ def get_default_config() -> Dict[str, Any]:
             },
         },
     }
+

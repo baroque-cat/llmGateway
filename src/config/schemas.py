@@ -216,7 +216,7 @@ class DatabaseConfig:
         """
         if not self.password:
             raise ValueError("Database password is not set. Cannot construct DSN.")
-        return f"postgresql+asyncpg://{self.user}:{self.password}@{self.host}:{self.port}/{self.dbname}"
+        return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.dbname}"
 
 
 @dataclass
@@ -259,3 +259,4 @@ class Config:
     worker: WorkerConfig = field(default_factory=WorkerConfig)
     # A dictionary mapping the unique instance name to its full configuration.
     providers: Dict[str, ProviderConfig] = field(default_factory=dict)
+

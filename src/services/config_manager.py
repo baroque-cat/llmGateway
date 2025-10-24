@@ -122,6 +122,7 @@ class ConfigManager:
             minimal_config["provider_type"] = full_instance_config["provider_type"]
             minimal_config["enabled"] = full_instance_config["enabled"]
             minimal_config["keys_path"] = full_instance_config["keys_path"]
+            minimal_config["shared_key_status"] = full_instance_config["shared_key_status"]
             minimal_config["access_control"] = full_instance_config["access_control"]
             
             # The result is a config that is clean and minimal, but contains all
@@ -250,3 +251,4 @@ class ConfigManager:
             ptype = details.get('provider_type', 'N/A')
             status = "enabled" if details.get('enabled', False) else "disabled"
             print(f"  - {name:<{max_len}}  (type: {ptype}, status: {status})")
+
