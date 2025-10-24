@@ -22,6 +22,17 @@ class OpenAILikeProvider(AIBaseProvider):
         """
         Parses a JSON request body to extract the model name for OpenAI-like APIs.
         This implementation ignores the URL path.
+        
+        Args:
+            path: The URL path of the original request (ignored).
+            content: The raw byte content (body) of the original request.
+        
+        Returns:
+            A RequestDetails object with the parsed model name.
+        
+        Raises:
+            ValueError: If the request body is empty, not valid JSON, or is missing
+                        the required 'model' field.
         """
         logger.debug(f"Parsing request details for provider '{self.name}'.")
         try:

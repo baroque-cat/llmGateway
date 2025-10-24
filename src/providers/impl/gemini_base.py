@@ -52,8 +52,21 @@ class GeminiBaseProvider(AIBaseProvider):
     async def parse_request_details(self, path: str, content: bytes) -> RequestDetails:
         """
         Parses the URL path to extract the model name for Gemini APIs.
-        Provides a default implementation suitable for most text/image models.
+        This implementation ignores the request body content.
+        
+        Args:
+            path: The URL path of the original request.
+            content: The raw byte content (body) of the request (ignored).
+        
+        Returns:
+            A RequestDetails object with the parsed model name.
+        
+        Raises:
+            ValueError: If the model name cannot be extracted from the path.
         """
+        # The content argument is ignored for this provider type, as per the design.
+        _ = content
+        
         match = MODEL_FROM_PATH_REGEX.search(path)
         if not match:
             raise ValueError(f"Could not extract model name from path: {path}")

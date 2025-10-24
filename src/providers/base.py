@@ -67,7 +67,22 @@ class AIBaseProvider(IProvider):
     async def parse_request_details(self, path: str, content: bytes) -> RequestDetails:
         """
         (Abstract) Parses the raw incoming request to extract provider-specific details.
+        
+        This is a key method for the gateway's operation, delegating the complex
+        task of understanding different API request formats to the specific provider
+        implementation. This is the cornerstone of the polymorphic gateway design.
+        
         Must be implemented by subclasses.
+        
+        Args:
+            path: The URL path of the original request (e.g., '/v1/chat/completions').
+            content: The raw byte content (body) of the original request.
+        
+        Returns:
+            A RequestDetails object containing standardized information like the model name.
+        
+        Raises:
+            ValueError: If parsing fails due to invalid format or missing data.
         """
         raise NotImplementedError
 
