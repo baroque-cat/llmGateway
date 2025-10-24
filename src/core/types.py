@@ -9,7 +9,7 @@ ensuring a modular and extensible architecture.
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Any, Set, TypedDict
 
 import httpx
 
@@ -17,6 +17,19 @@ import httpx
 from src.core.accessor import ConfigAccessor
 from src.core.models import CheckResult, RequestDetails
 from src.db.database import DatabaseManager
+
+# --- NEW: TypedDicts for Desired State ---
+# These structures provide type safety for the data collected during the
+# "Read Phase" of the background worker's synchronization cycle.
+
+class ProviderKeyState(TypedDict):
+    """Represents the desired state for keys of a single provider."""
+    keys_from_files: Set[str]
+    models_from_config: List[str]
+
+class ProviderProxyState(TypedDict):
+    """Represents the desired state for proxies of a single provider."""
+    proxies_from_files: Set[str]
 
 
 class IProvider(ABC):
@@ -119,8 +132,6 @@ class IResourceSyncer(ABC):
     resources from a source to a destination.
     """
 
-    # REFACTORED: Add an __init__ method to the contract for proper Dependency Injection.
-    # This enforces that all synchronizers are initialized with their dependencies.
     @abstractmethod
     def __init__(self, accessor: ConfigAccessor, db_manager: DatabaseManager):
         """
@@ -132,12 +143,20 @@ class IResourceSyncer(ABC):
         """
         pass
 
-    # REFACTORED: The sync method no longer takes arguments.
-    # It will use the dependencies injected via the constructor.
-    # This is a BREAKING CHANGE that improves the design.
+    # REFACTORED: The 'sync' method is replaced with 'apply_state'.
+    # This new method takes a complete "desired state" snapshot and applies it to the
+    # database, making the syncer a "dumb" executor of a pre-calculated plan.
     @abstractmethod
-    async def sync(self):
+    async def apply_state(self, provider_id_map: Dict[str, int], desired_state: Dict[str, Any]):
         """
-        Executes one full synchronization cycle for the specific resource type. (Async)
+        Executes one full synchronization cycle for the specific resource type
+        based on a pre-built desired state. (Async)
+
+        Args:
+            provider_id_map: A mapping from provider name to its database ID.
+            desired_state: A dictionary where keys are provider names and values
+                           are TypedDicts (e.g., ProviderKeyState) representing
+                           the complete desired state for that provider's resources.
         """
         pass
+

@@ -3,11 +3,11 @@
 import os
 import re
 import logging
-from typing import Set, List
+from typing import Set, List, Dict
 
-# REFACTORED: Import ConfigAccessor for dependency injection.
+# REFACTORED: Import new TypedDict for state representation.
+from src.core.types import IResourceSyncer, ProviderKeyState
 from src.core.accessor import ConfigAccessor
-from src.core.types import IResourceSyncer
 from src.db.database import DatabaseManager
 
 logger = logging.getLogger(__name__)
@@ -17,6 +17,7 @@ def _read_keys_from_directory(path: str) -> Set[str]:
     """
     Reads all files in a specified directory, extracts API keys, and returns them as a unique set.
     This function performs synchronous file I/O, which is acceptable for this periodic task.
+    This helper function is now intended to be called by the background worker during the "Read Phase".
     """
     if not os.path.exists(path) or not os.path.isdir(path):
         logger.warning(f"Key directory not found or is not a directory: '{path}'. Skipping.")
@@ -43,11 +44,11 @@ def _read_keys_from_directory(path: str) -> Set[str]:
 
 class KeySyncer(IResourceSyncer):
     """
-    A concrete implementation of IResourceSyncer for synchronizing API keys (Async Version).
-    This class now follows the Dependency Injection pattern.
+    A concrete implementation of IResourceSyncer for synchronizing API keys.
+    This class now implements the "apply_state" pattern, acting as an executor
+    for a pre-calculated synchronization plan.
     """
 
-    # REFACTORED: Added a constructor to accept dependencies, conforming to the new IResourceSyncer interface.
     def __init__(self, accessor: ConfigAccessor, db_manager: DatabaseManager):
         """
         Initializes the KeySyncer with its required dependencies.
@@ -59,55 +60,51 @@ class KeySyncer(IResourceSyncer):
         self.accessor = accessor
         self.db_manager = db_manager
 
-    # REFACTORED: The 'sync' method no longer takes arguments.
-    # It now uses the dependencies injected via the constructor.
-    async def sync(self):
+    # REFACTORED: The old 'sync' method is replaced by 'apply_state'.
+    # This method receives a complete snapshot of the desired state for all providers
+    # and is responsible for applying this state to the database.
+    async def apply_state(self, provider_id_map: Dict[str, int], desired_key_state: Dict[str, ProviderKeyState]):
         """
-        Performs a full synchronization cycle for API keys using the async DatabaseManager.
-        """
-        logger.info("Starting API key synchronization cycle...")
+        Performs a full synchronization for API keys by applying the desired state to the database.
 
-        try:
-            # Fetch the provider name-to-ID mapping once at the beginning for efficiency.
-            provider_id_map = await self.db_manager.providers.get_id_map()
-        except Exception as e:
-            logger.critical(f"Failed to fetch provider ID map from database. Aborting key sync cycle. Error: {e}", exc_info=True)
+        Args:
+            provider_id_map: A mapping from provider name to its database ID.
+            desired_key_state: A dictionary where keys are provider names and values
+                               are ProviderKeyState objects.
+        """
+        logger.info("Applying desired key state to the database...")
+
+        if not desired_key_state:
+            logger.info("No key state to apply. Key synchronization cycle finished.")
             return
 
-        # REFACTORED: Use the accessor to iterate over only enabled providers.
-        for provider_name, provider_config in self.accessor.get_enabled_providers().items():
+        for provider_name, state in desired_key_state.items():
             try:
-                if not provider_config.keys_path:
-                    logger.warning(f"No 'keys_path' configured for provider '{provider_name}'. Skipping key sync.")
-                    continue
-
                 provider_id = provider_id_map.get(provider_name)
                 if provider_id is None:
-                    logger.error(f"Provider '{provider_name}' not found in the database. It may not have been synced yet. Skipping.")
+                    logger.error(f"Provider '{provider_name}' not found in the ID map. Skipping key sync for this provider.")
                     continue
-                
-                logger.info(f"Syncing keys for provider: '{provider_name}' (ID: {provider_id})")
 
-                # Step 1: Read keys from the specified directory (sync I/O).
-                keys_from_file = _read_keys_from_directory(provider_config.keys_path)
-                logger.info(f"Found {len(keys_from_file)} unique keys in '{provider_config.keys_path}' for provider '{provider_name}'.")
+                keys_from_file = state['keys_from_files']
+                models_from_config = state['models_from_config']
 
-                # Step 2: Aggregate all models for this provider from the config.
-                # REFACTORED AND FIXED: The config schema for 'models' is now a Dict[str, ModelInfo].
-                # We simply need to get the keys of this dictionary to get the model names.
-                all_provider_models: List[str] = list(provider_config.models.keys())
+                logger.info(
+                    f"Applying state for provider '{provider_name}' (ID: {provider_id}): "
+                    f"{len(keys_from_file)} keys and {len(models_from_config)} models."
+                )
 
-                # Step 3: Call the async database repository method to perform synchronization.
-                # REFACTORED: Use the instance-level db_manager.
+                # IMPORTANT: This call assumes that `db_manager.keys.sync` has been updated
+                # to accept the 'models_from_config' argument and to handle the logic
+                # for removing obsolete key-model relationships.
                 await self.db_manager.keys.sync(
                     provider_name=provider_name,
-                    keys_from_file=keys_from_file,
                     provider_id=provider_id,
-                    provider_models=all_provider_models
+                    keys_from_file=keys_from_file,
+                    provider_models=models_from_config
                 )
             except Exception as e:
                 # Isolate failures to prevent one provider from halting the entire sync process.
-                logger.error(f"An unexpected error occurred while syncing keys for provider '{provider_name}': {e}", exc_info=True)
+                logger.error(f"An unexpected error occurred while applying key state for provider '{provider_name}': {e}", exc_info=True)
 
-        logger.info("API key synchronization cycle finished.")
+        logger.info("Finished applying desired key state.")
 
