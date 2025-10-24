@@ -1,4 +1,4 @@
-#!/usr.bin/env python3
+#!/usr/bin/env python3
 
 """
 Core Enums - Fundamental Enumeration Types for the Gateway.
@@ -16,6 +16,7 @@ class ErrorReason(Enum):
     """
     Standardized error reasons for API validation and processing.
     Used across the system for consistent error handling and reporting.
+    This enum defines *why* a check failed.
     """
 
     # General Errors
@@ -69,3 +70,32 @@ class ErrorReason(Enum):
             ErrorReason.NO_ACCESS,
         }
         return self in client_errors
+
+
+@unique
+class Status(str, Enum):
+    """
+    Represents all possible states for a resource's status in the database.
+    
+    This enum is the single source of truth for the `status` column in tables
+    like `key_model_status`. By inheriting from `str`, its members can be used
+    directly in database queries without needing to call `.value`.
+    """
+    # Non-error statuses
+    VALID = "valid"
+    UNTESTED = "untested"
+    
+    # Statuses corresponding to error reasons
+    UNKNOWN = "unknown"
+    NETWORK_ERROR = "network_error"
+    TIMEOUT = "timeout"
+    SERVER_ERROR = "server_error"
+    SERVICE_UNAVAILABLE = "service_unavailable"
+    OVERLOADED = "overloaded"
+    BAD_REQUEST = "bad_request"
+    INVALID_KEY = "invalid_key"
+    NO_ACCESS = "no_access"
+    RATE_LIMITED = "rate_limited"
+    NO_QUOTA = "no_quota"
+    NO_MODEL = "no_model"
+
