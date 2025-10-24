@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 
 import logging
+import random
 from typing import List, Set, Dict, Any, Optional
 from datetime import datetime
 
 import asyncpg
 from asyncpg.pool import Pool
 
-# REFACTORED: Import ConfigAccessor and new Status Enum.
 from src.core.accessor import ConfigAccessor
 from src.core.models import CheckResult
-from src.core.enums import Status, ErrorReason
+from src.core.enums import Status
 
 # --- Module-level setup ---
 logger = logging.getLogger(__name__)
@@ -18,10 +18,8 @@ logger = logging.getLogger(__name__)
 # This will hold the connection pool instance after initialization.
 _db_pool: Optional[Pool] = None
 
-# REFACTORED: The magic string set is no longer needed.
-# The Status enum is now the single source of truth.
-
-# REFACTORED: The database schema has been updated to support the new logic.
+# The database schema, refactored to support state-aware health checks.
+# This schema aligns perfectly with the logic in KeyProbe and the removal of the amnesty service.
 DB_SCHEMA = """
 -- Table 1: Provider directory (unchanged)
 CREATE TABLE IF NOT EXISTS providers (
@@ -84,7 +82,7 @@ CREATE INDEX IF NOT EXISTS idx_key_status_next_check_time ON key_model_status(ne
 CREATE INDEX IF NOT EXISTS idx_key_status_gateway_lookup ON key_model_status(status, model_name);
 """
 
-# --- Component 1: Connection Management (unchanged) ---
+# --- Component 1: Connection Management ---
 
 async def init_db_pool(dsn: str):
     """
@@ -122,16 +120,17 @@ def get_pool() -> Pool:
     return _db_pool
 
 
-# --- Component 3: Repositories ---
+# --- Component 2: Repositories ---
 
 class ProviderRepository:
     """
-    Manages data access for the 'providers' table. (unchanged)
+    Manages data access for the 'providers' table.
     """
     def __init__(self, pool: Pool):
         self._pool = pool
 
     async def sync(self, provider_names_from_config: List[str]):
+        """Ensures the providers table is in sync with the configuration."""
         async with self._pool.acquire() as conn:
             async with conn.transaction():
                 rows = await conn.fetch("SELECT name FROM providers")
@@ -145,6 +144,7 @@ class ProviderRepository:
                     logger.info(f"SYNC: Added {len(new_providers)} new providers to the database: {new_providers}")
 
     async def get_id_map(self) -> Dict[str, int]:
+        """Fetches a mapping of all provider names to their database IDs."""
         async with self._pool.acquire() as conn:
             rows = await conn.fetch("SELECT id, name FROM providers")
             return {row['name']: row['id'] for row in rows}
@@ -158,66 +158,83 @@ class KeyRepository:
         self._pool = pool
         self.accessor = accessor
 
-    async def sync(self, provider_name: str, keys_from_file: Set[str], provider_id: int, provider_models: List[str]):
-        # This method's logic is correct, but the 'key_model_status' insertion
-        # needs to be updated for the new 'failing_since' column.
+    async def sync(self, provider_name: str, provider_id: int, keys_from_file: Set[str], provider_models: List[str]):
+        """
+        Synchronizes keys and their model associations for a single provider.
+        This method is a core part of the two-phase synchronization cycle.
+        It adds/removes keys and adds/removes key-model status records to match the desired state.
+        """
         async with self._pool.acquire() as conn:
             async with conn.transaction():
-                # 1. Get keys for this provider from DB
+                # Step 1: Sync the `api_keys` table.
                 rows = await conn.fetch("SELECT id, key_value FROM api_keys WHERE provider_id = $1", provider_id)
-                keys_in_db = {row['key_value']: row['id'] for row in rows}
-                db_key_values = set(keys_in_db.keys())
+                db_keys = {row['key_value']: row['id'] for row in rows}
+                db_key_values = set(db_keys.keys())
 
-                # 2. Add new keys to api_keys table
-                new_keys_to_add = list(keys_from_file - db_key_values)
-                if new_keys_to_add:
-                    to_insert = [(provider_id, key) for key in new_keys_to_add]
-                    await conn.copy_records_to_table('api_keys', records=to_insert, columns=['provider_id', 'key_value'])
-                    logger.info(f"SYNC: Added {len(new_keys_to_add)} new keys for provider '{provider_name}'.")
+                # Add new keys
+                new_key_values = keys_from_file - db_key_values
+                if new_key_values:
+                    records_to_add = [(provider_id, key) for key in new_key_values]
+                    await conn.copy_records_to_table('api_keys', records=records_to_add, columns=['provider_id', 'key_value'])
+                    logger.info(f"SYNC '{provider_name}': Added {len(new_key_values)} new keys.")
 
-                # 3. Remove old keys from api_keys table
+                # Remove old keys
                 keys_to_remove = db_key_values - keys_from_file
                 if keys_to_remove:
-                    ids_to_remove = [keys_in_db[val] for val in keys_to_remove]
+                    ids_to_remove = [db_keys[val] for val in keys_to_remove]
                     await conn.execute("DELETE FROM api_keys WHERE id = ANY($1::int[])", ids_to_remove)
-                    logger.info(f"SYNC: Removed {len(keys_to_remove)} obsolete keys for provider '{provider_name}'.")
+                    logger.info(f"SYNC '{provider_name}': Removed {len(keys_to_remove)} obsolete keys.")
 
-                # 4. Sync key_model_status table
+                # Step 2: Sync the `key_model_status` table.
                 rows = await conn.fetch("SELECT id FROM api_keys WHERE provider_id = $1", provider_id)
-                current_key_ids = {row['id'] for row in rows}
-                
-                if not current_key_ids:
+                current_key_ids_in_db = {row['id'] for row in rows}
+
+                if not current_key_ids_in_db:
+                    logger.info(f"SYNC '{provider_name}': No keys exist for this provider, skipping model status sync.")
                     return
 
-                rows = await conn.fetch("SELECT key_id, model_name FROM key_model_status WHERE key_id = ANY($1::int[])", list(current_key_ids))
-                model_statuses_in_db = {(row['key_id'], row['model_name']) for row in rows}
-                
-                models_to_add = []
-                initial_check_time = datetime.utcnow()
-                for key_id in current_key_ids:
-                    for model_name in provider_models:
-                        if (key_id, model_name) not in model_statuses_in_db:
-                            # Add the NULL placeholder for the new 'failing_since' column
-                            models_to_add.append((key_id, model_name, 'untested', None, initial_check_time))
-                
+                # Calculate the desired state of (key_id, model_name) pairs.
+                desired_model_state = {(key_id, model) for key_id in current_key_ids_in_db for model in provider_models}
+
+                # Get the current state from the DB.
+                rows = await conn.fetch("SELECT key_id, model_name FROM key_model_status WHERE key_id = ANY($1::int[])", list(current_key_ids_in_db))
+                current_model_state = {(row['key_id'], row['model_name']) for row in rows}
+
+                # Add new model associations.
+                models_to_add = list(desired_model_state - current_model_state)
                 if models_to_add:
-                    # Update column list to include the new column
+                    initial_check_time = datetime.utcnow()
+                    records = [(key_id, model, 'untested', None, initial_check_time) for key_id, model in models_to_add]
                     await conn.copy_records_to_table(
-                        'key_model_status',
-                        records=models_to_add,
+                        'key_model_status', records=records,
                         columns=['key_id', 'model_name', 'status', 'failing_since', 'next_check_time']
                     )
-                    logger.info(f"SYNC: Added {len(models_to_add)} new model status records for provider '{provider_name}'.")
+                    logger.info(f"SYNC '{provider_name}': Added {len(models_to_add)} new key-model associations.")
+
+                # Remove obsolete model associations.
+                models_to_remove = list(current_model_state - desired_model_state)
+                if models_to_remove:
+                    # This query efficiently deletes rows matching the tuples.
+                    await conn.execute("""
+                        DELETE FROM key_model_status
+                        WHERE (key_id, model_name) IN (
+                            SELECT key_id, model_name FROM UNNEST($1::record[]) AS t(key_id int, model_name text)
+                        )
+                    """, models_to_remove)
+                    logger.info(f"SYNC '{provider_name}': Removed {len(models_to_remove)} obsolete key-model associations.")
 
     async def get_keys_to_check(self) -> List[Dict[str, Any]]:
-        # REFACTORED: The query now returns `failing_since` and no longer filters by `is_dead`.
+        """
+        Fetches all key-model pairs that are due for a health check.
+        It crucially retrieves the `failing_since` timestamp for the probe's logic.
+        """
         query = """
         SELECT
             k.id AS key_id,
             k.key_value,
             p.name AS provider_name,
             s.model_name AS model_name,
-            s.failing_since  -- This is the crucial new piece of data for the probe.
+            s.failing_since
         FROM api_keys AS k
         JOIN key_model_status AS s ON k.id = s.key_id
         JOIN providers AS p ON k.provider_id = p.id
@@ -229,6 +246,8 @@ class KeyRepository:
         results = []
         checked_keys_for_shared_providers = set()
         
+        # This logic handles providers where all keys share a single status (e.g., account-level rate limit).
+        # It ensures we only check one model per key for these providers to save resources.
         for row in rows:
             provider_name = row['provider_name']
             provider_conf = self.accessor.get_provider(provider_name)
@@ -238,7 +257,6 @@ class KeyRepository:
                 if key_id in checked_keys_for_shared_providers:
                     continue
                 
-                # We still only need to check one model (preferably the default) for shared status keys.
                 if row['model_name'] == provider_conf.default_model:
                     results.append(dict(row))
                     checked_keys_for_shared_providers.add(key_id)
@@ -247,17 +265,18 @@ class KeyRepository:
         return results
 
     async def update_status(self, key_id: int, model_name: str, provider_name: str, result: CheckResult, next_check_time: datetime):
-        # REFACTORED: This method now contains the core logic for managing `failing_since`.
+        """
+        Updates the status of a key-model pair based on a check result.
+        This method contains the core logic for managing the `failing_since` timestamp.
+        """
         status_str = Status.VALID if result.ok else result.error_reason.value
         
-        # Use the new Status enum for the assertion.
         assert status_str in Status, f"Attempted to write invalid status '{status_str}' to the database!"
 
         provider_config = self.accessor.get_provider(provider_name)
         
         async with self._pool.acquire() as conn:
             async with conn.transaction():
-                # This single, powerful query handles all logic for updating the status and the `failing_since` timestamp.
                 base_query = """
                 UPDATE key_model_status
                 SET 
@@ -268,10 +287,7 @@ class KeyRepository:
                     response_time = $4, 
                     error_message = $5,
                     failing_since = CASE
-                        -- If the check was successful, clear the failure timestamp.
                         WHEN $6 THEN NULL
-                        -- Otherwise (if it failed), set the timestamp to now(), but only if it's not already set.
-                        -- This captures the beginning of a continuous failure streak.
                         ELSE COALESCE(failing_since, NOW() AT TIME ZONE 'utc')
                     END
                 WHERE {where_clause}
@@ -286,33 +302,54 @@ class KeyRepository:
                     where_clause = "key_id = $7"
                     params.append(key_id)
                     await conn.execute(base_query.format(where_clause=where_clause), *params)
-                    logger.debug(f"PROPAGATED status for key ID {key_id} to '{status_str}' for all its models.")
                 else:
                     where_clause = "key_id = $7 AND model_name = $8"
                     params.extend([key_id, model_name])
                     await conn.execute(base_query.format(where_clause=where_clause), *params)
 
-                # The old logic for flagging keys as 'dead' is now completely removed.
-
     async def get_available_key(self, provider_name: str, model_name: str) -> Optional[Dict[str, Any]]:
-        # REFACTORED: Removed the `k.is_dead = FALSE` check. The gateway only cares about the 'valid' status.
-        query = """
-            SELECT
-                k.id AS key_id,
-                k.key_value
-            FROM api_keys AS k
-            JOIN key_model_status AS s ON k.id = s.key_id
-            JOIN providers AS p ON k.provider_id = p.id
-            WHERE p.name = $1 AND s.model_name = $2 AND s.status = 'valid'
-            ORDER BY RANDOM()
-            LIMIT 1
-            """
+        """
+        Retrieves a random available key for a given provider and model using
+        the efficient COUNT + OFFSET method, as requested.
+        """
         async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(query, provider_name, model_name)
+            # Step 1: Get the total count of valid keys.
+            count_query = """
+                SELECT COUNT(k.id)
+                FROM api_keys AS k
+                JOIN key_model_status AS s ON k.id = s.key_id
+                JOIN providers AS p ON k.provider_id = p.id
+                WHERE p.name = $1 AND s.model_name = $2 AND s.status = 'valid'
+            """
+            total_valid_keys = await conn.fetchval(count_query, provider_name, model_name)
+
+            # Step 2: Handle the edge case of no available keys.
+            if not total_valid_keys or total_valid_keys == 0:
+                return None
+
+            # Step 3: Generate a random offset and fetch the key.
+            random_offset = random.randint(0, total_valid_keys - 1)
+            
+            get_key_query = """
+                SELECT
+                    k.id AS key_id,
+                    k.key_value
+                FROM api_keys AS k
+                JOIN key_model_status AS s ON k.id = s.key_id
+                JOIN providers AS p ON k.provider_id = p.id
+                WHERE p.name = $1 AND s.model_name = $2 AND s.status = 'valid'
+                ORDER BY k.id -- A stable order is required for OFFSET to be meaningful
+                OFFSET $3
+                LIMIT 1
+            """
+            row = await conn.fetchrow(get_key_query, provider_name, model_name, random_offset)
+            
         return dict(row) if row else None
 
     async def get_status_summary(self) -> List[Dict[str, Any]]:
-        # This query remains correct and does not need changes.
+        """
+        Retrieves an aggregated summary of key statuses, grouped by provider, model, and status.
+        """
         query = """
             SELECT
                 p.name AS provider,
@@ -330,19 +367,21 @@ class KeyRepository:
         return [dict(row) for row in rows]
 
 class ProxyRepository:
+    """Manages data access for proxy-related tables."""
     def __init__(self, pool: Pool):
         self._pool = pool
     
     async def sync(self, provider_name: str, proxies_from_file: Set[str], provider_id: int):
-         # Placeholder for future implementation
+         # This remains a placeholder as its implementation is outside the current scope.
          pass
 
 
-# --- Component 4: Facade ---
+# --- Component 3: Facade ---
 
 class DatabaseManager:
     """
     A facade class that provides a single point of access to all repository objects.
+    This simplifies dependency injection in the service layer.
     """
     def __init__(self, accessor: ConfigAccessor):
         pool = get_pool()
@@ -363,7 +402,7 @@ class DatabaseManager:
 
     async def check_connection(self) -> bool:
         """
-        Performs a simple query to verify that the database connection is alive and valid.
+        Performs a simple query to verify that the database connection is alive.
         """
         try:
             pool = get_pool()
@@ -374,14 +413,12 @@ class DatabaseManager:
             logger.error(f"Database connection check failed: {e}")
             return False
 
-    # REFACTORED: The amnesty mechanism is no longer needed with the new stateful probe logic.
-    # The entire `run_amnesty` method has been removed.
-
     async def run_vacuum(self):
         """Executes the VACUUM command to optimize the database."""
         pool = get_pool()
         async with pool.acquire() as conn:
             logger.info("MAINTENANCE: Starting database VACUUM operation...")
+            # Using non-transactional block for VACUUM
             await conn.execute("VACUUM;")
             logger.info("MAINTENANCE: Database VACUUM completed successfully.")
 
