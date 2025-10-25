@@ -23,7 +23,7 @@ Usage:
 # This follows Step 2 of the plan to create a clean public API.
 from src.config.loader import ConfigLoader
 from src.config.validator import ConfigValidator
-from src.core.accessor import ConfigAccessor
+#from src.core.accessor import ConfigAccessor
 from src.config.schemas import Config
 
 # This variable will hold the single, global instance of the loaded configuration.
@@ -75,8 +75,9 @@ __all__ = [
     "Config",
     "ConfigLoader",
     "ConfigValidator",
-    "ConfigAccessor",
+#    "ConfigAccessor",
     "load_config",
     "get_config",
 ]
+
 
