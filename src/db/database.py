@@ -366,6 +366,28 @@ class KeyRepository:
             rows = await conn.fetch(query)
         return [dict(row) for row in rows]
 
+    async def get_all_valid_keys_for_caching(self) -> List[Dict[str, Any]]:
+        """
+        Fetches all valid keys across all providers and models in a single query.
+        This method is designed to be called periodically to populate the gateway's in-memory cache.
+        
+        Returns:
+            A list of dictionaries, each containing 'provider_name', 'model_name', and 'key_value'.
+        """
+        query = """
+        SELECT
+            p.name as provider_name,
+            s.model_name,
+            k.key_value
+        FROM key_model_status AS s
+        JOIN api_keys AS k ON s.key_id = k.id
+        JOIN providers AS p ON k.provider_id = p.id
+        WHERE s.status = 'valid'
+        """
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(query)
+        return [dict(row) for row in rows]
+
 class ProxyRepository:
     """Manages data access for proxy-related tables."""
     def __init__(self, pool: Pool):
@@ -421,4 +443,3 @@ class DatabaseManager:
             # Using non-transactional block for VACUUM
             await conn.execute("VACUUM;")
             logger.info("MAINTENANCE: Database VACUUM completed successfully.")
-
