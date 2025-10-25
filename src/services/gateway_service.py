@@ -2,15 +2,15 @@
 
 import logging
 import asyncio
-from typing import Optional, Tuple
+from datetime import datetime, timedelta
+from typing import Optional
 
 from fastapi import FastAPI, Request, Response, Header
 from fastapi.responses import JSONResponse, StreamingResponse
-import httpx
 
 # Import core application components
 from src.core.accessor import ConfigAccessor
-from src.core.enums import ErrorReason, Status
+from src.core.enums import ErrorReason
 from src.core.http_client_factory import HttpClientFactory
 from src.core.models import CheckResult, RequestDetails
 from src.core.types import IProvider
@@ -22,8 +22,8 @@ from src.services.gateway_cache import GatewayCache
 # --- Module-level setup ---
 logger = logging.getLogger(__name__)
 
-# These will hold the application's state and dependencies.
-# They are initialized in the main.py entry point.
+# This will hold the application's state and dependencies.
+# It is populated during the FastAPI startup event.
 app_state: dict = {
     "accessor": None,
     "db_manager": None,
@@ -86,7 +86,6 @@ async def _handle_streaming_request(
     model_name: str
 ) -> Response:
     """
-
     Handles requests where retry is disabled, preserving end-to-end streaming.
     It does not read the full request body into memory.
     """
@@ -235,32 +234,56 @@ async def _handle_retryable_request(
 
 # --- FastAPI Application Factory and Event Handlers ---
 
-def create_app(
-    accessor: ConfigAccessor,
-    db_manager: DatabaseManager,
-    http_client_factory: HttpClientFactory,
-    gateway_cache: GatewayCache
-) -> FastAPI:
+def create_app(accessor: ConfigAccessor) -> FastAPI:
     """
     Creates and configures the FastAPI application instance.
+    It now only takes an accessor and manages its own dependencies.
     """
     app = FastAPI(title="llmGateway - API Gateway Service")
 
+    # Store the accessor, which is the only dependency passed from the outside.
     app_state["accessor"] = accessor
-    app_state["db_manager"] = db_manager
-    app_state["http_client_factory"] = http_client_factory
-    app_state["gateway_cache"] = gateway_cache
 
     @app.on_event("startup")
     async def startup_event():
         logger.info("Gateway service starting up...")
-        await app_state["gateway_cache"].populate_caches()
         
-        task = asyncio.create_task(
-            _cache_refresh_loop(app_state["gateway_cache"], interval_sec=30)
-        )
-        app_state["cache_refresh_task"] = task
-        logger.info("Background cache refresh task has been started.")
+        # --- FIXED: Full application state initialization is now done here. ---
+        try:
+            # 1. Get the accessor from app_state.
+            accessor: ConfigAccessor = app_state["accessor"]
+            
+            # 2. Initialize the database pool first. This is the root dependency.
+            dsn = accessor.get_database_dsn()
+            await database.init_db_pool(dsn)
+            logger.info("Database connection pool initialized successfully.")
+            
+            # 3. Create service components that depend on the config and DB pool.
+            logger.info("Creating service components (DB Manager, HTTP Factory, Cache)...")
+            db_manager = DatabaseManager(accessor)
+            http_client_factory = HttpClientFactory(accessor)
+            gateway_cache = GatewayCache(accessor, db_manager)
+            
+            # 4. Store the created components in the app_state for global access.
+            app_state["db_manager"] = db_manager
+            app_state["http_client_factory"] = http_client_factory
+            app_state["gateway_cache"] = gateway_cache
+            logger.info("Service components created and stored in app state.")
+
+            # 5. Now that all components are ready, populate the caches.
+            await gateway_cache.populate_caches()
+            
+            # 6. Start background tasks.
+            task = asyncio.create_task(
+                _cache_refresh_loop(gateway_cache, interval_sec=30)
+            )
+            app_state["cache_refresh_task"] = task
+            logger.info("Background cache refresh task has been started.")
+
+        except Exception as e:
+            logger.critical("A critical error occurred during application startup.", exc_info=e)
+            # This will prevent the application from starting if a critical dependency fails.
+            raise
 
     @app.on_event("shutdown")
     async def shutdown_event():
@@ -273,9 +296,13 @@ def create_app(
             except asyncio.CancelledError:
                 logger.info("Background cache refresh task successfully cancelled.")
         
-        await app_state["http_client_factory"].close_all()
+        http_client_factory = app_state.get("http_client_factory")
+        if http_client_factory:
+            await http_client_factory.close_all()
+        
+        # This function call correctly closes the global pool instance.
         await database.close_db_pool()
-        logger.info("All resources have been released gracefully.")
+        logger.info("All resources (HTTP clients, DB pool) have been released gracefully.")
 
     # --- The Core Catch-All Endpoint ---
     @app.api_route("/{full_path:path}", methods=["GET", "POST", "PUT", "DELETE"])

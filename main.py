@@ -12,10 +12,6 @@ sys.path.insert(0, './src')
 # --- Imports for both Gateway and Worker Services ---
 import uvicorn
 from src.services.gateway_service import create_app
-from src.services.gateway_cache import GatewayCache
-from src.core.http_client_factory import HttpClientFactory
-from src.db import database
-from src.db.database import DatabaseManager
 from src.core.accessor import ConfigAccessor
 from src.config.logging_config import setup_logging
 from src.services.background_worker import run_worker
@@ -38,22 +34,13 @@ def _start_gateway_service(args: argparse.Namespace):
         # Setup logging first, so other components can log during init.
         setup_logging(accessor)
         
-        print("Initializing database connection pool...")
-        # Use asyncio.run() to execute the async init function from a sync context.
-        asyncio.run(database.init_db_pool(accessor.get_database_dsn()))
-        
-        print("Initializing service components...")
-        db_manager = DatabaseManager(accessor)
-        http_client_factory = HttpClientFactory(accessor)
-        gateway_cache = GatewayCache(accessor, db_manager)
+        # --- FIXED: Service component initialization is now moved into the
+        # FastAPI startup event to ensure they are created within the correct
+        # asyncio event loop and after the database pool is ready.
         
         # Create the FastAPI app instance using the factory.
-        app = create_app(
-            accessor=accessor,
-            db_manager=db_manager,
-            http_client_factory=http_client_factory,
-            gateway_cache=gateway_cache
-        )
+        # We only pass the accessor, as the app will manage its own lifecycle.
+        app = create_app(accessor=accessor)
         
         print(f"Starting API Gateway on {args.host}:{args.port} with {args.workers} worker(s)...")
         
