@@ -372,10 +372,12 @@ class KeyRepository:
         This method is designed to be called periodically to populate the gateway's in-memory cache.
         
         Returns:
-            A list of dictionaries, each containing 'provider_name', 'model_name', and 'key_value'.
+            A list of dictionaries, each containing 'key_id', 'provider_name', 
+            'model_name', and 'key_value'.
         """
         query = """
         SELECT
+            k.id AS key_id,
             p.name as provider_name,
             s.model_name,
             k.key_value

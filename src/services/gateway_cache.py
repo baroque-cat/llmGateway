@@ -3,7 +3,7 @@
 import logging
 import asyncio
 import collections
-from typing import Dict, Optional, Deque
+from typing import Dict, Optional, Deque, Tuple
 
 from src.core.accessor import ConfigAccessor
 from src.db.database import DatabaseManager
@@ -34,10 +34,9 @@ class GatewayCache:
         # Cache for mapping gateway access tokens to provider instance names.
         self._auth_token_map: Dict[str, str] = {}
         
-        # Cache for pools of valid API keys, grouped by provider and model.
-        # The key is a composite string "provider_name:model_name".
-        # collections.deque is used for efficient O(1) pops from the left.
-        self._key_pool: Dict[str, Deque[str]] = collections.defaultdict(collections.deque)
+        # REFACTORED: Cache now stores tuples of (key_id, key_value)
+        # to enable the "fast feedback loop" in the gateway service.
+        self._key_pool: Dict[str, Deque[Tuple[int, str]]] = collections.defaultdict(collections.deque)
         
         # A lock to prevent race conditions during concurrent cache refresh operations.
         self._refresh_lock = asyncio.Lock()
@@ -77,16 +76,20 @@ class GatewayCache:
             logger.info("Refreshing key pool cache from database...")
             try:
                 # 1. Fetch all valid keys in a single, efficient query.
+                # This now includes key_id.
                 valid_keys_data = await self.db_manager.keys.get_all_valid_keys_for_caching()
                 
                 # 2. Build a new key pool in a temporary variable.
                 new_key_pool = collections.defaultdict(collections.deque)
                 for record in valid_keys_data:
+                    key_id = record['key_id']
                     provider_name = record['provider_name']
                     model_name = record['model_name']
                     key_value = record['key_value']
                     pool_key = f"{provider_name}:{model_name}"
-                    new_key_pool[pool_key].append(key_value)
+                    
+                    # REFACTORED: Append the (key_id, key_value) tuple.
+                    new_key_pool[pool_key].append((key_id, key_value))
                 
                 # 3. Atomically replace the old pool with the new one.
                 self._key_pool = new_key_pool
@@ -117,7 +120,7 @@ class GatewayCache:
         """
         return self._auth_token_map.get(token)
 
-    def get_key_from_pool(self, provider_name: str, model_name: str) -> Optional[str]:
+    def get_key_from_pool(self, provider_name: str, model_name: str) -> Optional[Tuple[int, str]]:
         """
         Retrieves and removes one available API key from the specified pool.
         
@@ -129,7 +132,7 @@ class GatewayCache:
             model_name: The name of the requested model.
             
         Returns:
-            An API key string if one is available, otherwise None.
+            A tuple of (key_id, key_value) if a key is available, otherwise None.
         """
         pool_key = f"{provider_name}:{model_name}"
         
@@ -137,11 +140,11 @@ class GatewayCache:
         
         if key_queue:
             try:
-                # Get a key from the left (front) of the deque.
-                key = key_queue.popleft()
+                # Get a key tuple from the left (front) of the deque.
+                key_info = key_queue.popleft()
                 # Append it to the right (back) to rotate it.
-                key_queue.append(key)
-                return key
+                key_queue.append(key_info)
+                return key_info
             except IndexError:
                 # This can happen in a rare race condition if the pool becomes empty
                 # between the 'if' check and 'popleft'.
