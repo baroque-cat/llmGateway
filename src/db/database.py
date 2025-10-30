@@ -3,7 +3,9 @@
 import logging
 import random
 from typing import List, Set, Dict, Any, Optional
-from datetime import datetime
+# --- STEP 1: ADD THE REQUIRED IMPORT AS PLANNED ---
+# Added 'timezone' to create timezone-aware datetime objects.
+from datetime import datetime, timezone
 
 import asyncpg
 from asyncpg.pool import Pool
@@ -203,7 +205,11 @@ class KeyRepository:
                 # Add new model associations.
                 models_to_add = list(desired_model_state - current_model_state)
                 if models_to_add:
-                    initial_check_time = datetime.utcnow()
+                    # --- STEP 2 & 3: REPLACE THE PROBLEMATIC LINE AS PLANNED ---
+                    # Use a timezone-aware datetime object for the initial check time.
+                    # This ensures consistency with the TIMESTAMPTZ column and prevents
+                    # timezone-related errors when this value is read by other services.
+                    initial_check_time = datetime.now(timezone.utc)
                     records = [(key_id, model, 'untested', None, initial_check_time) for key_id, model in models_to_add]
                     await conn.copy_records_to_table(
                         'key_model_status', records=records,
@@ -445,3 +451,4 @@ class DatabaseManager:
             # Using non-transactional block for VACUUM
             await conn.execute("VACUUM;")
             logger.info("MAINTENANCE: Database VACUUM completed successfully.")
+

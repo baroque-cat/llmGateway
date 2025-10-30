@@ -2,7 +2,9 @@
 
 import logging
 from typing import List, Dict, Any, Optional
-from datetime import datetime, timedelta
+# --- STEP 1: ADD THE REQUIRED IMPORT AS PLANNED ---
+# Added 'timezone' to create timezone-aware datetime objects.
+from datetime import datetime, timedelta, timezone
 
 from src.core.probes import IResourceProbe
 from src.core.models import CheckResult
@@ -118,7 +120,12 @@ class KeyProbe(IResourceProbe):
         This method implements the new state-aware logic with quarantine and
         permanent failure states.
         """
-        now = datetime.utcnow()
+        # --- STEP 2 & 3: REPLACE THE PROBLEMATIC LINE AS PLANNED ---
+        # Get the current time in UTC as a timezone-aware object.
+        # This is critical for performing correct arithmetic with the 'failing_since'
+        # timestamp, which is also timezone-aware from the database.
+        # Using the naive datetime.utcnow() would cause a TypeError.
+        now = datetime.now(timezone.utc)
 
         # 1. Highest priority: a successful check resets everything.
         if result.ok:
@@ -127,6 +134,7 @@ class KeyProbe(IResourceProbe):
         # The key is failing. The 'failing_since' timestamp determines the strategy.
         # This timestamp is set by the database layer on the first failure in a series.
         if failing_since:
+            # This calculation is now safe because both 'now' and 'failing_since' are timezone-aware.
             time_failing = now - failing_since
 
             # 2. Second priority: check if we should stop checking altogether.

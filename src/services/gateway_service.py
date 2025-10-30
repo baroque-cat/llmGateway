@@ -1,8 +1,11 @@
-# src/services/gateway_service.py
+#!/usr/bin/env python3
 
 import logging
 import asyncio
-from datetime import datetime, timedelta
+# --- STEP 1: ADD THE REQUIRED IMPORT AS PLANNED ---
+# Added 'timezone' to create timezone-aware datetime objects, ensuring
+# consistency across all parts of the application that interact with the database.
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import FastAPI, Request, Response, Header
@@ -62,9 +65,13 @@ async def _report_key_failure(db_manager: DatabaseManager, key_id: int, provider
     This implements the "fast feedback loop".
     """
     try:
-        # The next_check_time here is a placeholder; the KeyProbe's calculation is the source of truth.
-        # We just need to update the status immediately.
-        placeholder_next_check = datetime.utcnow() + timedelta(minutes=1)
+        # --- STEP 2 & 3: REPLACE THE PROBLEMATIC LINE AS PLANNED ---
+        # The next_check_time here is a placeholder. The gateway's job is to
+        # report the failure *now*, not to decide when to re-check. The complex
+        # scheduling logic belongs to the KeyProbe.
+        # We use a timezone-aware datetime object to prevent TypeErrors and
+        # maintain data consistency with the TIMESTAMPTZ database column.
+        placeholder_next_check = datetime.now(timezone.utc) + timedelta(minutes=1)
         
         await db_manager.keys.update_status(
             key_id=key_id,
@@ -79,23 +86,16 @@ async def _report_key_failure(db_manager: DatabaseManager, key_id: int, provider
 
 # --- REFACTORED AND TEMPORARILY MODIFIED Request Handlers ---
 
-# JUSTIFICATION FOR CHANGE (as per plan step 2):
-# Renamed from _handle_streaming_request to _handle_direct_request because it no longer streams.
-# This improves code clarity and reflects its actual (temporary) behavior.
 async def _handle_direct_request(
-    # JUSTIFICATION FOR CHANGE (as per plan step 1):
-    # The signature is changed from `request: Request` to `content: bytes`.
-    # This decouples the handler from the FastAPI request object and solves the "body can be read only once" issue.
     content: bytes,
-    request_meta: Request, # Keep original request for metadata like method, path, headers
+    request_meta: Request, 
     provider: IProvider,
     instance_name: str,
     model_name: str
 ) -> Response:
     """
     Handles requests where retry is disabled.
-    TEMPORARY DEBUGGING CHANGE: This function now reads the full response body
-    into memory and returns a standard `Response`, disabling streaming.
+    This function reads the full response body into memory and returns a standard `Response`.
     """
     cache: GatewayCache = app_state["gateway_cache"]
     http_factory: HttpClientFactory = app_state["http_client_factory"]
@@ -120,10 +120,6 @@ async def _handle_direct_request(
     )
     
     if check_result.ok:
-        # JUSTIFICATION FOR CHANGE (as per plan step 1):
-        # This is the core of the "no-streaming" temporary fix.
-        # Instead of returning a StreamingResponse, we read the entire body with .aread()
-        # and then return a regular fastapi.Response.
         response_body = await upstream_response.aread()
         await upstream_response.aclose()
         return Response(
@@ -140,8 +136,6 @@ async def _handle_direct_request(
         )
 
 async def _handle_retryable_request(
-    # JUSTIFICATION FOR CHANGE (as per plan step 1):
-    # Signature changed to accept `content: bytes` for the same reasons as _handle_direct_request.
     content: bytes,
     request_meta: Request,
     provider: IProvider,
@@ -150,8 +144,7 @@ async def _handle_retryable_request(
 ) -> Response:
     """
     Handles requests where retry is enabled.
-    TEMPORARY DEBUGGING CHANGE: This function now reads the full response body
-    into memory and returns a standard `Response`, disabling streaming.
+    This function reads the full response body into memory and returns a standard `Response`.
     """
     cache: GatewayCache = app_state["gateway_cache"]
     http_factory: HttpClientFactory = app_state["http_client_factory"]
@@ -189,9 +182,6 @@ async def _handle_retryable_request(
         )
 
         if check_result.ok:
-            # JUSTIFICATION FOR CHANGE (as per plan step 1):
-            # Same as in the other handler, we disable streaming by reading the full body
-            # before returning the response.
             response_body = await upstream_response.aread()
             await upstream_response.aclose()
             return Response(
@@ -329,25 +319,18 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
         
         # --- 3. Parse Request and Decide Logic Path ---
         
-        # JUSTIFICATION FOR CHANGE (as per plan step 3):
-        # This is the core logic change. We implement the conditional workflow
-        # to handle different provider types correctly.
-        
         details: RequestDetails
         request_body: bytes
         
         if provider_config.provider_type == "gemini":
-            # For Gemini, parse details from the path first, without touching the body.
             try:
                 details = await provider.parse_request_details(path=full_path, content=b"")
             except ValueError as e:
                 return JSONResponse(status_code=400, content={"error": f"Bad request: {e}"})
             
-            # Now that we know the model and are ready to proxy, we can safely read the body.
             request_body = await request.body()
         
-        else: # For 'openai_like', 'deepseek', etc.
-            # For these providers, we MUST read the body to determine the model.
+        else:
             request_body = await request.body()
             try:
                 details = await provider.parse_request_details(path=full_path, content=request_body)
@@ -360,16 +343,10 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
                 content={"error": f"Model '{details.model_name}' is not permitted for this provider instance."}
             )
 
-        # JUSTIFICATION FOR CHANGE (as per plan step 3):
-        # The 'synthetic_request' workaround is now removed. It's no longer needed because
-        # we pass the `request_body` (bytes) directly to the handlers.
-        
         retry_policy = provider_config.gateway_policy.retry
         if retry_policy.enabled:
             return await _handle_retryable_request(request_body, request, provider, instance_name, details)
         else:
-            # Call the renamed function
             return await _handle_direct_request(request_body, request, provider, instance_name, details.model_name)
 
     return app
-
