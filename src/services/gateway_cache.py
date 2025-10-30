@@ -34,11 +34,12 @@ class GatewayCache:
         # Cache for mapping gateway access tokens to provider instance names.
         self._auth_token_map: Dict[str, str] = {}
         
-        # REFACTORED: Cache now stores tuples of (key_id, key_value)
+        # Cache now stores tuples of (key_id, key_value)
         # to enable the "fast feedback loop" in the gateway service.
         self._key_pool: Dict[str, Deque[Tuple[int, str]]] = collections.defaultdict(collections.deque)
         
-        # A lock to prevent race conditions during concurrent cache refresh operations.
+        # A lock to prevent race conditions during concurrent cache modifications.
+        # This lock must be used by ALL methods that write to _key_pool.
         self._refresh_lock = asyncio.Lock()
 
     def _populate_auth_map(self):
@@ -76,7 +77,6 @@ class GatewayCache:
             logger.info("Refreshing key pool cache from database...")
             try:
                 # 1. Fetch all valid keys in a single, efficient query.
-                # This now includes key_id.
                 valid_keys_data = await self.db_manager.keys.get_all_valid_keys_for_caching()
                 
                 # 2. Build a new key pool in a temporary variable.
@@ -88,7 +88,6 @@ class GatewayCache:
                     key_value = record['key_value']
                     pool_key = f"{provider_name}:{model_name}"
                     
-                    # REFACTORED: Append the (key_id, key_value) tuple.
                     new_key_pool[pool_key].append((key_id, key_value))
                 
                 # 3. Atomically replace the old pool with the new one.
@@ -122,10 +121,10 @@ class GatewayCache:
 
     def get_key_from_pool(self, provider_name: str, model_name: str) -> Optional[Tuple[int, str]]:
         """
-        Retrieves and removes one available API key from the specified pool.
+        Retrieves one available API key from the specified pool and rotates it.
         
-        This operation is performed in O(1) time. If a key is used, it is
-        rotated to the back of the queue to ensure fair usage.
+        This operation is performed in O(1) time and is NOT locked to ensure
+        maximum performance for read operations. `deque` operations are atomic.
         
         Args:
             provider_name: The name of the provider instance.
@@ -147,7 +146,70 @@ class GatewayCache:
                 return key_info
             except IndexError:
                 # This can happen in a rare race condition if the pool becomes empty
-                # between the 'if' check and 'popleft'.
+                # between the 'if' check and 'popleft' because of a concurrent removal.
                 return None
         
         return None
+
+    # --- REFACTORED: Method is now aware of shared_key_status ---
+    async def remove_key_from_pool(self, provider_name: str, model_name: str, key_id: int):
+        """
+        Immediately removes a specific key from the live key pool cache.
+        
+        If the provider has 'shared_key_status' enabled, this method will
+        remove the key from ALL model pools associated with that provider.
+        Otherwise, it removes the key only from the specific model's pool.
+        This is a write operation and is protected by a lock.
+        
+        Args:
+            provider_name: The name of the provider instance.
+            model_name: The name of the model that triggered the failure.
+            key_id: The database ID of the key to remove.
+        """
+        async with self._refresh_lock:
+            provider_config = self.accessor.get_provider(provider_name)
+            
+            # --- NEW: Logic to decide removal strategy ---
+            if provider_config and provider_config.shared_key_status:
+                # Broadcast removal: remove the key from all pools for this provider.
+                logger.info(
+                    f"Broadcasting removal of shared key_id {key_id} for all models of provider '{provider_name}'."
+                )
+                # Find all pool keys that belong to this provider instance.
+                pools_to_update = [
+                    pool_key for pool_key in self._key_pool 
+                    if pool_key.startswith(f"{provider_name}:")
+                ]
+                
+                for pool_key in pools_to_update:
+                    self._remove_from_single_pool(pool_key, key_id)
+            else:
+                # Granular removal: remove the key only from the specific pool.
+                pool_key = f"{provider_name}:{model_name}"
+                self._remove_from_single_pool(pool_key, key_id)
+
+    def _remove_from_single_pool(self, pool_key: str, key_id: int):
+        """
+        A private helper to perform the removal logic on a single key pool.
+        This avoids code duplication.
+        """
+        key_queue = self._key_pool.get(pool_key)
+        
+        if not key_queue:
+            return # The pool is already empty or doesn't exist.
+
+        initial_size = len(key_queue)
+        
+        # Re-create the deque, excluding the key with the matching ID.
+        new_queue = collections.deque(
+            [info for info in key_queue if info[0] != key_id]
+        )
+        
+        if len(new_queue) < initial_size:
+            self._key_pool[pool_key] = new_queue
+            logger.info(f"Removed failed key_id {key_id} from live cache pool '{pool_key}'. "
+                        f"Pool size changed from {initial_size} to {len(new_queue)}.")
+        else:
+            # This is not an error, just means the key was already removed by another coroutine.
+            logger.debug(f"Attempted to remove key_id {key_id} from pool '{pool_key}', but it was not found.")
+

@@ -17,10 +17,7 @@ Key changes:
 PROVIDER_TYPE_DEFAULTS = {
     "gemini": {
         "api_base_url": "https://generativelanguage.googleapis.com",
-        "default_model": "gemini-2.5-flash",
-        "shared_key_status": False,
 
-        
         # This new structure allows a single provider to handle different
         # model types (text, image, etc.) by reading its configuration.
         "models": {
@@ -51,22 +48,11 @@ PROVIDER_TYPE_DEFAULTS = {
     
     "deepseek": {
         "api_base_url": "https://api.deepseek.com",
-        "default_model": "deepseek-chat",
-        "shared_key_status": True,
+        "default_model": "deepseek-reasoner",
+        "shared_key_status": False,
         
         # For OpenAI-like APIs, the endpoint is often the same for all chat models.
         "models": {
-            "deepseek-chat": {
-                # The full path appended to the base URL.
-                "endpoint_suffix": "/chat/completions",
-                # Note: The 'model' field is intentionally omitted.
-                # The provider code is responsible for injecting the correct
-                # model name into this payload before sending the request.
-                "test_payload": {
-                    "messages": [{"role": "user", "content": "Hello"}],
-                    "max_tokens": 1,
-                }
-            },
             "deepseek-reasoner": {
                 "endpoint_suffix": "/chat/completions",
                 "test_payload": {

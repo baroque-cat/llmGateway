@@ -31,7 +31,7 @@ def get_default_config() -> Dict[str, Any]:
 
         "logging": {
             "summary_log_path": "logs/summary/",
-            "summary_interval_min": 60,
+            "summary_interval_min": 30,
             "summary_log_max_size_mb": 5,
             "summary_log_backup_count": 3,
         },
@@ -62,9 +62,9 @@ def get_default_config() -> Dict[str, Any]:
                     "on_overload_min": 60,
                     # Intervals in Hours
                     "on_other_error_hr": 1,
-                    "on_success_hr": 2,
-                    "on_rate_limit_hr": 3,
-                    "on_no_quota_hr": 24,
+                    "on_success_hr": 1,
+                    "on_rate_limit_hr": 4,
+                    "on_no_quota_hr": 4,
                     # Intervals in Days
                     "on_invalid_key_days": 10,
                     "on_no_access_days": 10,

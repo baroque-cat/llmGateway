@@ -102,9 +102,9 @@ class HealthPolicyConfig:
 
     # --- Intervals in Hours (for medium-term issues) ---
     on_other_error_hr: int = 1
-    on_success_hr: int = 2
-    on_rate_limit_hr: int = 3
-    on_no_quota_hr: int = 24
+    on_success_hr: int = 1
+    on_rate_limit_hr: int = 4
+    on_no_quota_hr: int = 4
 
     # --- Intervals in Days (for long-term, persistent errors) ---
     on_invalid_key_days: int = 10
@@ -243,7 +243,7 @@ class LoggingConfig:
     # Path to the directory for summary log files.
     summary_log_path: str = "logs/summary/"
     # Interval in minutes for writing a summary log.
-    summary_interval_min: int = 60
+    summary_interval_min: int = 30
     # Maximum size in MB for a single summary log file before rotation.
     summary_log_max_size_mb: int = 5
     # Number of backup summary log files to keep.

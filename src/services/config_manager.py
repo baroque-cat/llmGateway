@@ -1,5 +1,7 @@
 # src/services/config_manager.py
 
+# src/services/config_manager.py
+
 import os
 import re
 import sys
@@ -90,48 +92,75 @@ class ConfigManager:
             supported = ", ".join(PROVIDER_TYPE_DEFAULTS.keys())
             raise ValueError(f"Unsupported provider type '{provider_type}'. Supported: {supported}")
 
-        # Step 2: Prepare common customizations.
+        # Step 2: Prepare common instance-specific customizations.
         token_var_name = f"{instance_name.upper().replace('-', '_')}_TOKEN"
         custom_fields = {
-            'provider_type': provider_type,
             'keys_path': os.path.join(self.keys_base_path, instance_name, ''),
             'access_control': {
                 'gateway_access_token': f"${{{token_var_name}}}"
             }
         }
 
-        # Step 3: Build the config based on the 'full' flag.
+        # Step 3: Build the config based on the 'full' flag, ensuring key order.
         if full:
-            # For a full config, we merge multiple layers.
-            # 1. Start with the absolute base template.
-            full_instance_config = copy.deepcopy(get_default_config()['providers']['llm_provider_default'])
+            # --- REFACTORED LOGIC FOR FULL CONFIG ---
+            # 1. Gather all data sources into a single dictionary.
+            base_template = copy.deepcopy(get_default_config()['providers']['llm_provider_default'])
+            type_specifics = PROVIDER_TYPE_DEFAULTS.get(provider_type, {})
             
-            # 2. Merge the provider-specific template over it.
-            type_specifics = PROVIDER_TYPE_DEFAULTS[provider_type]
-            full_instance_config.update(type_specifics)
+            # Merge sources. The order here determines precedence, not final key order.
+            source_data = {**base_template, **type_specifics, **custom_fields}
+            
+            # 2. Define the desired order for top-level keys.
+            TOP_LEVEL_KEY_ORDER = [
+                "provider_type", "enabled", "default_model", "shared_key_status",
+                "keys_path", "api_base_url", "models", "access_control",
+                "health_policy", "proxy_config", "timeouts", "gateway_policy"
+            ]
+            
+            # 3. Build the new dictionary in the specified order.
+            ordered_config = {}
+            processed_keys = set()
 
-            # 3. Apply the final instance-specific customizations.
-            full_instance_config.update(custom_fields)
-            full_instance_config['proxy_config']['pool_list_path'] = os.path.join(self.proxies_base_path, instance_name, '')
+            for key in TOP_LEVEL_KEY_ORDER:
+                if key in source_data:
+                    ordered_config[key] = source_data[key]
+                    processed_keys.add(key)
             
-            return full_instance_config
+            # 4. Add any remaining keys that were not in the priority list.
+            # This makes the function robust to future additions in defaults.
+            for key, value in source_data.items():
+                if key not in processed_keys:
+                    ordered_config[key] = value
+
+            # 5. Apply final, instance-specific overrides that were not in custom_fields.
+            ordered_config['provider_type'] = provider_type
+            ordered_config['proxy_config']['pool_list_path'] = os.path.join(self.proxies_base_path, instance_name, '')
+
+            return ordered_config
         else:
             # --- REFACTORED LOGIC FOR MINIMAL CONFIG ---
-            # This logic is designed to create a clean, minimal config with a logical key order.
-            
-            # 1. Create an empty dictionary to control insertion order. This is the core of the fix.
+            # 1. Start with an empty dictionary to control insertion order.
             minimal_config = {}
-
-            # 2. Add the most important identifying keys first, ensuring they appear at the top of the YAML block.
+            
+            # 2. Add the most important identifying keys first.
             minimal_config["provider_type"] = provider_type
             minimal_config["enabled"] = True
             
-            # 3. Merge the provider-specific template. This adds all relevant defaults
-            #    (like api_base_url, default_model, models, shared_key_status) in a robust way.
+            # 3. Make a safe copy of the type-specific template.
             type_specifics = copy.deepcopy(PROVIDER_TYPE_DEFAULTS[provider_type])
+            
+            # 4. Explicitly add high-priority optional keys if they exist,
+            #    removing them from the template to avoid duplication.
+            if 'default_model' in type_specifics:
+                minimal_config['default_model'] = type_specifics.pop('default_model')
+            if 'shared_key_status' in type_specifics:
+                minimal_config['shared_key_status'] = type_specifics.pop('shared_key_status')
+
+            # 5. Update with the rest of the template's keys (e.g., api_base_url, models).
             minimal_config.update(type_specifics)
             
-            # 4. Add the final instance-specific fields to the end.
+            # 6. Add the final instance-specific fields to the end.
             minimal_config["keys_path"] = custom_fields["keys_path"]
             minimal_config["access_control"] = custom_fields["access_control"]
             
