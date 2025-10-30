@@ -18,6 +18,30 @@ class OpenAILikeProvider(AIBaseProvider):
     This class serves as a versatile base for providers that follow the OpenAI API format.
     """
 
+    # --- Implementation of the error parsing contract from AIBaseProvider ---
+    async def _parse_proxy_error(self, response: httpx.Response) -> CheckResult:
+        """
+        Parses a failed OpenAI-like API response into a standardized CheckResult.
+
+        This method implements the safe-access pattern required by httpx:
+        1. Read the response body first.
+        2. THEN, access properties like .elapsed.
+        This fixes the latent RuntimeError for this provider type.
+        """
+        status_code = response.status_code
+        
+        # 1. Read body first.
+        response_bytes = await response.aread()
+        response_text = response_bytes.decode(errors='ignore')
+
+        # 2. Access .elapsed now that it's safe.
+        response_time = response.elapsed.total_seconds()
+        
+        # 3. Use this provider's specific mapping logic.
+        reason = self._map_status_code_to_reason(status_code)
+        
+        return CheckResult.fail(reason, response_text, response_time, status_code)
+
     async def parse_request_details(self, path: str, content: bytes) -> RequestDetails:
         """
         Parses a JSON request body to extract the model name for OpenAI-like APIs.
@@ -89,7 +113,6 @@ class OpenAILikeProvider(AIBaseProvider):
         
         return ErrorReason.UNKNOWN
 
-    # --- REFACTORED: The method now reads endpoint and payload from the config ---
     async def check(self, client: httpx.AsyncClient, token: str, model: str) -> CheckResult:
         """
         Checks the validity of an API token by making an async, lightweight test request.
@@ -102,17 +125,14 @@ class OpenAILikeProvider(AIBaseProvider):
         if not headers:
             return CheckResult.fail(ErrorReason.INVALID_KEY, "Token is empty or invalid.")
 
-        # Step 1: Get model-specific configuration.
         model_info = self.config.models.get(model)
         if not model_info:
             msg = f"Configuration for model '{model}' not found in provider '{self.name}'."
             logger.error(msg)
             return CheckResult.fail(ErrorReason.BAD_REQUEST, msg)
 
-        # Step 2: Build the URL and payload dynamically from the config.
         api_url = f"{self.config.api_base_url.rstrip('/')}{model_info.endpoint_suffix}"
         
-        # Create a copy of the payload template and inject the model name.
         payload = model_info.test_payload.copy()
         payload["model"] = model
         
@@ -153,7 +173,6 @@ class OpenAILikeProvider(AIBaseProvider):
         except httpx.RequestError as e:
             return CheckResult.fail(ErrorReason.NETWORK_ERROR, str(e), status_code=503)
 
-    # --- REFACTORED: The method now correctly reads from the new models dictionary ---
     async def inspect(self, client: httpx.AsyncClient, token: str, **kwargs) -> List[str]:
         """
         Inspects and returns a list of available models from the configuration.
@@ -162,18 +181,25 @@ class OpenAILikeProvider(AIBaseProvider):
         logger.debug(f"Inspecting models for provider '{self.name}' by reading from config.")
         return list(self.config.models.keys())
     
+    # --- REFACTORED: Now uses the centralized helper method from AIBaseProvider ---
     async def proxy_request(
-        self, client: httpx.AsyncClient, token: str, method: str, headers: Dict, path: str, content: bytes
+        self, client: httpx.AsyncClient, token: str, method: str, headers: Dict, path: str, query_params: str, content: bytes
     ) -> Tuple[httpx.Response, CheckResult]:
         """
-        Proxies the incoming request to an OpenAI-like API with streaming support.
-        (No changes needed here as it relies on the path provided by the gateway)
+        Proxies the incoming request to an OpenAI-like API.
+        
+        This method is now a thin wrapper that constructs the request and then
+        delegates the sending and response parsing to the robust `_send_proxy_request`
+        method in the base class.
         """
+        # 1. Construct the full upstream URL.
         base_url = self.config.api_base_url.rstrip('/')
         upstream_url = f"{base_url}/{path.lstrip('/')}"
-        
+        if query_params:
+            upstream_url += f"?{query_params}"
+
+        # 2. Prepare headers and timeouts.
         proxy_headers = self._prepare_proxy_headers(token, headers)
-        
         timeout_config = self.config.timeouts
         timeout = httpx.Timeout(
             connect=timeout_config.connect,
@@ -182,30 +208,16 @@ class OpenAILikeProvider(AIBaseProvider):
             pool=timeout_config.pool
         )
         
-        try:
-            upstream_request = client.build_request(
-                method=method,
-                url=upstream_url,
-                headers=proxy_headers,
-                content=content,
-                timeout=timeout,
-            )
-            upstream_response = await client.send(upstream_request, stream=True)
-            
-            status_code = upstream_response.status_code
-            response_time = upstream_response.elapsed.total_seconds()
-            
-            if upstream_response.is_success:
-                check_result = CheckResult.success(response_time=response_time, status_code=status_code)
-            else:
-                response_text = await upstream_response.aread()
-                reason = self._map_status_code_to_reason(status_code)
-                check_result = CheckResult.fail(reason, response_text.decode(), response_time, status_code)
+        # 3. Build the request object.
+        upstream_request = client.build_request(
+            method=method,
+            url=upstream_url,
+            headers=proxy_headers,
+            content=content,
+            timeout=timeout,
+        )
+        
+        # 4. Delegate to the centralized, reliable sender method.
+        return await self._send_proxy_request(client, upstream_request)
 
-        except httpx.RequestError as e:
-            error_message = f"Upstream request failed: {e}"
-            logger.error(error_message)
-            check_result = CheckResult.fail(ErrorReason.NETWORK_ERROR, error_message, status_code=503)
-            upstream_response = httpx.Response(503, content=error_message.encode())
-            
-        return upstream_response, check_result
+

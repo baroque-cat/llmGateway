@@ -40,46 +40,37 @@ class GeminiProvider(GeminiBaseProvider):
 
         return {"api_url": api_url, "payload": payload}
 
+    # --- REFACTORED: Now uses the centralized helper method from AIBaseProvider ---
     async def proxy_request(
-        self, client: httpx.AsyncClient, token: str, method: str, headers: Dict, path: str, content: bytes
+        self, client: httpx.AsyncClient, token: str, method: str, headers: Dict, path: str, query_params: str, content: bytes
     ) -> Tuple[httpx.Response, CheckResult]:
         """
-        Proxies the incoming request to the Gemini API with streaming support.
-        This implementation is generic enough for standard text/image proxying.
+        Proxies the incoming request to the Gemini API.
+        
+        This method is now a thin wrapper that constructs the request and then
+        delegates the sending and response parsing to the robust `_send_proxy_request`
+        method in the base class.
         """
+        # 1. Construct the full upstream URL.
         base_url = self.config.api_base_url.rstrip('/')
         upstream_url = f"{base_url}/{path.lstrip('/')}"
+        if query_params:
+            upstream_url += f"?{query_params}"
         
+        # 2. Prepare headers and timeouts.
         proxy_headers = self._prepare_proxy_headers(token, headers)
-        
         timeout_config = self.config.timeouts
         timeout = httpx.Timeout(
             connect=timeout_config.connect, read=timeout_config.read,
             write=timeout_config.write, pool=timeout_config.pool
         )
         
-        try:
-            upstream_request = client.build_request(
-                method=method, url=upstream_url, headers=proxy_headers,
-                content=content, timeout=timeout,
-            )
-            upstream_response = await client.send(upstream_request, stream=True)
-            
-            status_code = upstream_response.status_code
-            response_time = upstream_response.elapsed.total_seconds()
-            
-            if upstream_response.is_success:
-                check_result = CheckResult.success(response_time=response_time, status_code=status_code)
-            else:
-                response_text = await upstream_response.aread()
-                # Use the centralized error mapping method from the base class.
-                reason = self._map_error_to_reason(status_code, response_text.decode())
-                check_result = CheckResult.fail(reason, response_text.decode(), response_time, status_code)
-            
-        except httpx.RequestError as e:
-            error_message = f"Upstream request failed: {e}"
-            logger.error(error_message)
-            check_result = CheckResult.fail(ErrorReason.NETWORK_ERROR, error_message, status_code=503)
-            upstream_response = httpx.Response(503, content=error_message.encode())
+        # 3. Build the request object.
+        upstream_request = client.build_request(
+            method=method, url=upstream_url, headers=proxy_headers,
+            content=content, timeout=timeout,
+        )
+        
+        # 4. Delegate to the centralized, reliable sender method.
+        return await self._send_proxy_request(client, upstream_request)
 
-        return upstream_response, check_result

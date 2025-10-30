@@ -41,6 +41,30 @@ class GeminiBaseProvider(AIBaseProvider):
             "Content-Type": "application/json",
         }
 
+    # --- Implementation of the error parsing contract from AIBaseProvider ---
+    async def _parse_proxy_error(self, response: httpx.Response) -> CheckResult:
+        """
+        Parses a failed Gemini API response into a standardized CheckResult.
+
+        This method implements the safe-access pattern required by httpx:
+        1. Read the response body first.
+        2. THEN, access properties like .elapsed.
+        This definitively fixes the RuntimeError.
+        """
+        status_code = response.status_code
+        
+        # 1. Read the response body first. This makes other properties available.
+        response_bytes = await response.aread()
+        response_text = response_bytes.decode(errors='ignore')
+        
+        # 2. Now it is safe to access .elapsed.
+        response_time = response.elapsed.total_seconds()
+        
+        # 3. Use the centralized mapping logic to determine the failure reason.
+        reason = self._map_error_to_reason(status_code, response_text)
+        
+        return CheckResult.fail(reason, response_text, response_time, status_code)
+
     async def inspect(self, client: httpx.AsyncClient, token: str, **kwargs) -> List[str]:
         """
         Inspects and returns a list of available models from the configuration.
@@ -173,10 +197,11 @@ class GeminiBaseProvider(AIBaseProvider):
 
     @abstractmethod
     async def proxy_request(
-        self, client: httpx.AsyncClient, token: str, method: str, headers: Dict, path: str, content: bytes
+        self, client: httpx.AsyncClient, token: str, method: str, headers: Dict, path: str, query_params: str, content: bytes
     ) -> Tuple[httpx.Response, CheckResult]:
         """
         (Abstract) Proxies an incoming client request to the target API provider.
         Must be implemented by concrete subclasses.
         """
         raise NotImplementedError
+

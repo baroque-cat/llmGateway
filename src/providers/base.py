@@ -1,14 +1,19 @@
 # src/providers/base.py
 
+import logging
 from abc import abstractmethod
 from typing import List, Optional, Dict, Tuple
 
 import httpx
 
 from src.core.types import IProvider
-# --- NEW: Import the required data models ---
+# --- Import the required data models ---
 from src.core.models import CheckResult, RequestDetails
 from src.config.schemas import ProviderConfig
+from src.core.enums import ErrorReason
+
+# --- Get a logger for this module ---
+logger = logging.getLogger(__name__)
 
 
 class AIBaseProvider(IProvider):
@@ -62,41 +67,80 @@ class AIBaseProvider(IProvider):
         
         return cleaned_headers
 
-    # --- NEW: Abstract method from IProvider is now declared here ---
+    # --- REFACTORED: Protected helper method for sending requests (Template Method pattern) ---
+    async def _send_proxy_request(
+        self, client: httpx.AsyncClient, request: httpx.Request
+    ) -> Tuple[httpx.Response, CheckResult]:
+        """
+        Sends a pre-built proxy request and parses the result.
+
+        This method encapsulates the common logic for sending a request,
+        handling network errors, and processing successful/failed responses.
+        It delegates the parsing of provider-specific errors to the
+        `_parse_proxy_error` method.
+
+        Args:
+            client: The httpx.AsyncClient to use for the request.
+            request: The pre-built httpx.Request object.
+
+        Returns:
+            A tuple containing the raw httpx.Response and a parsed CheckResult.
+        """
+        try:
+            upstream_response = await client.send(request, stream=True)
+            
+            if upstream_response.is_success:
+                # --- FIXED: Do NOT access .elapsed on a successful streaming response ---
+                # The response body has not been read yet, so accessing .elapsed
+                # would raise a RuntimeError. For a successful proxy, we only
+                # need to confirm it's okay and pass the status code.
+                check_result = CheckResult.success(status_code=upstream_response.status_code)
+            else:
+                # For failed responses, delegate parsing to the provider-specific method.
+                # This method is responsible for safely reading the response.
+                check_result = await self._parse_proxy_error(upstream_response)
+
+        except httpx.RequestError as e:
+            error_message = f"Upstream request failed with a network-level error: {e}"
+            logger.error(error_message)
+            check_result = CheckResult.fail(ErrorReason.NETWORK_ERROR, error_message, status_code=503)
+            # Create a synthetic response for the gateway to handle gracefully.
+            upstream_response = httpx.Response(503, content=error_message.encode())
+        
+        return upstream_response, check_result
+
+    # --- Abstract method for provider-specific error parsing ---
+    @abstractmethod
+    async def _parse_proxy_error(self, response: httpx.Response) -> CheckResult:
+        """
+        (Abstract) Parses a failed httpx.Response to generate a CheckResult.
+
+        This method MUST be implemented by subclasses. It is responsible for
+        safely reading the response body and mapping the provider-specific
+        error content to a standardized ErrorReason. This is where the fix
+        for the '.elapsed' RuntimeError is implemented for *failed* requests.
+
+        Args:
+            response: The failed httpx.Response object from the upstream service.
+
+        Returns:
+            A CheckResult object detailing the failure.
+        """
+        raise NotImplementedError
+
     @abstractmethod
     async def parse_request_details(self, path: str, content: bytes) -> RequestDetails:
         """
         (Abstract) Parses the raw incoming request to extract provider-specific details.
-        
-        This is a key method for the gateway's operation, delegating the complex
-        task of understanding different API request formats to the specific provider
-        implementation. This is the cornerstone of the polymorphic gateway design.
-        
         Must be implemented by subclasses.
-        
-        Args:
-            path: The URL path of the original request (e.g., '/v1/chat/completions').
-            content: The raw byte content (body) of the original request.
-        
-        Returns:
-            A RequestDetails object containing standardized information like the model name.
-        
-        Raises:
-            ValueError: If parsing fails due to invalid format or missing data.
         """
         raise NotImplementedError
 
     @abstractmethod
     def _get_headers(self, token: str) -> Optional[Dict[str, str]]:
         """
-        Constructs the necessary authentication headers for API requests.
+        (Abstract) Constructs the necessary authentication headers for API requests.
         Must be implemented by subclasses.
-
-        Args:
-            token: The API token to be used for authentication.
-
-        Returns:
-            A dictionary of headers or None if token is invalid.
         """
         raise NotImplementedError
 
@@ -104,10 +148,6 @@ class AIBaseProvider(IProvider):
     async def check(self, client: httpx.AsyncClient, token: str, **kwargs) -> CheckResult:
         """
         (Abstract) Checks if an API token is valid for this provider. (Async)
-        
-        REFACTORED: The signature is now aligned with the IProvider interface,
-        and no longer contains the 'proxy' parameter. The client provided is
-        expected to be pre-configured by the HttpClientFactory.
         """
         raise NotImplementedError
 
@@ -120,9 +160,10 @@ class AIBaseProvider(IProvider):
     
     @abstractmethod
     async def proxy_request(
-        self, client: httpx.AsyncClient, token: str, method: str, headers: Dict, path: str, content: bytes
+        self, client: httpx.AsyncClient, token: str, method: str, headers: Dict, path: str, query_params: str, content: bytes
     ) -> Tuple[httpx.Response, CheckResult]:
         """
         (Abstract) Proxies an incoming client request to the target API provider. (Async)
         """
         raise NotImplementedError
+

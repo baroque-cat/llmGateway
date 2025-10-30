@@ -104,9 +104,10 @@ class IProvider(ABC):
         """
         pass
 
+    # --- MODIFIED: Added query_params to the method signature ---
     @abstractmethod
     async def proxy_request(
-        self, client: httpx.AsyncClient, token: str, method: str, headers: Dict, path: str, content: bytes
+        self, client: httpx.AsyncClient, token: str, method: str, headers: Dict, path: str, query_params: str, content: bytes
     ) -> Tuple[httpx.Response, CheckResult]:
         """
         Proxies an incoming client request to the target API provider. (Async)
@@ -121,6 +122,7 @@ class IProvider(ABC):
             method: The HTTP method of the original request (e.g., "POST").
             headers: A dictionary of headers from the original request.
             path: The URL path of the original request.
+            query_params: The raw query string from the original request (e.g., "alt=sse").
             content: The raw byte content (body) of the original request.
 
         Returns:
