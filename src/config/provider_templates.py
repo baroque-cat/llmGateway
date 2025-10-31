@@ -17,9 +17,9 @@ Key changes:
 PROVIDER_TYPE_DEFAULTS = {
     "gemini": {
         "api_base_url": "https://generativelanguage.googleapis.com",
+        "default_model": "gemini-2.5-flash",
+        "shared_key_status": False,
 
-        # This new structure allows a single provider to handle different
-        # model types (text, image, etc.) by reading its configuration.
         "models": {
             "gemini-2.5-flash": {
                 # The suffix appended to the model-specific URL for text generation.
