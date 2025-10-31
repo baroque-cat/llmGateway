@@ -1,10 +1,8 @@
-#!/usr/bin/env python3
+# src/db/database.py
 
 import logging
 import random
 from typing import List, Set, Dict, Any, Optional
-# --- STEP 1: ADD THE REQUIRED IMPORT AS PLANNED ---
-# Added 'timezone' to create timezone-aware datetime objects.
 from datetime import datetime, timezone
 
 import asyncpg
@@ -205,10 +203,6 @@ class KeyRepository:
                 # Add new model associations.
                 models_to_add = list(desired_model_state - current_model_state)
                 if models_to_add:
-                    # --- STEP 2 & 3: REPLACE THE PROBLEMATIC LINE AS PLANNED ---
-                    # Use a timezone-aware datetime object for the initial check time.
-                    # This ensures consistency with the TIMESTAMPTZ column and prevents
-                    # timezone-related errors when this value is read by other services.
                     initial_check_time = datetime.now(timezone.utc)
                     records = [(key_id, model, 'untested', None, initial_check_time) for key_id, model in models_to_add]
                     await conn.copy_records_to_table(
@@ -220,13 +214,28 @@ class KeyRepository:
                 # Remove obsolete model associations.
                 models_to_remove = list(current_model_state - desired_model_state)
                 if models_to_remove:
-                    # This query efficiently deletes rows matching the tuples.
-                    await conn.execute("""
-                        DELETE FROM key_model_status
-                        WHERE (key_id, model_name) IN (
-                            SELECT key_id, model_name FROM UNNEST($1::record[]) AS t(key_id int, model_name text)
-                        )
-                    """, models_to_remove)
+                    # --- MODIFIED BLOCK START ---
+                    # The previous method using UNNEST($1::record[]) is not supported by asyncpg's default codecs.
+                    # This new approach dynamically builds a WHERE clause with simple parameters, which is universally compatible.
+                    # This is safe from SQL injection because we only generate the structure and use parameterized inputs.
+                    
+                    conditions = []
+                    flat_params = []
+                    param_idx = 1
+                    for key_id, model_name in models_to_remove:
+                        # For each pair to remove, create a condition like: (key_id = $1 AND model_name = $2)
+                        conditions.append(f"(key_id = ${param_idx} AND model_name = ${param_idx + 1})")
+                        # Add the actual values to a flat list for parameter substitution.
+                        flat_params.extend([key_id, model_name])
+                        param_idx += 2
+                    
+                    # Join all conditions with OR to form the final WHERE clause.
+                    where_clause = " OR ".join(conditions)
+                    query = f"DELETE FROM key_model_status WHERE {where_clause}"
+                    
+                    # Execute the dynamically built, fully parameterized query.
+                    await conn.execute(query, *flat_params)
+                    # --- MODIFIED BLOCK END ---
                     logger.info(f"SYNC '{provider_name}': Removed {len(models_to_remove)} obsolete key-model associations.")
 
     async def get_keys_to_check(self) -> List[Dict[str, Any]]:
@@ -316,7 +325,7 @@ class KeyRepository:
     async def get_available_key(self, provider_name: str, model_name: str) -> Optional[Dict[str, Any]]:
         """
         Retrieves a random available key for a given provider and model using
-        the efficient COUNT + OFFSET method, as requested.
+        the efficient COUNT + OFFSET method.
         """
         async with self._pool.acquire() as conn:
             # Step 1: Get the total count of valid keys.
@@ -376,10 +385,6 @@ class KeyRepository:
         """
         Fetches all valid keys across all providers and models in a single query.
         This method is designed to be called periodically to populate the gateway's in-memory cache.
-        
-        Returns:
-            A list of dictionaries, each containing 'key_id', 'provider_name', 
-            'model_name', and 'key_value'.
         """
         query = """
         SELECT
@@ -451,4 +456,3 @@ class DatabaseManager:
             # Using non-transactional block for VACUUM
             await conn.execute("VACUUM;")
             logger.info("MAINTENANCE: Database VACUUM completed successfully.")
-
