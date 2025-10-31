@@ -340,26 +340,54 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
         """
         logger.info("Gateway service starting up...")
         try:
-            # FIXED: Use attribute access consistently
+            # Store the accessor in the app state for other components to use.
             app.state.accessor = accessor
 
-            logger.info("Pre-calculating streaming modes for providers...")
+            # --- MODIFIED BLOCK START: Enhanced startup logging ---
+            # This block implements the requested feature for detailed startup logging.
+            # It follows the logic defined in Step 1 of the plan.
+            logger.info("[Gateway Startup] Analyzing provider streaming modes...")
+            
+            # Initialize data structures for the dispatcher logic.
             app.state.full_stream_instances = set()
             app.state.gemini_stream_instances = set()
             app.state.single_model_map = {}
             
+            # Iterate through all enabled providers to analyze and log their mode.
             for name, config in accessor.get_enabled_providers().items():
-                if config.gateway_policy.retry.enabled:
-                    continue # Retry mode always buffers requests, so no full streaming
+                mode = ""
+                reason = ""
                 
-                if len(config.models) == 1:
+                # Rule 1 (Highest priority): Retry policy forces partial streaming.
+                if config.gateway_policy.retry.enabled:
+                    mode = "PARTIAL STREAM"
+                    reason = "Retry policy is enabled"
+                
+                # Rule 2: Single-model instances can be fully streamed.
+                elif len(config.models) == 1:
+                    mode = "FULL STREAM"
+                    reason = "Single model configured, no parsing needed"
+                    # Update state for the dispatcher.
                     app.state.full_stream_instances.add(name)
                     app.state.single_model_map[name] = list(config.models.keys())[0]
+
+                # Rule 3: Special case for Gemini's URL-based model selection.
                 elif config.provider_type == "gemini":
+                    mode = "FULL STREAM"
+                    reason = "Provider type 'gemini' allows model parsing from URL"
+                    # Update state for the dispatcher.
                     app.state.gemini_stream_instances.add(name)
+
+                # Rule 4 (Default): Multi-model instances require body parsing.
+                else:
+                    mode = "PARTIAL STREAM"
+                    reason = "Multiple models require request body parsing"
+                
+                # Log the determined mode and reason for operational clarity.
+                logger.info(f"[Gateway Startup] - Instance '{name}' -> {mode} (Reason: {reason})")
             
-            logger.info(f"Found {len(app.state.full_stream_instances)} single-model and "
-                        f"{len(app.state.gemini_stream_instances)} Gemini instances eligible for full streaming.")
+            logger.info("[Gateway Startup] Analysis complete.")
+            # --- MODIFIED BLOCK END ---
 
             dsn = accessor.get_database_dsn()
             await database.init_db_pool(dsn)
@@ -405,7 +433,6 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
         if not token:
             return JSONResponse(status_code=401, content={"error": "Missing or invalid authentication token."})
         
-        # FIXED: Use attribute access consistently
         cache: GatewayCache = request.app.state.gateway_cache
         instance_name = cache.get_instance_name_by_token(token)
         if not instance_name:
@@ -441,4 +468,3 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
         return await _handle_buffered_request(request, provider, instance_name)
 
     return app
-
