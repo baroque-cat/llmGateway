@@ -66,8 +66,6 @@ class ErrorReason(Enum):
         """
         client_errors = {
             ErrorReason.BAD_REQUEST,
-            ErrorReason.INVALID_KEY,
-            ErrorReason.NO_ACCESS,
         }
         return self in client_errors
 

@@ -100,6 +100,8 @@ class OpenAILikeProvider(AIBaseProvider):
         """
         Maps an HTTP status code to a standardized ErrorReason enum.
         """
+        if status_code == 400:
+            return ErrorReason.BAD_REQUEST
         if status_code in [401, 403]:
             return ErrorReason.INVALID_KEY
         if status_code == 402:

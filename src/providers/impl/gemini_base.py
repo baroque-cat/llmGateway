@@ -112,8 +112,10 @@ class GeminiBaseProvider(AIBaseProvider):
         # Map status codes according to the specified logic.
         # These errors do not definitively mean the key is dead, just that the
         # request failed for a specific reason.
-        if status_code in [400, 403]:
-            return ErrorReason.NO_ACCESS
+        if status_code == 400:
+            return ErrorReason.BAD_REQUEST
+        if status_code == 403:
+        return ErrorReason.NO_ACCESS
         if status_code == 404:
             return ErrorReason.NO_MODEL
         if status_code == 429:

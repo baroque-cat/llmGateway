@@ -31,7 +31,6 @@ app_state: dict = {
     "cache_refresh_task": None,
 }
 
-# --- REFACTORED: Centralized hop-by-hop header management ---
 # These are headers that control the connection between two nodes (e.g., client and this proxy).
 # They MUST NOT be blindly forwarded to the upstream server, as this can cause protocol conflicts.
 # Headers are lowercase for case-insensitive comparison.
@@ -51,7 +50,7 @@ HOP_BY_HOP_HEADERS: Set[str] = {
     'content-encoding',
 }
 
-# --- Helper Functions (Unchanged Logic) ---
+# --- Helper Functions ---
 
 def _get_token_from_headers(
     authorization: Optional[str] = Header(None),
@@ -117,7 +116,7 @@ async def _generate_streaming_body(upstream_response: Response) -> AsyncGenerato
 def _create_proxied_streaming_response(upstream_response: Response) -> StreamingResponse:
     """
     Creates a properly configured StreamingResponse for proxying.
-    This is the core fix: it filters out hop-by-hop headers to prevent protocol conflicts.
+    It filters out hop-by-hop headers to prevent protocol conflicts.
     """
     # Filter out hop-by-hop headers from the upstream response.
     filtered_headers = {
@@ -163,20 +162,47 @@ async def _handle_full_stream_request(
         headers=dict(request.headers),
         path=request.url.path,
         query_params=str(request.url.query),
-        content=request.stream()  # Pass the async iterator directly
+        content=request.stream()
     )
 
+    # --- MODIFIED BLOCK START: Implemented the new 3-way logic ---
     if check_result.ok:
-        # REFACTORED: Use the centralized helper to create the response.
+        # Case 1: Success. Stream the response back to the client.
         return _create_proxied_streaming_response(upstream_response)
+    
+    elif check_result.error_reason.is_client_error():
+        # Case 2: Client-side error (e.g., 400 Bad Request). The key is not at fault.
+        logger.warning(
+            f"Request for '{instance_name}' failed due to a client-side error: [{check_result.error_reason.value}]. "
+            f"The API key (ID: {key_id}) will NOT be penalized. Forwarding original error to client."
+        )
+        # Read the error body from the upstream to forward it.
+        response_body = await upstream_response.aread()
+        await upstream_response.aclose()
+        # Filter headers just like in the success case.
+        filtered_headers = {
+            key: value for key, value in upstream_response.headers.items()
+            if key.lower() not in HOP_BY_HOP_HEADERS
+        }
+        return Response(
+            content=response_body,
+            status_code=upstream_response.status_code,
+            headers=filtered_headers
+        )
+
     else:
-        logger.warning(f"Request failed for '{instance_name}' in full-stream mode. Reason: {check_result.error_reason.value}")
+        # Case 3: Upstream or key-related error. The key is at fault.
+        logger.warning(
+            f"Request for '{instance_name}' failed due to an upstream/key error: [{check_result.error_reason.value}]. "
+            f"The API key (ID: {key_id}) WILL be penalized."
+        )
         # Report and remove the failed key from the live cache.
         asyncio.create_task(
             _report_key_failure(db_manager, key_id, instance_name, model_name, check_result)
         )
         asyncio.create_task(cache.remove_key_from_pool(instance_name, model_name, key_id))
         return JSONResponse(status_code=503, content={"error": f"Upstream service failed: {check_result.error_reason.value}"})
+    # --- MODIFIED BLOCK END ---
 
 
 async def _handle_buffered_request(
@@ -221,16 +247,41 @@ async def _handle_buffered_request(
         content=request_body
     )
 
+    # --- MODIFIED BLOCK START: Implemented the new 3-way logic ---
     if check_result.ok:
-        # REFACTORED: Use the centralized helper to create the response.
+        # Case 1: Success. Stream the response back to the client.
         return _create_proxied_streaming_response(upstream_response)
+
+    elif check_result.error_reason.is_client_error():
+        # Case 2: Client-side error (e.g., 400 Bad Request). The key is not at fault.
+        logger.warning(
+            f"Request for '{instance_name}' failed due to a client-side error: [{check_result.error_reason.value}]. "
+            f"The API key (ID: {key_id}) will NOT be penalized. Forwarding original error to client."
+        )
+        response_body = await upstream_response.aread()
+        await upstream_response.aclose()
+        filtered_headers = {
+            key: value for key, value in upstream_response.headers.items()
+            if key.lower() not in HOP_BY_HOP_HEADERS
+        }
+        return Response(
+            content=response_body,
+            status_code=upstream_response.status_code,
+            headers=filtered_headers
+        )
+        
     else:
-        logger.warning(f"Request failed for '{instance_name}' in buffered mode. Reason: {check_result.error_reason.value}")
+        # Case 3: Upstream or key-related error. The key is at fault.
+        logger.warning(
+            f"Request for '{instance_name}' failed due to an upstream/key error: [{check_result.error_reason.value}]. "
+            f"The API key (ID: {key_id}) WILL be penalized."
+        )
         asyncio.create_task(
             _report_key_failure(db_manager, key_id, instance_name, details.model_name, check_result)
         )
         asyncio.create_task(cache.remove_key_from_pool(instance_name, details.model_name, key_id))
         return JSONResponse(status_code=503, content={"error": f"Upstream service failed: {check_result.error_reason.value}"})
+    # --- MODIFIED BLOCK END ---
 
 
 async def _handle_buffered_retryable_request(
@@ -265,8 +316,6 @@ async def _handle_buffered_retryable_request(
     server_error_attempts = 0
     last_error_response = None
 
-    # The maximum number of attempts is the sum of allowed retries for different error types.
-    # This prevents an infinite loop.
     max_total_attempts = key_error_policy.attempts + server_error_policy.attempts
     
     for attempt in range(max_total_attempts):
@@ -283,15 +332,33 @@ async def _handle_buffered_retryable_request(
             query_params=str(request.url.query), content=request_body
         )
 
+        # --- MODIFIED BLOCK START: Implemented the new 3-way logic inside the retry loop ---
         if check_result.ok:
-            # First successful attempt, stream the response and finish.
-            # REFACTORED: Use the centralized helper to create the response.
+            # Case 1: Success. Stream the response and terminate the loop.
             return _create_proxied_streaming_response(upstream_response)
 
         reason = check_result.error_reason
         logger.warning(f"Attempt {attempt + 1}/{max_total_attempts} failed for '{instance_name}'. Reason: [{reason.value}]")
-        last_error_response = JSONResponse(status_code=503, content={"error": f"Upstream service failed: {reason.value}"})
 
+        if reason.is_client_error():
+            # Case 2: Client-side error. Retrying is pointless. Abort the loop.
+            logger.error(f"Non-retryable client error received: {reason.value}. Aborting retry cycle.")
+            response_body = await upstream_response.aread()
+            await upstream_response.aclose()
+            filtered_headers = {
+                key: value for key, value in upstream_response.headers.items()
+                if key.lower() not in HOP_BY_HOP_HEADERS
+            }
+            last_error_response = Response(
+                content=response_body,
+                status_code=upstream_response.status_code,
+                headers=filtered_headers
+            )
+            break # Exit the loop immediately
+
+        # Case 3: Upstream or key-related error. Proceed with retry logic.
+        last_error_response = JSONResponse(status_code=503, content={"error": f"Upstream service failed: {reason.value}"})
+        
         # --- Key Error Logic ---
         if not reason.is_retryable():
             asyncio.create_task(
@@ -305,7 +372,7 @@ async def _handle_buffered_retryable_request(
                 continue
             else:
                 logger.error(f"Exhausted all {key_error_policy.attempts} retry attempts for key errors.")
-                break # Exhausted key retries
+                break
 
         # --- Server Error Logic ---
         elif reason.is_retryable():
@@ -317,10 +384,8 @@ async def _handle_buffered_retryable_request(
                 continue
             else:
                 logger.error(f"Exhausted all {server_error_policy.attempts} retry attempts for server errors.")
-                break # Exhausted server retries
-        else:
-            logger.error(f"Non-retryable or unknown error received from upstream: {reason.value}. Aborting.")
-            break
+                break
+        # --- MODIFIED BLOCK END ---
 
     return last_error_response or JSONResponse(status_code=503, content={"error": "All retry attempts failed."})
 
@@ -343,9 +408,7 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
             # Store the accessor in the app state for other components to use.
             app.state.accessor = accessor
 
-            # --- MODIFIED BLOCK START: Enhanced startup logging ---
             # This block implements the requested feature for detailed startup logging.
-            # It follows the logic defined in Step 1 of the plan.
             logger.info("[Gateway Startup] Analyzing provider streaming modes...")
             
             # Initialize data structures for the dispatcher logic.
@@ -387,7 +450,6 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
                 logger.info(f"[Gateway Startup] - Instance '{name}' -> {mode} (Reason: {reason})")
             
             logger.info("[Gateway Startup] Analysis complete.")
-            # --- MODIFIED BLOCK END ---
 
             dsn = accessor.get_database_dsn()
             await database.init_db_pool(dsn)
