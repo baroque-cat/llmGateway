@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from src.core.accessor import ConfigAccessor
 from src.core.http_client_factory import HttpClientFactory
 from src.core.models import CheckResult
+from src.core.enums import ErrorReason  # Added explicitly for error type checking
 from src.core.types import IProvider
 from src.db import database
 from src.db.database import DatabaseManager
@@ -35,26 +36,27 @@ app_state: dict = {
 # They MUST NOT be blindly forwarded to the upstream server, as this can cause protocol conflicts.
 # Headers are lowercase for case-insensitive comparison.
 HOP_BY_HOP_HEADERS: Set[str] = {
-    'connection',
-    'keep-alive',
-    'proxy-authenticate',
-    'proxy-authorization',
-    'te',
-    'trailers',
-    'transfer-encoding',
-    'upgrade',
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailers",
+    "transfer-encoding",
+    "upgrade",
     # Most importantly, Content-Length must be removed for streaming responses,
     # as FastAPI/Starlette will use 'Transfer-Encoding: chunked' instead.
-    'content-length',
+    "content-length",
     # Content-Encoding (e.g., gzip) is also managed by the client, not forwarded.
-    'content-encoding',
+    "content-encoding",
 }
 
 # --- Helper Functions ---
 
+
 def _get_token_from_headers(
     authorization: Optional[str] = Header(None),
-    x_goog_api_key: Optional[str] = Header(None)
+    x_goog_api_key: Optional[str] = Header(None),
 ) -> Optional[str]:
     """
     Extracts the API token from request headers with a defined priority.
@@ -65,11 +67,14 @@ def _get_token_from_headers(
         return authorization.split(" ", 1)[1]
     return x_goog_api_key
 
+
 async def _cache_refresh_loop(cache: GatewayCache, interval_sec: int):
     """
     An infinite loop that periodically refreshes the key pool cache.
     """
-    logger.info(f"Starting cache refresh loop with an interval of {interval_sec} seconds.")
+    logger.info(
+        f"Starting cache refresh loop with an interval of {interval_sec} seconds."
+    )
     while True:
         try:
             await asyncio.sleep(interval_sec)
@@ -80,7 +85,14 @@ async def _cache_refresh_loop(cache: GatewayCache, interval_sec: int):
         except Exception:
             logger.error("An error occurred in the cache refresh loop.", exc_info=True)
 
-async def _report_key_failure(db_manager: DatabaseManager, key_id: int, provider_name: str, model_name: str, result: CheckResult):
+
+async def _report_key_failure(
+    db_manager: DatabaseManager,
+    key_id: int,
+    provider_name: str,
+    model_name: str,
+    result: CheckResult,
+):
     """
     A fire-and-forget background task to report a key failure to the database.
     This implements the "fast feedback loop".
@@ -93,15 +105,24 @@ async def _report_key_failure(db_manager: DatabaseManager, key_id: int, provider
             model_name=model_name,
             provider_name=provider_name,
             result=result,
-            next_check_time=placeholder_next_check
+            next_check_time=placeholder_next_check,
         )
-        logger.info(f"Fast feedback: Successfully reported failure for key_id {key_id} to the database.")
+        logger.info(
+            f"Fast feedback: Successfully reported failure for key_id {key_id} to the database."
+        )
     except Exception as e:
-        logger.error(f"Fast feedback: Failed to report key failure for key_id {key_id}.", exc_info=e)
+        logger.error(
+            f"Fast feedback: Failed to report key failure for key_id {key_id}.",
+            exc_info=e,
+        )
+
 
 # --- Universal Streaming Response Helpers ---
 
-async def _generate_streaming_body(upstream_response: Response) -> AsyncGenerator[bytes, None]:
+
+async def _generate_streaming_body(
+    upstream_response: Response,
+) -> AsyncGenerator[bytes, None]:
     """
     An async generator that streams the response body from the upstream service.
     This helper function follows the DRY principle.
@@ -113,14 +134,18 @@ async def _generate_streaming_body(upstream_response: Response) -> AsyncGenerato
         # Ensure the upstream connection is closed when the stream finishes or is interrupted.
         await upstream_response.aclose()
 
-def _create_proxied_streaming_response(upstream_response: Response) -> StreamingResponse:
+
+def _create_proxied_streaming_response(
+    upstream_response: Response,
+) -> StreamingResponse:
     """
     Creates a properly configured StreamingResponse for proxying.
     It filters out hop-by-hop headers to prevent protocol conflicts.
     """
     # Filter out hop-by-hop headers from the upstream response.
     filtered_headers = {
-        key: value for key, value in upstream_response.headers.items()
+        key: value
+        for key, value in upstream_response.headers.items()
         if key.lower() not in HOP_BY_HOP_HEADERS
     }
 
@@ -128,16 +153,15 @@ def _create_proxied_streaming_response(upstream_response: Response) -> Streaming
         content=_generate_streaming_body(upstream_response),
         status_code=upstream_response.status_code,
         media_type=upstream_response.headers.get("content-type"),
-        headers=filtered_headers
+        headers=filtered_headers,
     )
+
 
 # --- Specialized Request Handlers (Refactored) ---
 
+
 async def _handle_full_stream_request(
-    request: Request,
-    provider: IProvider,
-    instance_name: str,
-    model_name: str
+    request: Request, provider: IProvider, instance_name: str, model_name: str
 ) -> Response:
     """
     Handles requests where both request and response can be streamed (full-duplex).
@@ -149,8 +173,12 @@ async def _handle_full_stream_request(
 
     key_info = cache.get_key_from_pool(instance_name, model_name)
     if not key_info:
-        logger.warning(f"No valid API keys available in pool for '{instance_name}:{model_name}'.")
-        return JSONResponse(status_code=503, content={"error": "No available API keys."})
+        logger.warning(
+            f"No valid API keys available in pool for '{instance_name}:{model_name}'."
+        )
+        return JSONResponse(
+            status_code=503, content={"error": "No available API keys."}
+        )
 
     key_id, api_key = key_info
     client = await http_factory.get_client_for_provider(instance_name)
@@ -162,14 +190,13 @@ async def _handle_full_stream_request(
         headers=dict(request.headers),
         path=request.url.path,
         query_params=str(request.url.query),
-        content=request.stream()
+        content=request.stream(),
     )
 
-    # --- MODIFIED BLOCK START: Implemented the new 3-way logic ---
     if check_result.ok:
         # Case 1: Success. Stream the response back to the client.
         return _create_proxied_streaming_response(upstream_response)
-    
+
     elif check_result.error_reason.is_client_error():
         # Case 2: Client-side error (e.g., 400 Bad Request). The key is not at fault.
         logger.warning(
@@ -181,13 +208,14 @@ async def _handle_full_stream_request(
         await upstream_response.aclose()
         # Filter headers just like in the success case.
         filtered_headers = {
-            key: value for key, value in upstream_response.headers.items()
+            key: value
+            for key, value in upstream_response.headers.items()
             if key.lower() not in HOP_BY_HOP_HEADERS
         }
         return Response(
             content=response_body,
             status_code=upstream_response.status_code,
-            headers=filtered_headers
+            headers=filtered_headers,
         )
 
     else:
@@ -198,17 +226,23 @@ async def _handle_full_stream_request(
         )
         # Report and remove the failed key from the live cache.
         asyncio.create_task(
-            _report_key_failure(db_manager, key_id, instance_name, model_name, check_result)
+            _report_key_failure(
+                db_manager, key_id, instance_name, model_name, check_result
+            )
         )
-        asyncio.create_task(cache.remove_key_from_pool(instance_name, model_name, key_id))
-        return JSONResponse(status_code=503, content={"error": f"Upstream service failed: {check_result.error_reason.value}"})
-    # --- MODIFIED BLOCK END ---
+        asyncio.create_task(
+            cache.remove_key_from_pool(instance_name, model_name, key_id)
+        )
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": f"Upstream service failed: {check_result.error_reason.value}"
+            },
+        )
 
 
 async def _handle_buffered_request(
-    request: Request,
-    provider: IProvider,
-    instance_name: str
+    request: Request, provider: IProvider, instance_name: str
 ) -> Response:
     """
     Handles requests where the request body must be buffered but the response can be streamed.
@@ -217,22 +251,31 @@ async def _handle_buffered_request(
     http_factory: HttpClientFactory = request.app.state.http_client_factory
     db_manager: DatabaseManager = request.app.state.db_manager
     accessor: ConfigAccessor = request.app.state.accessor
-    
+
     provider_config = accessor.get_provider_or_raise(instance_name)
 
     # Buffer the request body to parse it
     request_body = await request.body()
     try:
-        details = await provider.parse_request_details(path=request.url.path, content=request_body)
+        details = await provider.parse_request_details(
+            path=request.url.path, content=request_body
+        )
     except ValueError as e:
         return JSONResponse(status_code=400, content={"error": f"Bad request: {e}"})
-    
+
     if details.model_name not in provider_config.models:
-        return JSONResponse(status_code=400, content={"error": f"Model '{details.model_name}' is not permitted for this instance."})
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": f"Model '{details.model_name}' is not permitted for this instance."
+            },
+        )
 
     key_info = cache.get_key_from_pool(instance_name, details.model_name)
     if not key_info:
-        return JSONResponse(status_code=503, content={"error": "No available API keys."})
+        return JSONResponse(
+            status_code=503, content={"error": "No available API keys."}
+        )
 
     key_id, api_key = key_info
     client = await http_factory.get_client_for_provider(instance_name)
@@ -244,10 +287,9 @@ async def _handle_buffered_request(
         headers=dict(request.headers),
         path=request.url.path,
         query_params=str(request.url.query),
-        content=request_body
+        content=request_body,
     )
 
-    # --- MODIFIED BLOCK START: Implemented the new 3-way logic ---
     if check_result.ok:
         # Case 1: Success. Stream the response back to the client.
         return _create_proxied_streaming_response(upstream_response)
@@ -261,15 +303,16 @@ async def _handle_buffered_request(
         response_body = await upstream_response.aread()
         await upstream_response.aclose()
         filtered_headers = {
-            key: value for key, value in upstream_response.headers.items()
+            key: value
+            for key, value in upstream_response.headers.items()
             if key.lower() not in HOP_BY_HOP_HEADERS
         }
         return Response(
             content=response_body,
             status_code=upstream_response.status_code,
-            headers=filtered_headers
+            headers=filtered_headers,
         )
-        
+
     else:
         # Case 3: Upstream or key-related error. The key is at fault.
         logger.warning(
@@ -277,17 +320,23 @@ async def _handle_buffered_request(
             f"The API key (ID: {key_id}) WILL be penalized."
         )
         asyncio.create_task(
-            _report_key_failure(db_manager, key_id, instance_name, details.model_name, check_result)
+            _report_key_failure(
+                db_manager, key_id, instance_name, details.model_name, check_result
+            )
         )
-        asyncio.create_task(cache.remove_key_from_pool(instance_name, details.model_name, key_id))
-        return JSONResponse(status_code=503, content={"error": f"Upstream service failed: {check_result.error_reason.value}"})
-    # --- MODIFIED BLOCK END ---
+        asyncio.create_task(
+            cache.remove_key_from_pool(instance_name, details.model_name, key_id)
+        )
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": f"Upstream service failed: {check_result.error_reason.value}"
+            },
+        )
 
 
 async def _handle_buffered_retryable_request(
-    request: Request,
-    provider: IProvider,
-    instance_name: str
+    request: Request, provider: IProvider, instance_name: str
 ) -> Response:
     """
     Handles requests where retry is enabled. Requires buffering the request body.
@@ -305,92 +354,147 @@ async def _handle_buffered_retryable_request(
 
     request_body = await request.body()
     try:
-        details = await provider.parse_request_details(path=request.url.path, content=request_body)
+        details = await provider.parse_request_details(
+            path=request.url.path, content=request_body
+        )
     except ValueError as e:
         return JSONResponse(status_code=400, content={"error": f"Bad request: {e}"})
 
     if details.model_name not in provider_config.models:
-        return JSONResponse(status_code=400, content={"error": f"Model '{details.model_name}' is not permitted for this instance."})
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": f"Model '{details.model_name}' is not permitted for this instance."
+            },
+        )
 
     key_error_attempts = 0
     server_error_attempts = 0
     last_error_response = None
 
     max_total_attempts = key_error_policy.attempts + server_error_policy.attempts
-    
+
     for attempt in range(max_total_attempts):
         key_info = cache.get_key_from_pool(instance_name, details.model_name)
         if not key_info:
-            return JSONResponse(status_code=503, content={"error": "No available API keys to handle the request."})
+            return JSONResponse(
+                status_code=503,
+                content={"error": "No available API keys to handle the request."},
+            )
 
         key_id, api_key = key_info
         client = await http_factory.get_client_for_provider(instance_name)
 
         upstream_response, check_result = await provider.proxy_request(
-            client=client, token=api_key, method=request.method,
-            headers=dict(request.headers), path=request.url.path,
-            query_params=str(request.url.query), content=request_body
+            client=client,
+            token=api_key,
+            method=request.method,
+            headers=dict(request.headers),
+            path=request.url.path,
+            query_params=str(request.url.query),
+            content=request_body,
         )
 
-        # --- MODIFIED BLOCK START: Implemented the new 3-way logic inside the retry loop ---
         if check_result.ok:
             # Case 1: Success. Stream the response and terminate the loop.
             return _create_proxied_streaming_response(upstream_response)
 
         reason = check_result.error_reason
-        logger.warning(f"Attempt {attempt + 1}/{max_total_attempts} failed for '{instance_name}'. Reason: [{reason.value}]")
+        logger.warning(
+            f"Attempt {attempt + 1}/{max_total_attempts} failed for '{instance_name}'. Reason: [{reason.value}]"
+        )
 
         if reason.is_client_error():
             # Case 2: Client-side error. Retrying is pointless. Abort the loop.
-            logger.error(f"Non-retryable client error received: {reason.value}. Aborting retry cycle.")
+            logger.error(
+                f"Non-retryable client error received: {reason.value}. Aborting retry cycle."
+            )
             response_body = await upstream_response.aread()
             await upstream_response.aclose()
             filtered_headers = {
-                key: value for key, value in upstream_response.headers.items()
+                key: value
+                for key, value in upstream_response.headers.items()
                 if key.lower() not in HOP_BY_HOP_HEADERS
             }
             last_error_response = Response(
                 content=response_body,
                 status_code=upstream_response.status_code,
-                headers=filtered_headers
+                headers=filtered_headers,
             )
-            break # Exit the loop immediately
+            break  # Exit the loop immediately
 
-        # Case 3: Upstream or key-related error. Proceed with retry logic.
-        last_error_response = JSONResponse(status_code=503, content={"error": f"Upstream service failed: {reason.value}"})
-        
-        # --- Key Error Logic ---
-        if not reason.is_retryable():
-            asyncio.create_task(
-                _report_key_failure(db_manager, key_id, instance_name, details.model_name, check_result)
+        # Case 3: Key-specific failures OR Overloaded (503).
+        # CRITICAL FIX: We explicitly treat ErrorReason.OVERLOADED as a key failure here.
+        # Even though 503 is technically a "server" error in standard HTTP, for LLM providers (like Gemini),
+        # it typically means the specific key/project is rate-limited or overloaded.
+        # Therefore, we must rotate the key (remove current, get new) instead of just waiting.
+        if (not reason.is_retryable()) or (reason == ErrorReason.OVERLOADED):
+            logger.warning(
+                f"Key fault detected (Reason: {reason.value}). "
+                f"Marking key_id {key_id} as failed and removing from pool."
             )
-            asyncio.create_task(cache.remove_key_from_pool(instance_name, details.model_name, key_id))
+
+            asyncio.create_task(
+                _report_key_failure(
+                    db_manager, key_id, instance_name, details.model_name, check_result
+                )
+            )
+            asyncio.create_task(
+                cache.remove_key_from_pool(instance_name, details.model_name, key_id)
+            )
 
             key_error_attempts += 1
             if key_error_attempts < key_error_policy.attempts:
-                logger.info(f"Key error detected. Retrying with a new key... (Key Error Attempt {key_error_attempts}/{key_error_policy.attempts})")
+                logger.info(
+                    f"Retrying with a NEW key... (Key Error Attempt {key_error_attempts}/{key_error_policy.attempts})"
+                )
                 continue
             else:
-                logger.error(f"Exhausted all {key_error_policy.attempts} retry attempts for key errors.")
+                logger.error(
+                    f"Exhausted all {key_error_policy.attempts} retry attempts for key errors."
+                )
+                last_error_response = JSONResponse(
+                    status_code=503,
+                    content={"error": f"Upstream service failed: {reason.value}"},
+                )
                 break
 
-        # --- Server Error Logic ---
+        # Case 4: True Transient Server Errors (Timeout, Connection Error, etc).
+        # These are unrelated to the specific key, so we keep the key and use backoff.
         elif reason.is_retryable():
             server_error_attempts += 1
             if server_error_attempts < server_error_policy.attempts:
-                delay = server_error_policy.backoff_sec * (server_error_policy.backoff_factor ** (server_error_attempts -1))
-                logger.info(f"Server error detected. Retrying in {delay:.2f}s... (Server Error Attempt {server_error_attempts}/{server_error_policy.attempts})")
+                delay = server_error_policy.backoff_sec * (
+                    server_error_policy.backoff_factor ** (server_error_attempts - 1)
+                )
+                logger.info(
+                    f"Server error detected. Retrying in {delay:.2f}s... (Server Error Attempt {server_error_attempts}/{server_error_policy.attempts})"
+                )
                 await asyncio.sleep(delay)
                 continue
             else:
-                logger.error(f"Exhausted all {server_error_policy.attempts} retry attempts for server errors.")
+                logger.error(
+                    f"Exhausted all {server_error_policy.attempts} retry attempts for server errors."
+                )
+                last_error_response = JSONResponse(
+                    status_code=503,
+                    content={"error": f"Upstream service failed: {reason.value}"},
+                )
                 break
-        # --- MODIFIED BLOCK END ---
 
-    return last_error_response or JSONResponse(status_code=503, content={"error": "All retry attempts failed."})
+        # Fallback for any unhandled state
+        last_error_response = JSONResponse(
+            status_code=503,
+            content={"error": f"Upstream service failed: {reason.value}"},
+        )
+
+    return last_error_response or JSONResponse(
+        status_code=503, content={"error": "All retry attempts failed."}
+    )
 
 
 # --- FastAPI Application Factory and Event Handlers ---
+
 
 def create_app(accessor: ConfigAccessor) -> FastAPI:
     """
@@ -410,22 +514,22 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
 
             # This block implements the requested feature for detailed startup logging.
             logger.info("[Gateway Startup] Analyzing provider streaming modes...")
-            
+
             # Initialize data structures for the dispatcher logic.
             app.state.full_stream_instances = set()
             app.state.gemini_stream_instances = set()
             app.state.single_model_map = {}
-            
+
             # Iterate through all enabled providers to analyze and log their mode.
             for name, config in accessor.get_enabled_providers().items():
                 mode = ""
                 reason = ""
-                
+
                 # Rule 1 (Highest priority): Retry policy forces partial streaming.
                 if config.gateway_policy.retry.enabled:
                     mode = "PARTIAL STREAM"
                     reason = "Retry policy is enabled"
-                
+
                 # Rule 2: Single-model instances can be fully streamed.
                 elif len(config.models) == 1:
                     mode = "FULL STREAM"
@@ -445,28 +549,32 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
                 else:
                     mode = "PARTIAL STREAM"
                     reason = "Multiple models require request body parsing"
-                
+
                 # Log the determined mode and reason for operational clarity.
-                logger.info(f"[Gateway Startup] - Instance '{name}' -> {mode} (Reason: {reason})")
-            
+                logger.info(
+                    f"[Gateway Startup] - Instance '{name}' -> {mode} (Reason: {reason})"
+                )
+
             logger.info("[Gateway Startup] Analysis complete.")
 
             dsn = accessor.get_database_dsn()
             await database.init_db_pool(dsn)
-            
+
             app.state.db_manager = DatabaseManager(accessor)
             app.state.http_client_factory = HttpClientFactory(accessor)
             app.state.gateway_cache = GatewayCache(accessor, app.state.db_manager)
 
             await app.state.gateway_cache.populate_caches()
-            
+
             task = asyncio.create_task(
                 _cache_refresh_loop(app.state.gateway_cache, interval_sec=10)
             )
             app.state.cache_refresh_task = task
-            
+
         except Exception as e:
-            logger.critical("A critical error occurred during application startup.", exc_info=e)
+            logger.critical(
+                "A critical error occurred during application startup.", exc_info=e
+            )
             raise
 
     @app.on_event("shutdown")
@@ -493,12 +601,17 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
             request.headers.get("authorization"), request.headers.get("x-goog-api-key")
         )
         if not token:
-            return JSONResponse(status_code=401, content={"error": "Missing or invalid authentication token."})
-        
+            return JSONResponse(
+                status_code=401,
+                content={"error": "Missing or invalid authentication token."},
+            )
+
         cache: GatewayCache = request.app.state.gateway_cache
         instance_name = cache.get_instance_name_by_token(token)
         if not instance_name:
-            return JSONResponse(status_code=401, content={"error": "Invalid authentication token."})
+            return JSONResponse(
+                status_code=401, content={"error": "Invalid authentication token."}
+            )
 
         try:
             accessor: ConfigAccessor = request.app.state.accessor
@@ -506,25 +619,43 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
             provider = get_provider(instance_name, provider_config)
         except (KeyError, ValueError) as e:
             logger.error(f"Configuration error for instance '{instance_name}': {e}")
-            return JSONResponse(status_code=500, content={"error": "Internal server configuration error."})
-        
+            return JSONResponse(
+                status_code=500,
+                content={"error": "Internal server configuration error."},
+            )
+
         # Dispatch to the correct handler based on pre-calculated logic.
         if provider_config.gateway_policy.retry.enabled:
-            return await _handle_buffered_retryable_request(request, provider, instance_name)
-        
+            return await _handle_buffered_retryable_request(
+                request, provider, instance_name
+            )
+
         if instance_name in request.app.state.full_stream_instances:
             model_name = request.app.state.single_model_map[instance_name]
-            return await _handle_full_stream_request(request, provider, instance_name, model_name)
-        
+            return await _handle_full_stream_request(
+                request, provider, instance_name, model_name
+            )
+
         if instance_name in request.app.state.gemini_stream_instances:
             try:
                 # For Gemini, we can parse the model from the URL without reading the body.
-                details = await provider.parse_request_details(path=request.url.path, content=b"")
+                details = await provider.parse_request_details(
+                    path=request.url.path, content=b""
+                )
                 if details.model_name not in provider_config.models:
-                    return JSONResponse(status_code=400, content={"error": f"Model '{details.model_name}' is not permitted."})
-                return await _handle_full_stream_request(request, provider, instance_name, details.model_name)
+                    return JSONResponse(
+                        status_code=400,
+                        content={
+                            "error": f"Model '{details.model_name}' is not permitted."
+                        },
+                    )
+                return await _handle_full_stream_request(
+                    request, provider, instance_name, details.model_name
+                )
             except ValueError as e:
-                return JSONResponse(status_code=400, content={"error": f"Bad request: {e}"})
+                return JSONResponse(
+                    status_code=400, content={"error": f"Bad request: {e}"}
+                )
 
         # The default case for multi-model, non-Gemini providers: buffer request, stream response.
         return await _handle_buffered_request(request, provider, instance_name)

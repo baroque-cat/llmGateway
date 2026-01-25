@@ -62,4 +62,20 @@ PROVIDER_TYPE_DEFAULTS = {
             }
         },
     },
+
+    "moonshot": {
+        "api_base_url": "https://api.moonshot.cn/v1",
+        "default_model": "kimi-k2-turbo-preview",
+        "shared_key_status": False,
+        
+        "models": {
+            "kimi-k2-turbo-preview": {
+                "endpoint_suffix": "/chat/completions",
+                "test_payload": {
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "max_tokens": 1,
+                }
+            }
+        },
+    },
 }

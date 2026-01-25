@@ -73,4 +73,3 @@ class GeminiProvider(GeminiBaseProvider):
         
         # 4. Delegate to the centralized, reliable sender method.
         return await self._send_proxy_request(client, upstream_request)
-

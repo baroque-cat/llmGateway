@@ -52,49 +52,53 @@ class GeminiBaseProvider(AIBaseProvider):
         This definitively fixes the RuntimeError.
         """
         status_code = response.status_code
-        
+
         # 1. Read the response body first. This makes other properties available.
         response_bytes = await response.aread()
-        response_text = response_bytes.decode(errors='ignore')
-        
+        response_text = response_bytes.decode(errors="ignore")
+
         # 2. Now it is safe to access .elapsed.
         response_time = response.elapsed.total_seconds()
-        
+
         # 3. Use the centralized mapping logic to determine the failure reason.
         reason = self._map_error_to_reason(status_code, response_text)
-        
+
         return CheckResult.fail(reason, response_text, response_time, status_code)
 
-    async def inspect(self, client: httpx.AsyncClient, token: str, **kwargs) -> List[str]:
+    async def inspect(
+        self, client: httpx.AsyncClient, token: str, **kwargs
+    ) -> List[str]:
         """
         Inspects and returns a list of available models from the configuration.
         This logic is generic and reads keys from the multimodal 'models' dictionary.
         """
-        logger.debug(f"Inspecting models for provider '{self.name}' by reading from config.")
+        logger.debug(
+            f"Inspecting models for provider '{self.name}' by reading from config."
+        )
         return list(self.config.models.keys())
 
     async def parse_request_details(self, path: str, content: bytes) -> RequestDetails:
         """
         Parses the URL path to extract the model name for Gemini APIs.
         This implementation ignores the request body content.
-        
+
         Args:
             path: The URL path of the original request.
             content: The raw byte content (body) of the request (ignored).
-        
+
         Returns:
             A RequestDetails object with the parsed model name.
-        
+
         Raises:
             ValueError: If the model name cannot be extracted from the path.
         """
         # The content argument is ignored for this provider type, as per the design.
         _ = content
-        
+
         match = MODEL_FROM_PATH_REGEX.search(path)
         if not match:
             raise ValueError(f"Could not extract model name from path: {path}")
-        
+
         model_name = match.group(1)
         logger.debug(f"Successfully parsed model '{model_name}' from request path.")
         return RequestDetails(model_name=model_name)
@@ -115,7 +119,7 @@ class GeminiBaseProvider(AIBaseProvider):
         if status_code == 400:
             return ErrorReason.BAD_REQUEST
         if status_code == 403:
-        return ErrorReason.NO_ACCESS
+            return ErrorReason.NO_ACCESS
         if status_code == 404:
             return ErrorReason.NO_MODEL
         if status_code == 429:
@@ -126,11 +130,13 @@ class GeminiBaseProvider(AIBaseProvider):
             return ErrorReason.OVERLOADED
         if status_code == 504:
             return ErrorReason.TIMEOUT
-        
+
         # Fallback for any other unhandled error.
         return ErrorReason.UNKNOWN
 
-    async def check(self, client: httpx.AsyncClient, token: str, model: str) -> CheckResult:
+    async def check(
+        self, client: httpx.AsyncClient, token: str, model: str
+    ) -> CheckResult:
         """
         Template Method for checking the validity of a Gemini API token.
 
@@ -138,11 +144,15 @@ class GeminiBaseProvider(AIBaseProvider):
         errors, while delegating the creation of the specific URL and payload
         to the concrete subclass via `_build_check_request_args`.
         """
-        logger.debug(f"Checking Gemini key ending '...{token[-4:]}' for model '{model}'.")
+        logger.debug(
+            f"Checking Gemini key ending '...{token[-4:]}' for model '{model}'."
+        )
 
         headers = self._get_headers(token)
         if not headers:
-            return CheckResult.fail(ErrorReason.INVALID_KEY, "Token is empty or invalid.")
+            return CheckResult.fail(
+                ErrorReason.INVALID_KEY, "Token is empty or invalid."
+            )
 
         try:
             # Delegate creation of request specifics to the subclass.
@@ -157,29 +167,43 @@ class GeminiBaseProvider(AIBaseProvider):
 
         timeout_config = self.config.timeouts
         timeout = httpx.Timeout(
-            connect=timeout_config.connect, read=timeout_config.read,
-            write=timeout_config.write, pool=timeout_config.pool
+            connect=timeout_config.connect,
+            read=timeout_config.read,
+            write=timeout_config.write,
+            pool=timeout_config.pool,
         )
-        
+
         try:
-            response = await client.post(api_url, headers=headers, json=payload, timeout=timeout)
+            response = await client.post(
+                api_url, headers=headers, json=payload, timeout=timeout
+            )
             response.raise_for_status()
-            return CheckResult.success(response_time=response.elapsed.total_seconds(), status_code=response.status_code)
+            return CheckResult.success(
+                response_time=response.elapsed.total_seconds(),
+                status_code=response.status_code,
+            )
 
         except httpx.TimeoutException:
-            return CheckResult.fail(ErrorReason.TIMEOUT, "Request timed out", timeout.read, 504)
+            return CheckResult.fail(
+                ErrorReason.TIMEOUT, "Request timed out", timeout.read, 504
+            )
         except httpx.ProxyError as e:
-            return CheckResult.fail(ErrorReason.NETWORK_ERROR, f"Proxy error: {e}", status_code=503)
+            return CheckResult.fail(
+                ErrorReason.NETWORK_ERROR, f"Proxy error: {e}", status_code=503
+            )
         except httpx.ConnectError as e:
-            return CheckResult.fail(ErrorReason.NETWORK_ERROR, f"Connection error: {e}", status_code=503)
+            return CheckResult.fail(
+                ErrorReason.NETWORK_ERROR, f"Connection error: {e}", status_code=503
+            )
         except httpx.HTTPStatusError as e:
             response = e.response
             # Use the centralized error mapping method.
             reason = self._map_error_to_reason(response.status_code, response.text)
             return CheckResult.fail(
-                reason=reason, message=response.text,
+                reason=reason,
+                message=response.text,
                 response_time=response.elapsed.total_seconds(),
-                status_code=response.status_code
+                status_code=response.status_code,
             )
         except httpx.RequestError as e:
             return CheckResult.fail(ErrorReason.NETWORK_ERROR, str(e), status_code=503)
@@ -191,7 +215,7 @@ class GeminiBaseProvider(AIBaseProvider):
         """
         (Abstract) Constructs the API URL and payload for a health check.
         Must be implemented by concrete subclasses.
-        
+
         Returns:
             A dictionary containing 'api_url' (str) and 'payload' (dict).
         """
@@ -199,11 +223,17 @@ class GeminiBaseProvider(AIBaseProvider):
 
     @abstractmethod
     async def proxy_request(
-        self, client: httpx.AsyncClient, token: str, method: str, headers: Dict, path: str, query_params: str, content: bytes
+        self,
+        client: httpx.AsyncClient,
+        token: str,
+        method: str,
+        headers: Dict,
+        path: str,
+        query_params: str,
+        content: bytes,
     ) -> Tuple[httpx.Response, CheckResult]:
         """
         (Abstract) Proxies an incoming client request to the target API provider.
         Must be implemented by concrete subclasses.
         """
         raise NotImplementedError
-

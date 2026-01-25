@@ -53,6 +53,8 @@ class ErrorReason(Enum):
             ErrorReason.SERVER_ERROR,
             ErrorReason.SERVICE_UNAVAILABLE,
             ErrorReason.OVERLOADED,
+            ErrorReason.INVALID_KEY,
+            ErrorReason.NO_ACCESS,
         }
         return self in retryable_errors
 
