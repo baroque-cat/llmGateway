@@ -135,14 +135,18 @@ def main():
               # Create a minimal 'gemini' instance named 'gemini-work'
               python main.py config create gemini:gemini-work
 
+              # Create a generic OpenAI-compatible instance (e.g., for DeepSeek)
+              # Syntax: type:instance_name
+              python main.py config create openai_like:deepseek-main
+
               # Create a FULL instance with all default fields explicit
-              python main.py config create --full gemini:gemini-pro-setup
+              python main.py config create --full openai_like:moonshot-test
 
               # Create multiple instances at once
-              python main.py config create gemini:gemini-dev,gemini-test deepseek:deepseek-work
+              python main.py config create gemini:gemini-dev openai_like:deepseek-backup
               
-              # Remove one or more instances (using the same 'type:name' syntax)
-              python main.py config remove gemini:gemini-work deepseek:deepseek-work
+              # Remove one or more instances
+              python main.py config remove gemini:gemini-work openai_like:deepseek-backup
         ''')
     )
     config_subparsers = parser_config.add_subparsers(dest='action', required=True, help='Action to perform on the config')

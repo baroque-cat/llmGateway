@@ -9,9 +9,6 @@ from src.config.schemas import ProviderConfig
 from src.providers.base import AIBaseProvider
 from src.providers.impl.openai_like import OpenAILikeProvider
 from src.providers.impl.gemini import GeminiProvider
-# Add the import for the new provider
-from src.providers.impl.deepseek import DeepSeekProvider
-from src.providers.impl.moonshot import MoonShotProvider
 
 logger = logging.getLogger(__name__)
 
@@ -22,8 +19,6 @@ logger = logging.getLogger(__name__)
 _PROVIDER_CLASSES: Dict[str, Type[AIBaseProvider]] = {
     "openai_like": OpenAILikeProvider,
     "gemini": GeminiProvider,
-    "deepseek": DeepSeekProvider,
-    "moonshot": MoonShotProvider,
 }
 
 def get_provider(provider_name: str, config: ProviderConfig) -> IProvider:

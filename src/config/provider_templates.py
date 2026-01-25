@@ -46,34 +46,20 @@ PROVIDER_TYPE_DEFAULTS = {
         },
     },
     
-    "deepseek": {
-        "api_base_url": "https://api.deepseek.com",
-        "default_model": "deepseek-reasoner",
+    "openai_like": {
+        # Placeholder suggesting the format, forcing user input
+        "api_base_url": "https://api.provider-domain.com/v1",
+        "default_model": "your-model-name",
         "shared_key_status": False,
-        
-        # For OpenAI-like APIs, the endpoint is often the same for all chat models.
-        "models": {
-            "deepseek-reasoner": {
-                "endpoint_suffix": "/chat/completions",
-                "test_payload": {
-                    "messages": [{"role": "user", "content": "Hello"}],
-                    "max_tokens": 1,
-                }
-            }
-        },
-    },
 
-    "moonshot": {
-        "api_base_url": "https://api.moonshot.cn/v1",
-        "default_model": "kimi-k2-turbo-preview",
-        "shared_key_status": False,
-        
         "models": {
-            "kimi-k2-turbo-preview": {
+            "your-model-name": {
+                # Standard suffix for most OpenAI-compatible APIs
                 "endpoint_suffix": "/chat/completions",
+                # Minimal payload for health checks
                 "test_payload": {
-                    "messages": [{"role": "user", "content": "Hello"}],
-                    "max_tokens": 1,
+                    "messages": [{"role": "user", "content": "Hi"}],
+                    "max_tokens": 1
                 }
             }
         },
