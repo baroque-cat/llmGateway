@@ -17,7 +17,7 @@ poetry.toml
 keys/*
 logs/*
 data/*
-config/providers.yaml
+config/*
 
 #python
 __pycache__/
