@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, AsyncGenerator, Set
 
 from fastapi import FastAPI, Request, Response, Header
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse, Response
 
 # Import core application components
 from src.core.accessor import ConfigAccessor
@@ -50,6 +50,9 @@ HOP_BY_HOP_HEADERS: Set[str] = {
     # Content-Encoding (e.g., gzip) is also managed by the client, not forwarded.
     "content-encoding",
 }
+
+# Maximum size for body content in debug logs (10KB)
+MAX_DEBUG_BODY_SIZE = 10 * 1024
 
 # --- Helper Functions ---
 
@@ -115,6 +118,54 @@ async def _report_key_failure(
             f"Fast feedback: Failed to report key failure for key_id {key_id}.",
             exc_info=e,
         )
+
+
+async def _log_debug_info(
+    debug_mode: str,
+    instance_name: str,
+    request_method: str,
+    request_path: str,
+    request_headers: dict,
+    request_body: bytes,
+    response_status: int,
+    response_headers: dict,
+    response_body: bytes,
+):
+    """
+    Logs debug information based on the debug mode setting.
+    
+    Args:
+        debug_mode: The effective debug mode ("headers_only" or "full_body").
+        instance_name: The name of the provider instance.
+        request_method: HTTP method of the request.
+        request_path: Path of the request.
+        request_headers: Headers from the client request.
+        request_body: Body content from the client request.
+        response_status: HTTP status code from the upstream response.
+        response_headers: Headers from the upstream response.
+        response_body: Body content from the upstream response.
+    """
+    # Log basic request info
+    logger.info(f"Request to {instance_name}: {request_method} {request_path}")
+    logger.info(f"Request headers: {dict(request_headers)}")
+    
+    # Log request body if in full_body mode
+    if debug_mode == "full_body":
+        request_body_preview = request_body[:MAX_DEBUG_BODY_SIZE]
+        if len(request_body) > MAX_DEBUG_BODY_SIZE:
+            request_body_preview += b"... (truncated)"
+        logger.info(f"Request body: {request_body_preview}")
+    
+    # Log response info
+    logger.info(f"Response from {instance_name}: {response_status}")
+    logger.info(f"Response headers: {dict(response_headers)}")
+    
+    # Log response body if in full_body mode
+    if debug_mode == "full_body":
+        response_body_preview = response_body[:MAX_DEBUG_BODY_SIZE]
+        if len(response_body) > MAX_DEBUG_BODY_SIZE:
+            response_body_preview += b"... (truncated)"
+        logger.info(f"Response body: {response_body_preview}")
 
 
 # --- Universal Streaming Response Helpers ---
@@ -519,14 +570,25 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
             app.state.full_stream_instances = set()
             app.state.gemini_stream_instances = set()
             app.state.single_model_map = {}
+            app.state.debug_mode_map = {}  # NEW: Track debug mode per provider
 
-            # Get the global streaming mode from the configuration.
+            # Get the global streaming and debug modes from the configuration.
             global_streaming_mode = accessor._config.gateway.streaming_mode
+            global_debug_mode = accessor._config.gateway.debug_mode
 
             # Iterate through all enabled providers to analyze and log their mode.
             for name, config in accessor.get_enabled_providers().items():
                 mode = ""
                 reason = ""
+
+                # Determine the effective debug mode for this provider.
+                # Provider-specific setting takes precedence over the global setting.
+                effective_debug_mode = config.gateway_policy.debug_mode
+                if effective_debug_mode == "disabled":
+                    effective_debug_mode = global_debug_mode
+                
+                # Store the effective debug mode for use during request handling.
+                app.state.debug_mode_map[name] = effective_debug_mode
 
                 # Determine the effective streaming mode for this provider.
                 # Provider-specific setting takes precedence over the global setting.
@@ -534,8 +596,13 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
                 if effective_streaming_mode == "auto":
                     effective_streaming_mode = global_streaming_mode
 
+                # If debug mode is enabled, force disable streaming regardless of other settings.
+                # Debug mode requires buffering the entire request/response for logging.
+                if effective_debug_mode != "disabled":
+                    mode = "DEBUG MODE"
+                    reason = f"Debug mode '{effective_debug_mode}' enabled - forcing buffered requests"
                 # If streaming is explicitly disabled, skip all other rules.
-                if effective_streaming_mode == "disabled":
+                elif effective_streaming_mode == "disabled":
                     mode = "PARTIAL STREAM"
                     reason = "Streaming is explicitly disabled"
                 else:
@@ -638,19 +705,25 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
                 content={"error": "Internal server configuration error."},
             )
 
+        # Get the effective debug mode for this provider
+        effective_debug_mode = request.app.state.debug_mode_map.get(instance_name, "disabled")
+        
         # Dispatch to the correct handler based on pre-calculated logic.
-        if provider_config.gateway_policy.retry.enabled:
+        # Debug mode has highest priority and forces buffered requests.
+        if effective_debug_mode != "disabled":
+            return await _handle_buffered_request(
+                request, provider, instance_name
+            )
+        elif provider_config.gateway_policy.retry.enabled:
             return await _handle_buffered_retryable_request(
                 request, provider, instance_name
             )
-
-        if instance_name in request.app.state.full_stream_instances:
+        elif instance_name in request.app.state.full_stream_instances:
             model_name = request.app.state.single_model_map[instance_name]
             return await _handle_full_stream_request(
                 request, provider, instance_name, model_name
             )
-
-        if instance_name in request.app.state.gemini_stream_instances:
+        elif instance_name in request.app.state.gemini_stream_instances:
             try:
                 # For Gemini, we can parse the model from the URL without reading the body.
                 details = await provider.parse_request_details(

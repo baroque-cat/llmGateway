@@ -19,6 +19,12 @@ def get_default_config() -> Dict[str, Any]:
             # - "disabled": Streaming is explicitly disabled in both directions (request and response) for all providers,
             #   unless overridden at the provider level.
             "streaming_mode": "auto",
+            
+            # Controls the debug logging mode for all providers.
+            # - "disabled": No additional debug logging (default behavior).
+            # - "headers_only": Log request and response headers only.
+            # - "full_body": Log request and response headers and body content (truncated to 10KB).
+            "debug_mode": "disabled",
         },
 
         # --- WORKER SETTINGS ---
@@ -106,6 +112,13 @@ def get_default_config() -> Dict[str, Any]:
                     # - "auto": Streaming is enabled when technically possible (current behavior).
                     # - "disabled": Streaming is explicitly disabled in both directions (request and response).
                     "streaming_mode": "auto",
+                    
+                    # Controls the debug logging mode for this provider instance.
+                    # - "disabled": No additional debug logging (inherits from global setting).
+                    # - "headers_only": Log request and response headers only.
+                    # - "full_body": Log request and response headers and body content (truncated to 10KB).
+                    "debug_mode": "disabled",
+                    
                     # Retry policies for failed requests.
                     "retry": {
                         "enabled": False,
