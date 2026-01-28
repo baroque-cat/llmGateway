@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Literal
 
 # ==============================================================================
 # 1. ATOMIC AND NESTED CONFIGURATION CLASSES
@@ -158,6 +158,10 @@ class TimeoutConfig:
 @dataclass
 class GatewayPolicyConfig:
     """Groups all policies applied by the API Gateway during live request processing."""
+    # Controls whether streaming is enabled for this provider instance.
+    # - "auto": Streaming is enabled when technically possible (current behavior).
+    # - "disabled": Streaming is explicitly disabled in both directions (request and response).
+    streaming_mode: Literal["auto", "disabled"] = "auto"
     # Policy for automatically retrying failed requests.
     retry: RetryPolicyConfig = field(default_factory=RetryPolicyConfig)
     # Policy for the circuit breaker to handle endpoint failures.
@@ -257,6 +261,16 @@ class LoggingConfig:
 # the entire application's configuration.
 
 @dataclass
+class GatewayGlobalConfig:
+    """Global settings for the API Gateway service."""
+    # Controls the default streaming behavior for all providers.
+    # - "auto": Streaming is enabled when technically possible (current behavior).
+    # - "disabled": Streaming is explicitly disabled in both directions (request and response) for all providers,
+    #   unless overridden at the provider level.
+    streaming_mode: Literal["auto", "disabled"] = "auto"
+
+
+@dataclass
 class Config:
     """
     The main configuration object for the entire llmGateway application.
@@ -266,6 +280,7 @@ class Config:
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     worker: WorkerConfig = field(default_factory=WorkerConfig)
+    gateway: GatewayGlobalConfig = field(default_factory=GatewayGlobalConfig)
     # A dictionary mapping the unique instance name to its full configuration.
     providers: Dict[str, ProviderConfig] = field(default_factory=dict)
 

@@ -12,6 +12,15 @@ def get_default_config() -> Dict[str, Any]:
         # --- GLOBAL SETTINGS ---
         "debug": False,
 
+        # --- GATEWAY SETTINGS ---
+        "gateway": {
+            # Controls the default streaming behavior for all providers.
+            # - "auto": Streaming is enabled when technically possible (current behavior).
+            # - "disabled": Streaming is explicitly disabled in both directions (request and response) for all providers,
+            #   unless overridden at the provider level.
+            "streaming_mode": "auto",
+        },
+
         # --- WORKER SETTINGS ---
         "worker": {
             # Concurrency limit for the background worker's probes.
@@ -93,6 +102,10 @@ def get_default_config() -> Dict[str, Any]:
 
                 # Policies applied only by the API Gateway during request processing.
                 "gateway_policy": {
+                    # Controls whether streaming is enabled for this provider instance.
+                    # - "auto": Streaming is enabled when technically possible (current behavior).
+                    # - "disabled": Streaming is explicitly disabled in both directions (request and response).
+                    "streaming_mode": "auto",
                     # Retry policies for failed requests.
                     "retry": {
                         "enabled": False,

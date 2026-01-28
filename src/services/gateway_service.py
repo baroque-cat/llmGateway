@@ -520,35 +520,49 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
             app.state.gemini_stream_instances = set()
             app.state.single_model_map = {}
 
+            # Get the global streaming mode from the configuration.
+            global_streaming_mode = accessor._config.gateway.streaming_mode
+
             # Iterate through all enabled providers to analyze and log their mode.
             for name, config in accessor.get_enabled_providers().items():
                 mode = ""
                 reason = ""
 
-                # Rule 1 (Highest priority): Retry policy forces partial streaming.
-                if config.gateway_policy.retry.enabled:
+                # Determine the effective streaming mode for this provider.
+                # Provider-specific setting takes precedence over the global setting.
+                effective_streaming_mode = config.gateway_policy.streaming_mode
+                if effective_streaming_mode == "auto":
+                    effective_streaming_mode = global_streaming_mode
+
+                # If streaming is explicitly disabled, skip all other rules.
+                if effective_streaming_mode == "disabled":
                     mode = "PARTIAL STREAM"
-                    reason = "Retry policy is enabled"
-
-                # Rule 2: Single-model instances can be fully streamed.
-                elif len(config.models) == 1:
-                    mode = "FULL STREAM"
-                    reason = "Single model configured, no parsing needed"
-                    # Update state for the dispatcher.
-                    app.state.full_stream_instances.add(name)
-                    app.state.single_model_map[name] = list(config.models.keys())[0]
-
-                # Rule 3: Special case for Gemini's URL-based model selection.
-                elif config.provider_type == "gemini":
-                    mode = "FULL STREAM"
-                    reason = "Provider type 'gemini' allows model parsing from URL"
-                    # Update state for the dispatcher.
-                    app.state.gemini_stream_instances.add(name)
-
-                # Rule 4 (Default): Multi-model instances require body parsing.
+                    reason = "Streaming is explicitly disabled"
                 else:
-                    mode = "PARTIAL STREAM"
-                    reason = "Multiple models require request body parsing"
+                    # Rule 1 (Highest priority): Retry policy forces partial streaming.
+                    if config.gateway_policy.retry.enabled:
+                        mode = "PARTIAL STREAM"
+                        reason = "Retry policy is enabled"
+
+                    # Rule 2: Single-model instances can be fully streamed.
+                    elif len(config.models) == 1:
+                        mode = "FULL STREAM"
+                        reason = "Single model configured, no parsing needed"
+                        # Update state for the dispatcher.
+                        app.state.full_stream_instances.add(name)
+                        app.state.single_model_map[name] = list(config.models.keys())[0]
+
+                    # Rule 3: Special case for Gemini's URL-based model selection.
+                    elif config.provider_type == "gemini":
+                        mode = "FULL STREAM"
+                        reason = "Provider type 'gemini' allows model parsing from URL"
+                        # Update state for the dispatcher.
+                        app.state.gemini_stream_instances.add(name)
+
+                    # Rule 4 (Default): Multi-model instances require body parsing.
+                    else:
+                        mode = "PARTIAL STREAM"
+                        reason = "Multiple models require request body parsing"
 
                 # Log the determined mode and reason for operational clarity.
                 logger.info(
