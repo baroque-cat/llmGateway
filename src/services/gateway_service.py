@@ -342,8 +342,43 @@ async def _handle_buffered_request(
     )
 
     if check_result.ok:
-        # Case 1: Success. Stream the response back to the client.
-        return _create_proxied_streaming_response(upstream_response)
+        # Case 1: Success. Check if debug logging is needed.
+        effective_debug_mode = request.app.state.debug_mode_map.get(instance_name, "disabled")
+        
+        if effective_debug_mode != "disabled":
+            # Read the entire response body for logging
+            response_body = await upstream_response.aread()
+            await upstream_response.aclose()
+            
+            # Log debug information
+            await _log_debug_info(
+                debug_mode=effective_debug_mode,
+                instance_name=instance_name,
+                request_method=request.method,
+                request_path=request.url.path,
+                request_headers=dict(request.headers),
+                request_body=request_body,
+                response_status=upstream_response.status_code,
+                response_headers=dict(upstream_response.headers),
+                response_body=response_body,
+            )
+            
+            # Filter out hop-by-hop headers for the final response
+            filtered_headers = {
+                key: value
+                for key, value in upstream_response.headers.items()
+                if key.lower() not in HOP_BY_HOP_HEADERS
+            }
+            
+            # Return buffered response (not streaming) since we've read the entire body
+            return Response(
+                content=response_body,
+                status_code=upstream_response.status_code,
+                headers=filtered_headers,
+            )
+        else:
+            # Normal streaming response when debug is disabled
+            return _create_proxied_streaming_response(upstream_response)
 
     elif check_result.error_reason.is_client_error():
         # Case 2: Client-side error (e.g., 400 Bad Request). The key is not at fault.
@@ -353,6 +388,22 @@ async def _handle_buffered_request(
         )
         response_body = await upstream_response.aread()
         await upstream_response.aclose()
+        
+        # Log debug information for client errors too
+        effective_debug_mode = request.app.state.debug_mode_map.get(instance_name, "disabled")
+        if effective_debug_mode != "disabled":
+            await _log_debug_info(
+                debug_mode=effective_debug_mode,
+                instance_name=instance_name,
+                request_method=request.method,
+                request_path=request.url.path,
+                request_headers=dict(request.headers),
+                request_body=request_body,
+                response_status=upstream_response.status_code,
+                response_headers=dict(upstream_response.headers),
+                response_body=response_body,
+            )
+        
         filtered_headers = {
             key: value
             for key, value in upstream_response.headers.items()
@@ -447,8 +498,43 @@ async def _handle_buffered_retryable_request(
         )
 
         if check_result.ok:
-            # Case 1: Success. Stream the response and terminate the loop.
-            return _create_proxied_streaming_response(upstream_response)
+            # Case 1: Success. Check if debug logging is needed.
+            effective_debug_mode = request.app.state.debug_mode_map.get(instance_name, "disabled")
+            
+            if effective_debug_mode != "disabled":
+                # Read the entire response body for logging
+                response_body = await upstream_response.aread()
+                await upstream_response.aclose()
+                
+                # Log debug information
+                await _log_debug_info(
+                    debug_mode=effective_debug_mode,
+                    instance_name=instance_name,
+                    request_method=request.method,
+                    request_path=request.url.path,
+                    request_headers=dict(request.headers),
+                    request_body=request_body,
+                    response_status=upstream_response.status_code,
+                    response_headers=dict(upstream_response.headers),
+                    response_body=response_body,
+                )
+                
+                # Filter out hop-by-hop headers for the final response
+                filtered_headers = {
+                    key: value
+                    for key, value in upstream_response.headers.items()
+                    if key.lower() not in HOP_BY_HOP_HEADERS
+                }
+                
+                # Return buffered response (not streaming) since we've read the entire body
+                return Response(
+                    content=response_body,
+                    status_code=upstream_response.status_code,
+                    headers=filtered_headers,
+                )
+            else:
+                # Normal streaming response when debug is disabled
+                return _create_proxied_streaming_response(upstream_response)
 
         reason = check_result.error_reason
         logger.warning(
@@ -462,6 +548,22 @@ async def _handle_buffered_retryable_request(
             )
             response_body = await upstream_response.aread()
             await upstream_response.aclose()
+            
+            # Log debug information for client errors too
+            effective_debug_mode = request.app.state.debug_mode_map.get(instance_name, "disabled")
+            if effective_debug_mode != "disabled":
+                await _log_debug_info(
+                    debug_mode=effective_debug_mode,
+                    instance_name=instance_name,
+                    request_method=request.method,
+                    request_path=request.url.path,
+                    request_headers=dict(request.headers),
+                    request_body=request_body,
+                    response_status=upstream_response.status_code,
+                    response_headers=dict(upstream_response.headers),
+                    response_body=response_body,
+                )
+            
             filtered_headers = {
                 key: value
                 for key, value in upstream_response.headers.items()
