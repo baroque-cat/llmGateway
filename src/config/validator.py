@@ -4,7 +4,7 @@ import logging
 from typing import List, Set
 
 # Import the full dataclass definitions for type checking.
-from src.config.schemas import Config, ProviderConfig, HealthPolicyConfig
+from src.config.schemas import Config, ProviderConfig, HealthPolicyConfig, ErrorParsingConfig
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +128,10 @@ class ConfigValidator:
         # --- NEW: Health Policy Validation ---
         # This call integrates the new validation logic as planned.
         self._validate_health_policy(name, conf.health_policy)
+        
+        # --- NEW: Error Parsing Validation ---
+        # Validate error parsing configuration if enabled
+        self._validate_error_parsing(name, conf.gateway_policy.error_parsing)
 
     def _validate_health_policy(self, name: str, policy: HealthPolicyConfig):
         """
@@ -171,4 +175,58 @@ class ConfigValidator:
         # Batch delay can be zero, so we check for negative values.
         if policy.batch_delay_sec < 0:
              self._add_error(f"Provider '{name}': Health policy field 'batch_delay_sec' cannot be negative, but got {policy.batch_delay_sec}.")
+
+    def _validate_error_parsing(self, name: str, config: ErrorParsingConfig):
+        """
+        Validates the error parsing configuration for a provider.
+        
+        This ensures that error parsing rules are properly configured and
+        map to valid ErrorReason values.
+        """
+        if not config.enabled:
+            return
+        
+        # Import ErrorReason here to avoid circular imports
+        from src.core.enums import ErrorReason
+        
+        # Validate each rule
+        for i, rule in enumerate(config.rules):
+            # Validate status code (should be 4xx or 5xx)
+            if rule.status_code < 400 or rule.status_code >= 600:
+                self._add_error(
+                    f"Provider '{name}': error_parsing.rules[{i}].status_code "
+                    f"must be a 4xx or 5xx HTTP status code, got {rule.status_code}."
+                )
+            
+            # Validate error_path is not empty
+            if not rule.error_path or not isinstance(rule.error_path, str):
+                self._add_error(
+                    f"Provider '{name}': error_parsing.rules[{i}].error_path "
+                    f"must be a non-empty string, got '{rule.error_path}'."
+                )
+            
+            # Validate match_pattern is not empty
+            if not rule.match_pattern or not isinstance(rule.match_pattern, str):
+                self._add_error(
+                    f"Provider '{name}': error_parsing.rules[{i}].match_pattern "
+                    f"must be a non-empty string, got '{rule.match_pattern}'."
+                )
+            
+            # Validate map_to is a valid ErrorReason value
+            try:
+                ErrorReason(rule.map_to)
+            except ValueError:
+                valid_values = [e.value for e in ErrorReason]
+                self._add_error(
+                    f"Provider '{name}': error_parsing.rules[{i}].map_to "
+                    f"must be a valid ErrorReason value, got '{rule.map_to}'. "
+                    f"Valid values: {valid_values}"
+                )
+            
+            # Validate priority is non-negative
+            if rule.priority < 0:
+                self._add_error(
+                    f"Provider '{name}': error_parsing.rules[{i}].priority "
+                    f"must be non-negative, got {rule.priority}."
+                )
 

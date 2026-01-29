@@ -1,8 +1,10 @@
 # src/providers/base.py
 
+import json
 import logging
+import re
 from abc import abstractmethod
-from typing import List, Optional, Dict, Tuple
+from typing import List, Optional, Dict, Tuple, Any
 
 import httpx
 
@@ -66,6 +68,100 @@ class AIBaseProvider(IProvider):
         cleaned_headers.update({k.lower(): v for k, v in provider_headers.items()})
         
         return cleaned_headers
+
+    # --- NEW: Error parsing helper methods ---
+    
+    async def _refine_error_reason(
+        self, 
+        response: httpx.Response, 
+        default_reason: ErrorReason,
+        body_bytes: Optional[bytes] = None,
+        response_data: Optional[Dict[str, Any]] = None
+    ) -> ErrorReason:
+        """
+        Refines the error reason based on error parsing rules from configuration.
+        
+        This method analyzes the response body using configured error parsing rules
+        to provide more accurate error classification. For example, it can distinguish
+        between different types of 400 errors (e.g., "Arrearage" vs format errors).
+        
+        Args:
+            response: The HTTP response from the upstream API
+            default_reason: The default error reason based on HTTP status code
+            body_bytes: Optional pre-read response body bytes (to avoid re-reading)
+            response_data: Optional pre-parsed JSON response data
+            
+        Returns:
+            Refined error reason if a rule matches, otherwise the default reason
+        """
+        # Check if error parsing is enabled and has rules
+        error_config = self.config.gateway_policy.error_parsing
+        if not error_config.enabled or not error_config.rules:
+            return default_reason
+        
+        # Get rules for this status code
+        rules = [r for r in error_config.rules if r.status_code == response.status_code]
+        if not rules:
+            return default_reason
+        
+        # Parse response body if not already provided
+        parsed_data = response_data
+        if parsed_data is None:
+            try:
+                if body_bytes is None:
+                    body_bytes = await response.aread()
+                if body_bytes:
+                    parsed_data = json.loads(body_bytes.decode('utf-8', errors='ignore'))
+                else:
+                    # Empty body, can't parse
+                    return default_reason
+            except (json.JSONDecodeError, UnicodeDecodeError, AttributeError):
+                # If we can't parse the body, return the default reason
+                return default_reason
+        
+        # Apply rules in priority order (higher priority first)
+        matched_rules = []
+        for rule in sorted(rules, key=lambda x: x.priority, reverse=True):
+            try:
+                value = self._extract_json_value(parsed_data, rule.error_path)
+                if value and re.search(rule.match_pattern, str(value), re.IGNORECASE):
+                    matched_rules.append(rule)
+            except (KeyError, TypeError, re.error):
+                # Skip rules that can't be evaluated
+                continue
+        
+        # Select the highest priority matched rule
+        if matched_rules:
+            best_rule = max(matched_rules, key=lambda x: x.priority)
+            try:
+                return ErrorReason(best_rule.map_to)
+            except ValueError:
+                logger.warning(
+                    f"Invalid map_to value '{best_rule.map_to}' in error parsing rule "
+                    f"for provider '{self.name}'. Using default reason."
+                )
+        
+        return default_reason
+    
+    def _extract_json_value(self, data: Dict[str, Any], path: str) -> Optional[Any]:
+        """
+        Extracts a value from a nested dictionary using a dot-separated path.
+        
+        Args:
+            data: The JSON data as a dictionary
+            path: Dot-separated path to the field (e.g., "error.type")
+            
+        Returns:
+            The extracted value or None if the path doesn't exist
+        """
+        parts = path.split('.')
+        current = data
+        for part in parts:
+            if isinstance(current, dict) and part in current:
+                current = current[part]
+            else:
+                return None
+        return current
 
     # --- REFACTORED: Protected helper method for sending requests (Template Method pattern) ---
     async def _send_proxy_request(

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional, Literal
+from typing import Dict, Any, Optional, Literal, List
 
 # ==============================================================================
 # 1. ATOMIC AND NESTED CONFIGURATION CLASSES
@@ -156,6 +156,54 @@ class TimeoutConfig:
 
 
 @dataclass
+class ErrorParsingRule:
+    """
+    Rule for parsing specific errors from response body.
+    
+    This allows fine-grained error classification based on response content,
+    enabling the gateway to distinguish between different types of errors
+    with the same HTTP status code (e.g., 400 Bad Request with different error types).
+    """
+    # HTTP status code this rule applies to (e.g., 400, 429, etc.)
+    status_code: int
+    
+    # JSON path to the error field (e.g., "error.type", "error.code", "error.message")
+    error_path: str
+    
+    # Regular expression or exact value to match in the error field
+    match_pattern: str
+    
+    # ErrorReason value to map to when this rule matches (e.g., "invalid_key", "no_quota")
+    map_to: str
+    
+    # Priority for rule matching (higher priority rules are checked first)
+    priority: int = 0
+    
+    # Human-readable description of what this rule detects
+    description: str = ""
+
+
+@dataclass
+class ErrorParsingConfig:
+    """
+    Configuration for error response parsing in the gateway.
+    
+    This enables the gateway to analyze error response bodies and refine
+    error classification beyond simple HTTP status codes. This is particularly
+    useful for providers that return detailed error information in the response body.
+    """
+    # Whether error parsing is enabled for this provider
+    enabled: bool = False
+    
+    # List of error parsing rules to apply
+    rules: List[ErrorParsingRule] = field(default_factory=list)
+    
+    # Whether buffering of response is required for error parsing
+    # When true, streaming responses will be buffered to enable error analysis
+    require_buffering: bool = True
+
+
+@dataclass
 class GatewayPolicyConfig:
     """Groups all policies applied by the API Gateway during live request processing."""
     # Controls whether streaming is enabled for this provider instance.
@@ -168,6 +216,10 @@ class GatewayPolicyConfig:
     # - "headers_only": Log request and response headers only.
     # - "full_body": Log request and response headers and body content (truncated to 10KB).
     debug_mode: Literal["disabled", "headers_only", "full_body"] = "disabled"
+    
+    # Configuration for parsing error responses to refine error classification
+    # This enables distinguishing between different error types with the same HTTP status code
+    error_parsing: ErrorParsingConfig = field(default_factory=ErrorParsingConfig)
     
     # Policy for automatically retrying failed requests.
     retry: RetryPolicyConfig = field(default_factory=RetryPolicyConfig)

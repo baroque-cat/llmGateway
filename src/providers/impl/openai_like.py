@@ -27,20 +27,30 @@ class OpenAILikeProvider(AIBaseProvider):
         1. Read the response body first.
         2. THEN, access properties like .elapsed.
         This fixes the latent RuntimeError for this provider type.
+        
+        Now enhanced with error parsing rules from configuration.
         """
         status_code = response.status_code
         
-        # 1. Read body first.
+        # 1. Read body first (required for safe .elapsed access)
         response_bytes = await response.aread()
         response_text = response_bytes.decode(errors='ignore')
 
         # 2. Access .elapsed now that it's safe.
         response_time = response.elapsed.total_seconds()
         
-        # 3. Use this provider's specific mapping logic.
-        reason = self._map_status_code_to_reason(status_code)
+        # 3. Get default reason based on status code
+        default_reason = self._map_status_code_to_reason(status_code)
         
-        return CheckResult.fail(reason, response_text, response_time, status_code)
+        # 4. Refine reason using error parsing rules (if configured)
+        # Pass the already-read body to avoid re-reading
+        refined_reason = await self._refine_error_reason(
+            response=response,
+            default_reason=default_reason,
+            body_bytes=response_bytes
+        )
+        
+        return CheckResult.fail(refined_reason, response_text, response_time, status_code)
 
     async def parse_request_details(self, path: str, content: bytes) -> RequestDetails:
         """
@@ -176,12 +186,21 @@ class OpenAILikeProvider(AIBaseProvider):
             return CheckResult.fail(ErrorReason.NETWORK_ERROR, f"Connection error: {e}", status_code=503)
         except httpx.HTTPStatusError as e:
             response = e.response
-            reason = self._map_status_code_to_reason(response.status_code)
+            status_code = response.status_code
+            
+            # Special handling for worker: 400 errors in check() likely indicate invalid key
+            # since the request format is predetermined and correct
+            if status_code == 400:
+                reason = ErrorReason.INVALID_KEY
+                logger.debug(f"Worker check received 400 error, treating as {reason.value} for key validation")
+            else:
+                reason = self._map_status_code_to_reason(status_code)
+            
             return CheckResult.fail(
                 reason=reason,
                 message=response.text,
                 response_time=response.elapsed.total_seconds(),
-                status_code=response.status_code
+                status_code=status_code
             )
         except httpx.RequestError as e:
             return CheckResult.fail(ErrorReason.NETWORK_ERROR, str(e), status_code=503)

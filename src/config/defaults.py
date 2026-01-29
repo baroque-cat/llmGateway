@@ -119,6 +119,14 @@ def get_default_config() -> Dict[str, Any]:
                     # - "full_body": Log request and response headers and body content (truncated to 10KB).
                     "debug_mode": "disabled",
                     
+                    # Configuration for parsing error responses to refine error classification
+                    # This enables distinguishing between different error types with the same HTTP status code
+                    "error_parsing": {
+                        "enabled": False,
+                        "require_buffering": True,
+                        "rules": []
+                    },
+                    
                     # Retry policies for failed requests.
                     "retry": {
                         "enabled": False,
