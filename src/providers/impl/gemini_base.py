@@ -135,7 +135,7 @@ class GeminiBaseProvider(AIBaseProvider):
         return ErrorReason.UNKNOWN
 
     async def check(
-        self, client: httpx.AsyncClient, token: str, model: str
+        self, client: httpx.AsyncClient, token: str, **kwargs
     ) -> CheckResult:
         """
         Template Method for checking the validity of a Gemini API token.
@@ -143,7 +143,18 @@ class GeminiBaseProvider(AIBaseProvider):
         This method contains the shared logic for making requests and handling
         errors, while delegating the creation of the specific URL and payload
         to the concrete subclass via `_build_check_request_args`.
+        
+        Args:
+            client: The httpx.AsyncClient to use for the request.
+            token: The API token to validate.
+            **kwargs: Additional keyword arguments. Expected to contain 'model' key.
+            
+        Returns:
+            A CheckResult indicating the success or failure of the check.
         """
+        model = kwargs.get('model')
+        if not model:
+            return CheckResult.fail(ErrorReason.BAD_REQUEST, "Missing 'model' parameter in check method.")
         logger.debug(
             f"Checking Gemini key ending '...{token[-4:]}' for model '{model}'."
         )

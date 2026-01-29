@@ -115,12 +115,23 @@ class OpenAILikeProvider(AIBaseProvider):
         
         return ErrorReason.UNKNOWN
 
-    async def check(self, client: httpx.AsyncClient, token: str, model: str) -> CheckResult:
+    async def check(self, client: httpx.AsyncClient, token: str, **kwargs) -> CheckResult:
         """
         Checks the validity of an API token by making an async, lightweight test request.
         The URL and payload for the check are now dynamically determined from the
         provider's configuration, removing hardcoded values.
+        
+        Args:
+            client: The httpx.AsyncClient to use for the request.
+            token: The API token to validate.
+            **kwargs: Additional keyword arguments. Expected to contain 'model' key.
+            
+        Returns:
+            A CheckResult indicating the success or failure of the check.
         """
+        model = kwargs.get('model')
+        if not model:
+            return CheckResult.fail(ErrorReason.BAD_REQUEST, "Missing 'model' parameter in check method.")
         logger.debug(f"Checking OpenAI-like key ending '...{token[-4:]}' for model '{model}'.")
 
         headers = self._get_headers(token)
