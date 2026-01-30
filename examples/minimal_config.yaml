@@ -1,0 +1,36 @@
+# examples/minimal_config.yaml
+# This is a minimal configuration file with only the required settings.
+
+# --- WORKER SETTINGS ---
+worker:
+  max_concurrent_providers: 5
+
+# --- DATABASE SETTINGS ---
+database:
+  host: "localhost"
+  port: 5433
+  user: "llm_gateway"
+  password: "${DB_PASSWORD}"
+  dbname: "llmgateway"
+
+# --- PROVIDER SETTINGS ---
+providers:
+  # Minimal configuration for a Gemini provider
+  gemini-minimal:
+    provider_type: "gemini"
+    enabled: true
+    keys_path: "keys/gemini-minimal/"
+    
+    api_base_url: "https://generativelanguage.googleapis.com"
+    default_model: "gemini-2.5-flash"
+    
+    models:
+      gemini-2.5-flash:
+        endpoint_suffix: ":generateContent"
+        test_payload:
+          contents:
+            - parts:
+                - text: "Hello"
+
+    access_control:
+      gateway_access_token: "${GEMINI_MINIMAL_TOKEN}"

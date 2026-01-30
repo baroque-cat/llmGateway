@@ -3,7 +3,6 @@
 import os
 import re
 import logging
-import copy
 from typing import Any, Dict, Type, TypeVar, get_type_hints, get_origin, get_args
 from dataclasses import is_dataclass, fields
 
@@ -14,7 +13,6 @@ from deepmerge import always_merger
 # Import schemas and default templates
 from src.config.schemas import Config, ProviderConfig
 from src.config.defaults import get_default_config
-from src.config.provider_templates import PROVIDER_TYPE_DEFAULTS
 
 logger = logging.getLogger(__name__)
 
@@ -126,23 +124,9 @@ class ConfigLoader:
             # 1. Start with the generic provider template from defaults.py
             provider_base = get_default_config()['providers']['llm_provider_default']
             
-            # --- MODIFIED BLOCK START: FIX FOR 'models' MERGING ---
-            # 2. Get a deep copy of the type-specific template to avoid side effects
-            # on the global PROVIDER_TYPE_DEFAULTS constant.
-            type_template = copy.deepcopy(PROVIDER_TYPE_DEFAULTS.get(provider_type, {}))
-
-            # This is the core fix. We check if the user has defined their own
-            # 'models' section. If so, it should completely override the template's.
-            # To achieve this with deepmerge, we remove the 'models' key from the
-            # template *before* merging. This forces a 'replace' strategy for this key.
-            if 'models' in user_provider_conf and 'models' in type_template:
-                del type_template['models']
-
-            provider_base = always_merger.merge(provider_base, type_template)
-            # --- MODIFIED BLOCK END ---
-
-            # 3. Finally, merge the user's specific configuration for this instance.
-            # This handles all complex scenarios like partial overrides.
+            # 2. Merge the user's specific configuration for this instance.
+            # Since we have removed automatic template injection (provider_templates.py),
+            # the user config must contain all necessary fields (api_base_url, models, etc.).
             final_provider_instance = always_merger.merge(provider_base, user_provider_conf)
             
             final_providers[name] = final_provider_instance

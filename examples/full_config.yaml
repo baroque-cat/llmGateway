@@ -1,0 +1,152 @@
+# examples/full_config.yaml
+# This configuration file is a comprehensive reference showing all available settings.
+# Copy this file to 'config/providers.yaml' and edit it to suit your needs.
+
+# --- WORKER SETTINGS ---
+worker:
+  # Concurrency limit for the background worker's probes.
+  max_concurrent_providers: 10
+
+# --- DATABASE SETTINGS ---
+database:
+  host: "localhost"
+  port: 5433
+  user: "llm_gateway"
+  # Use environment variables for sensitive data.
+  # Ensure you have a .env file with DB_PASSWORD set.
+  password: "${DB_PASSWORD}"
+  dbname: "llmgateway"
+
+# --- LOGGING SETTINGS ---
+logging:
+  summary_log_path: "logs/summary/"
+  summary_interval_min: 30
+  summary_log_max_size_mb: 5
+  summary_log_backup_count: 3
+
+# --- PROVIDER SETTINGS ---
+providers:
+  # Example 1: Google Gemini (Full Configuration)
+  gemini-production:
+    provider_type: "gemini"
+    enabled: true
+    # Directory to store API keys
+    keys_path: "keys/gemini-production/"
+    
+    api_base_url: "https://generativelanguage.googleapis.com"
+    default_model: "gemini-2.5-flash"
+    shared_key_status: false
+
+    # Defined models for this provider
+    models:
+      gemini-2.5-flash:
+        endpoint_suffix: ":generateContent"
+        test_payload:
+          contents:
+            - parts:
+                - text: "Hello"
+      
+      gemini-2.5-pro:
+        endpoint_suffix: ":generateContent"
+        test_payload:
+          contents:
+            - parts:
+                - text: "Hello"
+      
+      imagen-3.0-generate-002:
+        endpoint_suffix: ":predict"
+        test_payload:
+          instances:
+            - prompt: "test image"
+
+    # Access control for the Gateway API
+    access_control:
+      gateway_access_token: "${GEMINI_PROD_TOKEN}"
+
+    # Health check policy for the background worker
+    health_policy:
+      on_server_error_min: 30
+      on_overload_min: 60
+      on_other_error_hr: 1
+      on_success_hr: 1
+      on_rate_limit_hr: 4
+      on_no_quota_hr: 4
+      on_invalid_key_days: 10
+      on_no_access_days: 10
+      quarantine_after_days: 30
+      quarantine_recheck_interval_days: 10
+      stop_checking_after_days: 90
+      batch_size: 30
+      batch_delay_sec: 15
+
+    # Proxy configuration
+    proxy_config:
+      mode: "none" # "none", "static", or "stealth"
+      # static_url: "http://user:pass@proxy:8080" # Required if mode is static
+      pool_list_path: "proxies/gemini-production/" # Required if mode is stealth
+
+    timeouts:
+      connect: 5.0
+      read: 20.0
+      write: 10.0
+      pool: 5.0
+
+    # Gateway specific policies
+    gateway_policy:
+      streaming_mode: "auto" # "auto" or "disabled"
+      debug_mode: "disabled" # "disabled", "headers_only", "full_body"
+      
+      # Error parsing rules for better error classification
+      error_parsing:
+        enabled: true
+        rules:
+          - status_code: 400
+            error_path: "error.status"
+            match_pattern: "INVALID_ARGUMENT"
+            map_to: "invalid_key"
+            priority: 10
+            description: "Gemini invalid API key"
+
+      retry:
+        enabled: true
+        on_key_error:
+          attempts: 3
+        on_server_error:
+          attempts: 5
+          backoff_sec: 0.5
+          backoff_factor: 2.0
+      
+      circuit_breaker:
+        enabled: true
+        mode: "auto_recovery"
+        failure_threshold: 20
+        jitter_sec: 5
+        backoff:
+          base_duration_sec: 60
+          max_duration_sec: 3600
+          factor: 2.0
+
+  # Example 2: OpenAI-compatible Provider (e.g. DeepSeek, Moonshot)
+  deepseek-main:
+    provider_type: "openai_like"
+    enabled: true
+    keys_path: "keys/deepseek-main/"
+    
+    api_base_url: "https://api.deepseek.com/v1"
+    default_model: "deepseek-chat"
+    
+    models:
+      deepseek-chat:
+        endpoint_suffix: "/chat/completions"
+        test_payload:
+          messages:
+            - role: "user"
+              content: "Hi"
+          max_tokens: 1
+    
+    access_control:
+      gateway_access_token: "${DEEPSEEK_TOKEN}"
+    
+    # Using default health and gateway policies by omitting them
+    proxy_config:
+      mode: "none"
