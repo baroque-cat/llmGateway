@@ -6,7 +6,7 @@ import httpx
 
 from src.services.gateway_service import _log_debug_info
 from src.core.models import CheckResult
-from src.config.schemas import Config, GatewayGlobalConfig, ProviderConfig, GatewayPolicyConfig
+from src.config.schemas import Config, ProviderConfig, GatewayPolicyConfig
 
 
 @pytest.mark.asyncio
@@ -88,38 +88,3 @@ async def test_log_debug_info_body_truncation():
         assert len(response_body_calls) == 1
         assert b"... (truncated)" in request_body_calls[0].encode()
         assert b"... (truncated)" in response_body_calls[0].encode()
-
-
-def test_debug_mode_disabled():
-    """Test that debug mode disabled doesn't affect normal operation."""
-    config = Config()
-    config.gateway = GatewayGlobalConfig(debug_mode="disabled")
-    provider_config = ProviderConfig()
-    provider_config.gateway_policy = GatewayPolicyConfig(debug_mode="disabled")
-    
-    # Should inherit global setting
-    effective_debug_mode = "disabled"
-    assert effective_debug_mode == "disabled"
-
-
-def test_debug_mode_inheritance():
-    """Test debug mode inheritance logic."""
-    # Test case 1: Provider has debug_mode="disabled", should inherit global
-    config = Config()
-    config.gateway = GatewayGlobalConfig(debug_mode="headers_only")
-    provider_config = ProviderConfig()
-    provider_config.gateway_policy = GatewayPolicyConfig(debug_mode="disabled")
-    
-    effective_debug_mode = provider_config.gateway_policy.debug_mode
-    if effective_debug_mode == "disabled":
-        effective_debug_mode = config.gateway.debug_mode
-    
-    assert effective_debug_mode == "headers_only"
-    
-    # Test case 2: Provider has debug_mode="full_body", should override global
-    provider_config.gateway_policy.debug_mode = "full_body"
-    effective_debug_mode = provider_config.gateway_policy.debug_mode
-    if effective_debug_mode == "disabled":
-        effective_debug_mode = config.gateway.debug_mode
-        
-    assert effective_debug_mode == "full_body"

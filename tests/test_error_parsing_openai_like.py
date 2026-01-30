@@ -325,7 +325,7 @@ class TestOpenAILikeErrorParsing:
         assert result.status_code == 400
     
     @pytest.mark.asyncio
-    async def test_parse_proxy_error_requires_buffering_flag(self):
+    async def test_parse_proxy_error_passes_body_bytes(self):
         """Test that _parse_proxy_error passes body_bytes to avoid re-reading."""
         provider = self.create_mock_provider(
             error_config=ErrorParsingConfig(
@@ -337,8 +337,7 @@ class TestOpenAILikeErrorParsing:
                         match_pattern="Arrearage",
                         map_to="invalid_key"
                     )
-                ],
-                require_buffering=True
+                ]
             )
         )
         

@@ -197,10 +197,6 @@ class ErrorParsingConfig:
     
     # List of error parsing rules to apply
     rules: List[ErrorParsingRule] = field(default_factory=list)
-    
-    # Whether buffering of response is required for error parsing
-    # When true, streaming responses will be buffered to enable error analysis
-    require_buffering: bool = True
 
 
 @dataclass
@@ -212,7 +208,7 @@ class GatewayPolicyConfig:
     streaming_mode: Literal["auto", "disabled"] = "auto"
     
     # Controls the debug logging mode for this provider instance.
-    # - "disabled": No additional debug logging (inherits from global setting).
+    # - "disabled": No additional debug logging.
     # - "headers_only": Log request and response headers only.
     # - "full_body": Log request and response headers and body content (truncated to 10KB).
     debug_mode: Literal["disabled", "headers_only", "full_body"] = "disabled"
@@ -320,32 +316,14 @@ class LoggingConfig:
 # the entire application's configuration.
 
 @dataclass
-class GatewayGlobalConfig:
-    """Global settings for the API Gateway service."""
-    # Controls the default streaming behavior for all providers.
-    # - "auto": Streaming is enabled when technically possible (current behavior).
-    # - "disabled": Streaming is explicitly disabled in both directions (request and response) for all providers,
-    #   unless overridden at the provider level.
-    streaming_mode: Literal["auto", "disabled"] = "auto"
-    
-    # Controls the debug logging mode for all providers.
-    # - "disabled": No additional debug logging (default behavior).
-    # - "headers_only": Log request and response headers only.
-    # - "full_body": Log request and response headers and body content (truncated to 10KB).
-    debug_mode: Literal["disabled", "headers_only", "full_body"] = "disabled"
-
-
-@dataclass
 class Config:
     """
     The main configuration object for the entire llmGateway application.
     It serves as the root of the configuration tree.
     """
-    debug: bool = False
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     worker: WorkerConfig = field(default_factory=WorkerConfig)
-    gateway: GatewayGlobalConfig = field(default_factory=GatewayGlobalConfig)
     # A dictionary mapping the unique instance name to its full configuration.
     providers: Dict[str, ProviderConfig] = field(default_factory=dict)
 

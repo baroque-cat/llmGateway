@@ -338,8 +338,7 @@ class TestGeminiErrorParsing:
                         match_pattern="INVALID_ARGUMENT",
                         map_to="invalid_key"
                     )
-                ],
-                require_buffering=True
+                ]
             )
         )
         

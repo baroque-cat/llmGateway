@@ -10,23 +10,7 @@ def get_default_config() -> Dict[str, Any]:
     """
     return {
         # --- GLOBAL SETTINGS ---
-        "debug": False,
-
-        # --- GATEWAY SETTINGS ---
-        "gateway": {
-            # Controls the default streaming behavior for all providers.
-            # - "auto": Streaming is enabled when technically possible (current behavior).
-            # - "disabled": Streaming is explicitly disabled in both directions (request and response) for all providers,
-            #   unless overridden at the provider level.
-            "streaming_mode": "auto",
-            
-            # Controls the debug logging mode for all providers.
-            # - "disabled": No additional debug logging (default behavior).
-            # - "headers_only": Log request and response headers only.
-            # - "full_body": Log request and response headers and body content (truncated to 10KB).
-            "debug_mode": "disabled",
-        },
-
+        
         # --- WORKER SETTINGS ---
         "worker": {
             # Concurrency limit for the background worker's probes.
@@ -114,7 +98,7 @@ def get_default_config() -> Dict[str, Any]:
                     "streaming_mode": "auto",
                     
                     # Controls the debug logging mode for this provider instance.
-                    # - "disabled": No additional debug logging (inherits from global setting).
+                    # - "disabled": No additional debug logging.
                     # - "headers_only": Log request and response headers only.
                     # - "full_body": Log request and response headers and body content (truncated to 10KB).
                     "debug_mode": "disabled",
@@ -123,7 +107,6 @@ def get_default_config() -> Dict[str, Any]:
                     # This enables distinguishing between different error types with the same HTTP status code
                     "error_parsing": {
                         "enabled": False,
-                        "require_buffering": True,
                         "rules": []
                     },
                     

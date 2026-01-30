@@ -37,10 +37,6 @@ class ConfigAccessor:
     # --- Step 2: Global Configuration Accessors ---
     # These methods provide direct access to top-level configuration sections.
 
-    def is_debug_mode(self) -> bool:
-        """Checks if global debug mode is enabled."""
-        return self._config.debug
-
     def get_database_config(self) -> DatabaseConfig:
         """Returns the complete database configuration object."""
         return self._config.database
