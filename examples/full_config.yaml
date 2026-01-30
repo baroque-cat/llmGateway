@@ -110,13 +110,20 @@ providers:
       
       # Error parsing rules for better error classification (Slow Path)
       # Only reads the response body if a rule matches the status code.
+      #
+      # NOTE: Do not use 'unsafe_status_mapping' and 'error_parsing' for the SAME status code.
+      # 'unsafe_status_mapping' takes precedence (Fast Path) and prevents body reading,
+      # so these parsing rules will never run for that status code.
       error_parsing:
-        enabled: true
+        enabled: false # Default is false to maintain Zero-Overhead behavior
         rules:
           - status_code: 400
             error_path: "error.status"
             match_pattern: "INVALID_ARGUMENT"
             map_to: "invalid_key"
+            # Priority determines which rule wins if multiple rules match the same error.
+            # Higher values = Higher priority. 
+            # Useful for defining specific matches (e.g. priority 10) vs catch-alls (e.g. priority 0).
             priority: 10
             description: "Gemini invalid API key"
 
