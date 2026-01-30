@@ -107,7 +107,7 @@ class TestErrorParsingScenarios:
         }).encode('utf-8')
         mock_response.aread = AsyncMock(return_value=error_body)
         
-        result = await provider._parse_proxy_error(mock_response)
+        result = await provider._parse_proxy_error(mock_response, error_body)
         
         # Should map to INVALID_KEY
         assert isinstance(result, CheckResult)
@@ -155,7 +155,7 @@ class TestErrorParsingScenarios:
         }).encode('utf-8')
         mock_response.aread = AsyncMock(return_value=error_body)
         
-        result = await provider._parse_proxy_error(mock_response)
+        result = await provider._parse_proxy_error(mock_response, error_body)
         
         # Should map to NO_QUOTA
         assert isinstance(result, CheckResult)
@@ -202,7 +202,7 @@ class TestErrorParsingScenarios:
         }).encode('utf-8')
         mock_response.aread = AsyncMock(return_value=error_body)
         
-        result = await provider._parse_proxy_error(mock_response)
+        result = await provider._parse_proxy_error(mock_response, error_body)
         
         # Should map to INVALID_KEY
         assert isinstance(result, CheckResult)
@@ -255,11 +255,11 @@ class TestErrorParsingScenarios:
         mock_response.aread = AsyncMock(return_value=error_body)
         
         # With error parsing disabled, should get BAD_REQUEST
-        result_disabled = await provider_disabled._parse_proxy_error(mock_response)
+        result_disabled = await provider_disabled._parse_proxy_error(mock_response, error_body)
         assert result_disabled.error_reason == ErrorReason.BAD_REQUEST
         
         # With error parsing enabled but no match, should also get BAD_REQUEST
-        result_enabled = await provider_enabled._parse_proxy_error(mock_response)
+        result_enabled = await provider_enabled._parse_proxy_error(mock_response, error_body)
         assert result_enabled.error_reason == ErrorReason.BAD_REQUEST
         
         # Now test with Arrearage error
@@ -271,7 +271,7 @@ class TestErrorParsingScenarios:
         }).encode('utf-8')
         mock_response.aread = AsyncMock(return_value=arrearage_body)
         
-        result_arrearage = await provider_enabled._parse_proxy_error(mock_response)
+        result_arrearage = await provider_enabled._parse_proxy_error(mock_response, arrearage_body)
         assert result_arrearage.error_reason == ErrorReason.INVALID_KEY
     
     @pytest.mark.asyncio
@@ -329,7 +329,7 @@ class TestErrorParsingScenarios:
         }).encode('utf-8')
         mock_response.aread = AsyncMock(return_value=error_body)
         
-        result = await provider._parse_proxy_error(mock_response)
+        result = await provider._parse_proxy_error(mock_response, error_body)
         
         # Should use highest priority rule (INVALID_KEY for Arrearage)
         # Note: map_to="invalid_key" maps to ErrorReason.INVALID_KEY
@@ -374,7 +374,7 @@ class TestErrorParsingScenarios:
         
         for error_body in test_cases:
             mock_response.aread = AsyncMock(return_value=error_body)
-            result = await provider._parse_proxy_error(mock_response)
+            result = await provider._parse_proxy_error(mock_response, error_body)
             
             # Should still return a valid CheckResult
             assert isinstance(result, CheckResult)
@@ -410,6 +410,6 @@ class TestErrorParsingScenarios:
             mock_response.elapsed.total_seconds.return_value = 0.5
             mock_response.aread = AsyncMock(return_value=b'{"error": {"message": "test"}}')
             
-            result = await provider._parse_proxy_error(mock_response)
+            result = await provider._parse_proxy_error(mock_response, b'{"error": {"message": "test"}}')
             assert result.error_reason == expected_reason, \
                 f"Status {status_code} should map to {expected_reason}, got {result.error_reason}"

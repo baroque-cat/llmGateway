@@ -74,7 +74,7 @@ class TestOpenAILikeErrorParsing:
         }).encode('utf-8')
         mock_response.aread = AsyncMock(return_value=error_body)
         
-        result = await provider._parse_proxy_error(mock_response)
+        result = await provider._parse_proxy_error(mock_response, error_body)
         
         # Should map to BAD_REQUEST by default (no error parsing)
         assert isinstance(result, CheckResult)
@@ -115,7 +115,7 @@ class TestOpenAILikeErrorParsing:
         }).encode('utf-8')
         mock_response.aread = AsyncMock(return_value=error_body)
         
-        result = await provider._parse_proxy_error(mock_response)
+        result = await provider._parse_proxy_error(mock_response, error_body)
         
         # Should map to INVALID_KEY due to error parsing rule
         assert isinstance(result, CheckResult)
@@ -156,7 +156,7 @@ class TestOpenAILikeErrorParsing:
         }).encode('utf-8')
         mock_response.aread = AsyncMock(return_value=error_body)
         
-        result = await provider._parse_proxy_error(mock_response)
+        result = await provider._parse_proxy_error(mock_response, error_body)
         
         # Should fall back to default mapping (BAD_REQUEST)
         assert isinstance(result, CheckResult)
@@ -205,7 +205,7 @@ class TestOpenAILikeErrorParsing:
         }).encode('utf-8')
         mock_response.aread = AsyncMock(return_value=error_body)
         
-        result = await provider._parse_proxy_error(mock_response)
+        result = await provider._parse_proxy_error(mock_response, error_body)
         
         # Should use higher priority rule (INVALID_KEY)
         assert isinstance(result, CheckResult)
@@ -251,7 +251,7 @@ class TestOpenAILikeErrorParsing:
         }).encode('utf-8')
         mock_response.aread = AsyncMock(return_value=error_body)
         
-        result = await provider._parse_proxy_error(mock_response)
+        result = await provider._parse_proxy_error(mock_response, error_body)
         
         # Should map to RATE_LIMITED
         assert isinstance(result, CheckResult)
@@ -283,7 +283,7 @@ class TestOpenAILikeErrorParsing:
         mock_response.elapsed.total_seconds.return_value = 0.5
         mock_response.aread = AsyncMock(return_value=b'')  # Empty body
         
-        result = await provider._parse_proxy_error(mock_response)
+        result = await provider._parse_proxy_error(mock_response, b'')
         
         # Should use default mapping (BAD_REQUEST)
         assert isinstance(result, CheckResult)
@@ -315,7 +315,7 @@ class TestOpenAILikeErrorParsing:
         mock_response.elapsed.total_seconds.return_value = 0.5
         mock_response.aread = AsyncMock(return_value=b'Invalid JSON {')
         
-        result = await provider._parse_proxy_error(mock_response)
+        result = await provider._parse_proxy_error(mock_response, b'Invalid JSON {')
         
         # Should use default mapping (BAD_REQUEST)
         assert isinstance(result, CheckResult)
@@ -357,7 +357,7 @@ class TestOpenAILikeErrorParsing:
         with patch.object(provider, '_refine_error_reason', AsyncMock()) as mock_refine:
             mock_refine.return_value = ErrorReason.INVALID_KEY
             
-            await provider._parse_proxy_error(mock_response)
+            await provider._parse_proxy_error(mock_response, error_body)
             
             # Verify _refine_error_reason was called with body_bytes
             mock_refine.assert_called_once()

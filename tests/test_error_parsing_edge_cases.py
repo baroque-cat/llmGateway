@@ -85,7 +85,7 @@ class TestErrorParsingEdgeCases:
         mock_response.aread = AsyncMock(return_value=error_body)
         
         # Should still parse successfully
-        result = await provider._parse_proxy_error(mock_response)
+        result = await provider._parse_proxy_error(mock_response, error_body)
         
         assert isinstance(result, CheckResult)
         assert not result.available
@@ -146,7 +146,7 @@ class TestErrorParsingEdgeCases:
         
         # Start timing
         start_time = time.time()
-        result = await provider._parse_proxy_error(mock_response)
+        result = await provider._parse_proxy_error(mock_response, error_body)
         end_time = time.time()
         
         # Should match the high-priority rule
@@ -196,7 +196,7 @@ class TestErrorParsingEdgeCases:
         }).encode('utf-8')
         mock_response.aread = AsyncMock(return_value=error_body)
         
-        result = await provider._parse_proxy_error(mock_response)
+        result = await provider._parse_proxy_error(mock_response, error_body)
         
         assert result.error_reason == ErrorReason.INVALID_KEY
     
@@ -251,7 +251,7 @@ class TestErrorParsingEdgeCases:
             else:
                 mock_response.headers = {}
             
-            result = await provider._parse_proxy_error(mock_response)
+            result = await provider._parse_proxy_error(mock_response, error_body)
             
             # Should still parse the JSON regardless of content-type
             assert result.error_reason == ErrorReason.NO_QUOTA
@@ -300,7 +300,7 @@ class TestErrorParsingEdgeCases:
         mock_response.aread = AsyncMock(return_value=error_body)
         
         # Should skip the invalid regex rule and match the valid one
-        result = await provider._parse_proxy_error(mock_response)
+        result = await provider._parse_proxy_error(mock_response, error_body)
         
         assert result.error_reason == ErrorReason.NO_QUOTA
     
@@ -340,7 +340,7 @@ class TestErrorParsingEdgeCases:
             }).encode('utf-8')
             mock_response.aread = AsyncMock(return_value=error_body)
             
-            result = await provider._parse_proxy_error(mock_response)
+            result = await provider._parse_proxy_error(mock_response, error_body)
             
             assert result.error_reason == ErrorReason.BAD_REQUEST
             assert result.status_code == 400
@@ -399,7 +399,7 @@ class TestErrorParsingEdgeCases:
             }).encode('utf-8')
             mock_response.aread = AsyncMock(return_value=error_body)
             
-            result = await provider._parse_proxy_error(mock_response)
+            result = await provider._parse_proxy_error(mock_response, error_body)
             
             assert result.error_reason == expected_reason, \
                 f"Status {status_code} with code {error_code} should map to {expected_reason}, got {result.error_reason}"
@@ -439,7 +439,7 @@ class TestErrorParsingEdgeCases:
         
         for body in test_bodies:
             mock_response.aread = AsyncMock(return_value=body)
-            result = await provider._parse_proxy_error(mock_response)
+            result = await provider._parse_proxy_error(mock_response, body)
             
             # Should fall back to default mapping (BAD_REQUEST for 400)
             assert result.error_reason == ErrorReason.BAD_REQUEST
@@ -487,7 +487,7 @@ class TestErrorParsingEdgeCases:
             }).encode('utf-8')
             mock_response.aread = AsyncMock(return_value=error_body)
             
-            result = await provider._parse_proxy_error(mock_response)
+            result = await provider._parse_proxy_error(mock_response, error_body)
             
             # Should match the Unicode pattern
             assert result.error_reason == ErrorReason.INVALID_KEY
