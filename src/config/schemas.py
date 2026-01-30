@@ -222,6 +222,12 @@ class GatewayPolicyConfig:
     # Policy for the circuit breaker to handle endpoint failures.
     circuit_breaker: CircuitBreakerConfig = field(default_factory=CircuitBreakerConfig)
 
+    # Mapping of HTTP status codes to ErrorReason strings for fast, body-less error handling.
+    # When a status code matches an entry here, the gateway will IMMEDIATELY fail the request
+    # with the mapped reason without reading the response body.
+    # WARNING: This prevents forwarding specific upstream error messages to the client.
+    unsafe_status_mapping: Dict[int, str] = field(default_factory=dict)
+
 
 @dataclass
 class ProviderConfig:

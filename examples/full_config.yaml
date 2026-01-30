@@ -101,7 +101,15 @@ providers:
       streaming_mode: "auto" # "auto" or "disabled"
       debug_mode: "disabled" # "disabled", "headers_only", "full_body"
       
-      # Error parsing rules for better error classification
+      # NEW: Unsafe Status Mapping (Fast Fail)
+      # Immediately fails requests with these status codes without reading the response body.
+      # This provides maximum performance but prevents forwarding upstream error messages.
+      unsafe_status_mapping:
+        400: "bad_request"   # 400 -> BAD_REQUEST (No penalty, no body read)
+        # 403: "no_access"   # Uncomment to force fast fail on 403
+      
+      # Error parsing rules for better error classification (Slow Path)
+      # Only reads the response body if a rule matches the status code.
       error_parsing:
         enabled: true
         rules:

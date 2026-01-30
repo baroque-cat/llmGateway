@@ -192,9 +192,64 @@ class AIBaseProvider(IProvider):
                 # need to confirm it's okay and pass the status code.
                 check_result = CheckResult.success(status_code=upstream_response.status_code)
             else:
-                # For failed responses, delegate parsing to the provider-specific method.
-                # This method is responsible for safely reading the response.
-                check_result = await self._parse_proxy_error(upstream_response)
+                # --- NEW: Zero-Overhead Error Handling Pipeline ---
+                status_code = upstream_response.status_code
+                gateway_policy = self.config.gateway_policy
+                
+                # 1. Unsafe Status Mapping (Highest Priority - Fast Fail)
+                if status_code in gateway_policy.unsafe_status_mapping:
+                    reason_str = gateway_policy.unsafe_status_mapping[status_code]
+                    try:
+                        reason = ErrorReason(reason_str)
+                    except ValueError:
+                        logger.warning(
+                            f"Invalid ErrorReason '{reason_str}' in unsafe_status_mapping for '{self.name}'. "
+                            f"Fallback to UNKNOWN."
+                        )
+                        reason = ErrorReason.UNKNOWN
+
+                    # STOP: Close stream without reading body
+                    await upstream_response.aclose()
+                    
+                    check_result = CheckResult.fail(
+                        reason=reason,
+                        message=f"Fast fail: {reason.value} (Status {status_code})",
+                        status_code=status_code
+                    )
+                
+                # 2. Debug Mode or Error Parsing (Read Body)
+                else:
+                    should_read_body = False
+                    
+                    # Check Debug Mode
+                    if gateway_policy.debug_mode == "full_body":
+                        should_read_body = True
+                        
+                    # Check Error Parsing Rules
+                    elif gateway_policy.error_parsing.enabled:
+                        # Only read if there is a rule for this specific status code
+                        for rule in gateway_policy.error_parsing.rules:
+                            if rule.status_code == status_code:
+                                should_read_body = True
+                                break
+                    
+                    if should_read_body:
+                        # READ: Read body into memory
+                        try:
+                            content_bytes = await upstream_response.aread()
+                        except Exception as e:
+                            logger.error(f"Failed to read error response body: {e}")
+                            content_bytes = None
+                            
+                        # Delegate parsing with content
+                        check_result = await self._parse_proxy_error(upstream_response, content_bytes)
+                    else:
+                        # STOP: Fast Fallback (Default Behavior)
+                        # Do NOT read body. Close stream.
+                        await upstream_response.aclose()
+                        
+                        # Delegate parsing WITHOUT content (will use status code mapping)
+                        check_result = await self._parse_proxy_error(upstream_response, None)
 
         except httpx.RequestError as e:
             error_message = f"Upstream request failed with a network-level error: {e}"
@@ -207,18 +262,18 @@ class AIBaseProvider(IProvider):
 
     # --- Abstract method for provider-specific error parsing ---
     @abstractmethod
-    async def _parse_proxy_error(self, response: httpx.Response) -> CheckResult:
+    async def _parse_proxy_error(self, response: httpx.Response, content: Optional[bytes] = None) -> CheckResult:
         """
         (Abstract) Parses a failed httpx.Response to generate a CheckResult.
 
         This method MUST be implemented by subclasses. It is responsible for
-        safely reading the response body and mapping the provider-specific
-        error content to a standardized ErrorReason. This is where the fix
-        for the '.elapsed' RuntimeError is implemented for *failed* requests.
-
+        mapping the provider-specific error to a standardized ErrorReason.
+        
         Args:
-            response: The failed httpx.Response object from the upstream service.
-
+            response: The failed httpx.Response object.
+            content: Optional pre-read body bytes. If None, the body was NOT read 
+                     (optimization) and should NOT be read here.
+                     
         Returns:
             A CheckResult object detailing the failure.
         """

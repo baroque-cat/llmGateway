@@ -19,36 +19,45 @@ class OpenAILikeProvider(AIBaseProvider):
     """
 
     # --- Implementation of the error parsing contract from AIBaseProvider ---
-    async def _parse_proxy_error(self, response: httpx.Response) -> CheckResult:
+    async def _parse_proxy_error(self, response: httpx.Response, content: Optional[bytes] = None) -> CheckResult:
         """
         Parses a failed OpenAI-like API response into a standardized CheckResult.
 
         This method implements the safe-access pattern required by httpx:
-        1. Read the response body first.
-        2. THEN, access properties like .elapsed.
-        This fixes the latent RuntimeError for this provider type.
-        
+        It uses the pre-read content if provided, otherwise it relies on status codes
+        without reading the body (Zero-Overhead).
+
         Now enhanced with error parsing rules from configuration.
         """
         status_code = response.status_code
         
-        # 1. Read body first (required for safe .elapsed access)
-        response_bytes = await response.aread()
-        response_text = response_bytes.decode(errors='ignore')
-
-        # 2. Access .elapsed now that it's safe.
-        response_time = response.elapsed.total_seconds()
+        # 1. Use pre-read content if available
+        response_bytes = content
+        response_text = ""
+        
+        if response_bytes:
+            response_text = response_bytes.decode(errors='ignore')
+            # If content was read, .elapsed is safe to access (response is closed or read)
+            # However, in the Zero-Overhead path (content=None), response is closed but not read.
+            # httpx 0.23+ allows elapsed access after close.
+        
+        # 2. Access .elapsed (safe after .read() or .close() in base provider)
+        try:
+            response_time = response.elapsed.total_seconds()
+        except RuntimeError:
+            response_time = 0.0
         
         # 3. Get default reason based on status code
         default_reason = self._map_status_code_to_reason(status_code)
         
-        # 4. Refine reason using error parsing rules (if configured)
-        # Pass the already-read body to avoid re-reading
-        refined_reason = await self._refine_error_reason(
-            response=response,
-            default_reason=default_reason,
-            body_bytes=response_bytes
-        )
+        # 4. Refine reason using error parsing rules (if configured AND content is available)
+        refined_reason = default_reason
+        if response_bytes:
+            refined_reason = await self._refine_error_reason(
+                response=response,
+                default_reason=default_reason,
+                body_bytes=response_bytes
+            )
         
         return CheckResult.fail(refined_reason, response_text, response_time, status_code)
 
