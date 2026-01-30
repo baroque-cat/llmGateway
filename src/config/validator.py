@@ -127,7 +127,7 @@ class ConfigValidator:
         
         # --- NEW: Health Policy Validation ---
         # This call integrates the new validation logic as planned.
-        self._validate_health_policy(name, conf.health_policy)
+        self._validate_health_policy(name, conf.worker_health_policy)
         
         # --- NEW: Error Parsing Validation ---
         # Validate error parsing configuration if enabled

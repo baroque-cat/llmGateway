@@ -92,13 +92,15 @@ class IResourceProbe(ABC):
         asyncio.current_task().set_name(provider_name)
 
         async with self.semaphore:
-            # REFACTORED: Use the accessor to get the provider configuration.
-            provider_config = self.accessor.get_provider(provider_name)
-            if not provider_config:
-                logger.warning(f"No configuration found for provider '{provider_name}'. Skipping {len(resources)} resources.")
+            # REFACTORED: Use the accessor to get the provider policy directly.
+            # This ensures we are using the facade pattern correctly and not accessing
+            # internal implementation details like 'worker_health_policy'.
+            policy = self.accessor.get_health_policy(provider_name)
+            
+            if not policy:
+                logger.warning(f"No configuration/policy found for provider '{provider_name}'. Skipping {len(resources)} resources.")
                 return
             
-            policy = provider_config.health_policy
             batch_size = policy.batch_size
             batch_delay_sec = policy.batch_delay_sec
 

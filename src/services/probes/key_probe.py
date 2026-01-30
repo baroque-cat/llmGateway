@@ -81,14 +81,17 @@ class KeyProbe(IResourceProbe):
         failing_since = resource.get('failing_since') # This can be None
 
         try:
-            provider_config = self.accessor.get_provider_or_raise(provider_name)
+            # We only need to check existence here, the policy is retrieved via accessor below.
+            if not self.accessor.get_provider(provider_name):
+                 raise KeyError(f"Provider '{provider_name}' not found")
         except KeyError as e:
             logger.error(f"Cannot update key status due to config error. {e}.")
             return
 
         # The core logic is now encapsulated in this calculation.
+        # REFACTORED: Use accessor to get the health policy.
         next_check_time = self._calculate_next_check_time(
-            policy=provider_config.worker_health_policy,
+            policy=self.accessor.get_health_policy(provider_name),
             result=result,
             failing_since=failing_since
         )

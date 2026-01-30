@@ -12,7 +12,9 @@ from src.config.schemas import (
     LoggingConfig,
     ModelInfo,
     ProviderConfig,
-    WorkerConfig
+    WorkerConfig,
+    ProxyConfig,
+    TimeoutConfig
 )
 
 class ConfigAccessor:
@@ -140,6 +142,32 @@ class ConfigAccessor:
         """
         provider = self.get_provider(name)
         return provider.worker_health_policy if provider else None
+
+    def get_proxy_config(self, name: str) -> Optional[ProxyConfig]:
+        """
+        Retrieves the proxy configuration for a specific provider instance.
+
+        Args:
+            name: The name of the provider instance.
+
+        Returns:
+            The ProxyConfig object, or None if the provider does not exist.
+        """
+        provider = self.get_provider(name)
+        return provider.proxy_config if provider else None
+
+    def get_timeout_config(self, name: str) -> Optional[TimeoutConfig]:
+        """
+        Retrieves the timeout configuration for a specific provider instance.
+
+        Args:
+            name: The name of the provider instance.
+
+        Returns:
+            The TimeoutConfig object, or None if the provider does not exist.
+        """
+        provider = self.get_provider(name)
+        return provider.timeouts if provider else None
 
     def get_model_info(self, provider_name: str, model_name: str) -> Optional[ModelInfo]:
         """

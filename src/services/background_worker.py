@@ -39,12 +39,15 @@ def _setup_directories(accessor: ConfigAccessor):
         accessor.get_logging_config().summary_log_path,
     }
     
-    for provider in accessor.get_all_providers().values():
+    for provider_name, provider in accessor.get_all_providers().items():
         if provider.enabled:
             if provider.keys_path:
                 paths_to_check.add(provider.keys_path)
-            if provider.proxy_config.mode == 'stealth' and provider.proxy_config.pool_list_path:
-                paths_to_check.add(provider.proxy_config.pool_list_path)
+            
+            # REFACTORED: Use accessor to get proxy config safely
+            proxy_config = accessor.get_proxy_config(provider_name)
+            if proxy_config and proxy_config.mode == 'stealth' and proxy_config.pool_list_path:
+                paths_to_check.add(proxy_config.pool_list_path)
 
     try:
         for path in paths_to_check:
@@ -87,8 +90,10 @@ async def run_sync_cycle(accessor: ConfigAccessor, db_manager: DatabaseManager, 
             desired_state["keys"][provider_name] = key_state
 
             # For ProxySyncer (runs only if mode is 'stealth')
-            if provider_config.proxy_config.mode == 'stealth':
-                proxies_from_file = _read_proxies_from_directory(provider_config.proxy_config.pool_list_path)
+            # REFACTORED: Use accessor to get proxy config safely
+            proxy_config = accessor.get_proxy_config(provider_name)
+            if proxy_config and proxy_config.mode == 'stealth':
+                proxies_from_file = _read_proxies_from_directory(proxy_config.pool_list_path)
                 proxy_state: ProviderProxyState = {'proxies_from_files': proxies_from_file}
                 desired_state["proxies"][provider_name] = proxy_state
         

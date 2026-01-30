@@ -43,11 +43,15 @@ class HttpClientFactory:
         # same client simultaneously.
         self._locks: Dict[str, asyncio.Lock] = {}
 
-    def _get_cache_key_for_provider(self, provider_config: ProviderConfig) -> str:
+    def _get_cache_key_for_provider(self, provider_name: str) -> str:
         """
         Determines the unique cache key based on the provider's proxy configuration.
         """
-        proxy_config = provider_config.proxy_config
+        # REFACTORED: Use accessor to get proxy config
+        proxy_config = self.accessor.get_proxy_config(provider_name)
+        if not proxy_config:
+             raise ValueError(f"Proxy config not found for provider '{provider_name}'")
+
         if proxy_config.mode == 'none':
             # A constant key for all direct connections.
             return "__none__"
@@ -78,11 +82,11 @@ class HttpClientFactory:
         Raises:
             KeyError: If the provider_name is not found in the configuration.
         """
-        # REFACTORED: Use the accessor to get provider config. get_provider_or_raise
-        # is used here because a missing provider is a critical, unrecoverable error.
-        provider_config = self.accessor.get_provider_or_raise(provider_name)
+        # Check existence first
+        if not self.accessor.get_provider(provider_name):
+             raise KeyError(f"Provider '{provider_name}' not found")
 
-        cache_key = self._get_cache_key_for_provider(provider_config)
+        cache_key = self._get_cache_key_for_provider(provider_name)
 
         # First, check the cache for a quick return without locking.
         if cache_key in self._clients:
@@ -101,8 +105,10 @@ class HttpClientFactory:
             self.logger.info(f"Cache miss for key '{cache_key}'. Creating new HTTP/2 client...")
 
             proxy_url = None
-            if provider_config.proxy_config.mode == 'static':
-                proxy_url = provider_config.proxy_config.static_url
+            # REFACTORED: Use accessor for proxy config
+            proxy_config = self.accessor.get_proxy_config(provider_name)
+            if proxy_config and proxy_config.mode == 'static':
+                proxy_url = proxy_config.static_url
 
             try:
                 client = httpx.AsyncClient(
