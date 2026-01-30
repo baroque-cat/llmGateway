@@ -156,15 +156,8 @@ def parse_request(data: dict) -> RequestDetails:
 
 The gateway service supports manual control over streaming behavior through configuration:
 
-### Global Configuration
-In the root of your `providers.yaml` file, you can set a global streaming mode:
-```yaml
-gateway:
-  streaming_mode: "auto" # or "disabled"
-```
-
 ### Provider-Specific Configuration  
-In each provider's `gateway_policy` section, you can override the global setting:
+In each provider's `gateway_policy` section, you can set the streaming mode:
 ```yaml
 providers:
   my_provider:
@@ -175,9 +168,6 @@ providers:
 ### Streaming Modes
 - **`auto`**: Streaming is enabled when technically possible (current default behavior).
 - **`disabled`**: Streaming is explicitly disabled in both directions (request and response) for debugging or special requirements.
-
-### Priority Logic
-Provider-specific settings take precedence over global settings. If a provider's `streaming_mode` is set to `"auto"`, it will inherit the global setting.
 
 ## 5. Error Parsing Configuration
 
@@ -192,7 +182,6 @@ providers:
     gateway_policy:
       error_parsing:
         enabled: true
-        require_buffering: false
         rules:
           - status_code: 400
             error_path: "error.type"

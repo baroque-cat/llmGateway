@@ -336,67 +336,6 @@ class TestErrorParsingScenarios:
         assert result.error_reason == ErrorReason.INVALID_KEY
     
     @pytest.mark.asyncio
-    async def test_require_buffering_scenario(self):
-        """
-        Test that require_buffering flag doesn't affect error parsing logic.
-        
-        The flag controls whether streaming responses need buffering,
-        but error parsing should work regardless.
-        """
-        # Test with require_buffering=True (default)
-        provider_buffering = self.create_mock_openai_provider(
-            error_config=ErrorParsingConfig(
-                enabled=True,
-                rules=[
-                    ErrorParsingRule(
-                        status_code=400,
-                        error_path="error.type",
-                        match_pattern="Arrearage",
-                        map_to="invalid_key"
-                    )
-                ],
-                require_buffering=True
-            )
-        )
-        
-        # Test with require_buffering=False
-        provider_no_buffering = self.create_mock_openai_provider(
-            error_config=ErrorParsingConfig(
-                enabled=True,
-                rules=[
-                    ErrorParsingRule(
-                        status_code=400,
-                        error_path="error.type",
-                        match_pattern="Arrearage",
-                        map_to="invalid_key"
-                    )
-                ],
-                require_buffering=False
-            )
-        )
-        
-        mock_response = AsyncMock(spec=httpx.Response)
-        mock_response.status_code = 400
-        mock_response.elapsed = MagicMock()
-        mock_response.elapsed.total_seconds.return_value = 0.5
-        
-        error_body = json.dumps({
-            "error": {
-                "type": "Arrearage",
-                "message": "Payment overdue"
-            }
-        }).encode('utf-8')
-        mock_response.aread = AsyncMock(return_value=error_body)
-        
-        # Both should produce the same result
-        result_buffering = await provider_buffering._parse_proxy_error(mock_response)
-        result_no_buffering = await provider_no_buffering._parse_proxy_error(mock_response)
-        
-        assert result_buffering.error_reason == ErrorReason.INVALID_KEY
-        assert result_no_buffering.error_reason == ErrorReason.INVALID_KEY
-        assert result_buffering.error_reason == result_no_buffering.error_reason
-    
-    @pytest.mark.asyncio
     async def test_malformed_error_response(self):
         """
         Test handling of malformed or unexpected error response structures.

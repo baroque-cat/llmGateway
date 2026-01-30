@@ -93,51 +93,6 @@ class TestErrorParsingEdgeCases:
         assert result.status_code == 400
     
     @pytest.mark.asyncio
-    async def test_streaming_response_with_require_buffering(self):
-        """
-        Test error parsing with streaming responses when require_buffering=True.
-        
-        Streaming responses can't be re-read, so error parsing must work
-        with the buffered content.
-        """
-        provider = self.create_mock_openai_provider(
-            error_config=ErrorParsingConfig(
-                enabled=True,
-                rules=[
-                    ErrorParsingRule(
-                        status_code=400,
-                        error_path="error.type",
-                        match_pattern="Arrearage",
-                        map_to="invalid_key"
-                    )
-                ],
-                require_buffering=True
-            )
-        )
-        
-        mock_response = AsyncMock(spec=httpx.Response)
-        mock_response.status_code = 400
-        mock_response.elapsed = MagicMock()
-        mock_response.elapsed.total_seconds.return_value = 0.5
-        
-        # Simulate a streaming error response
-        error_body = json.dumps({
-            "error": {
-                "type": "Arrearage",
-                "message": "Payment overdue"
-            }
-        }).encode('utf-8')
-        mock_response.aread = AsyncMock(return_value=error_body)
-        
-        # Mock the response as streaming
-        mock_response.headers = {"content-type": "text/event-stream"}
-        
-        result = await provider._parse_proxy_error(mock_response)
-        
-        # Should still parse correctly despite streaming content type
-        assert result.error_reason == ErrorReason.INVALID_KEY
-    
-    @pytest.mark.asyncio
     async def test_concurrent_rule_matching(self):
         """
         Test that error parsing works correctly with many concurrent rules.

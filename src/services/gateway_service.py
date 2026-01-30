@@ -674,29 +674,19 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
             app.state.single_model_map = {}
             app.state.debug_mode_map = {}  # NEW: Track debug mode per provider
 
-            # Get the global streaming and debug modes from the configuration.
-            global_streaming_mode = accessor._config.gateway.streaming_mode
-            global_debug_mode = accessor._config.gateway.debug_mode
-
             # Iterate through all enabled providers to analyze and log their mode.
             for name, config in accessor.get_enabled_providers().items():
                 mode = ""
                 reason = ""
 
                 # Determine the effective debug mode for this provider.
-                # Provider-specific setting takes precedence over the global setting.
                 effective_debug_mode = config.gateway_policy.debug_mode
-                if effective_debug_mode == "disabled":
-                    effective_debug_mode = global_debug_mode
                 
                 # Store the effective debug mode for use during request handling.
                 app.state.debug_mode_map[name] = effective_debug_mode
 
                 # Determine the effective streaming mode for this provider.
-                # Provider-specific setting takes precedence over the global setting.
                 effective_streaming_mode = config.gateway_policy.streaming_mode
-                if effective_streaming_mode == "auto":
-                    effective_streaming_mode = global_streaming_mode
 
                 # If debug mode is enabled, force disable streaming regardless of other settings.
                 # Debug mode requires buffering the entire request/response for logging.

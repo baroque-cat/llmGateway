@@ -10,17 +10,7 @@ The debug mode feature allows you to log detailed information about requests and
 
 ## Configuration
 
-Debug mode can be configured at two levels:
-
-### Global Level
-
-In the root of your `providers.yaml` file:
-
-```yaml
-gateway:
-  streaming_mode: "auto"
-  debug_mode: "headers_only"  # Global debug mode
-```
+Debug mode is configured at the provider level.
 
 ### Provider Level
 
@@ -33,10 +23,6 @@ providers:
       streaming_mode: "auto"
       debug_mode: "full_body"  # Provider-specific debug mode
 ```
-
-## Priority Logic
-
-Provider-specific settings take precedence over global settings. If a provider's `debug_mode` is set to `"disabled"`, it will inherit the global setting.
 
 ## Behavior
 
@@ -59,30 +45,9 @@ For `full_body` mode, body content is truncated to 10KB with "... (truncated)" s
 
 ## Usage Examples
 
-### Enable debug mode globally for all providers
-
-```yaml
-gateway:
-  debug_mode: "full_body"
-
-providers:
-  openai_provider:
-    # Will use full_body debug mode
-    gateway_policy:
-      debug_mode: "disabled"  # Inherits global setting
-  
-  gemini_provider:
-    # Will use full_body debug mode  
-    gateway_policy:
-      debug_mode: "disabled"  # Inherits global setting
-```
-
 ### Enable debug mode for specific provider only
 
 ```yaml
-gateway:
-  debug_mode: "disabled"  # Default: no debug logging
-
 providers:
   openai_provider:
     # Normal operation, no debug logging
@@ -93,29 +58,6 @@ providers:
     # Debug mode enabled for this provider only
     gateway_policy:
       debug_mode: "headers_only"
-```
-
-### Mixed configuration
-
-```yaml
-gateway:
-  debug_mode: "headers_only"  # Global default
-
-providers:
-  openai_provider:
-    # Inherits global headers_only
-    gateway_policy:
-      debug_mode: "disabled"
-  
-  gemini_provider:
-    # Overrides global setting with full_body
-    gateway_policy:
-      debug_mode: "full_body"
-  
-  anthropic_provider:
-    # Explicitly disables debug mode
-    gateway_policy:
-      debug_mode: "disabled"
 ```
 
 ## Important Notes
