@@ -53,3 +53,8 @@ def test_load_minimal_config_example(mock_env):
     # e.g. timeouts should come from defaults
     assert gemini.timeouts.connect == 5.0 
     assert gemini.timeouts.read == 20.0
+
+    # Check that worker_health_policy defaults are correctly applied
+    assert gemini.worker_health_policy.on_success_hr == 24
+    assert gemini.worker_health_policy.batch_size == 10
+    assert gemini.worker_health_policy.on_overload_min == 30

@@ -127,6 +127,10 @@ class ConfigAccessor:
     def get_health_policy(self, name: str) -> Optional[HealthPolicyConfig]:
         """
         Retrieves the health check policy for a specific provider instance.
+        
+        NOTE: This maps to 'worker_health_policy' in the configuration schema.
+        The method name is kept as 'get_health_policy' to maintain the facade interface
+        for existing consumers (like the background worker).
 
         Args:
             name: The name of the provider instance.
@@ -135,7 +139,7 @@ class ConfigAccessor:
             The HealthPolicyConfig object, or None if the provider does not exist.
         """
         provider = self.get_provider(name)
-        return provider.health_policy if provider else None
+        return provider.worker_health_policy if provider else None
 
     def get_model_info(self, provider_name: str, model_name: str) -> Optional[ModelInfo]:
         """

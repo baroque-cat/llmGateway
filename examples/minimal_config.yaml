@@ -34,3 +34,7 @@ providers:
 
     access_control:
       gateway_access_token: "${GEMINI_MINIMAL_TOKEN}"
+    
+    # You can override specific policies here if needed:
+    # worker_health_policy:
+    #   on_success_hr: 24

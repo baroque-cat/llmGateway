@@ -53,29 +53,6 @@ def get_default_config() -> Dict[str, Any]:
                     "gateway_access_token": "${LLM_PROVIDER_DEFAULT_TOKEN}",
                 },
 
-                # Policy for the background worker's health checks.
-                # REFACTORED: This section now perfectly matches the updated HealthPolicyConfig schema.
-                "health_policy": {
-                    # Intervals in Minutes
-                    "on_server_error_min": 30,
-                    "on_overload_min": 60,
-                    # Intervals in Hours
-                    "on_other_error_hr": 1,
-                    "on_success_hr": 1,
-                    "on_rate_limit_hr": 4,
-                    "on_no_quota_hr": 4,
-                    # Intervals in Days
-                    "on_invalid_key_days": 10,
-                    "on_no_access_days": 10,
-                    # Quarantine Policies
-                    "quarantine_after_days": 30,
-                    "quarantine_recheck_interval_days": 10,
-                    "stop_checking_after_days": 90,
-                    # Batching Configuration
-                    "batch_size": 30,
-                    "batch_delay_sec": 15,
-                },
-
                 "proxy_config": {
                     "mode": "none",
                     "static_url": None,
@@ -88,6 +65,29 @@ def get_default_config() -> Dict[str, Any]:
                     "read": 20.0,
                     "write": 10.0,
                     "pool": 5.0,
+                },
+
+                # Policy for the background worker's health checks.
+                # REFACTORED: This section now perfectly matches the updated HealthPolicyConfig schema.
+                "worker_health_policy": {
+                    # Intervals in Minutes
+                    "on_server_error_min": 30,
+                    "on_overload_min": 30,
+                    # Intervals in Hours
+                    "on_other_error_hr": 1,
+                    "on_success_hr": 24,
+                    "on_rate_limit_hr": 1,
+                    "on_no_quota_hr": 1,
+                    # Intervals in Days
+                    "on_invalid_key_days": 10,
+                    "on_no_access_days": 10,
+                    # Quarantine Policies
+                    "quarantine_after_days": 30,
+                    "quarantine_recheck_interval_days": 10,
+                    "stop_checking_after_days": 90,
+                    # Batching Configuration
+                    "batch_size": 10,
+                    "batch_delay_sec": 30,
                 },
 
                 # Policies applied only by the API Gateway during request processing.

@@ -63,22 +63,6 @@ providers:
     access_control:
       gateway_access_token: "${GEMINI_PROD_TOKEN}"
 
-    # Health check policy for the background worker
-    health_policy:
-      on_server_error_min: 30
-      on_overload_min: 60
-      on_other_error_hr: 1
-      on_success_hr: 1
-      on_rate_limit_hr: 4
-      on_no_quota_hr: 4
-      on_invalid_key_days: 10
-      on_no_access_days: 10
-      quarantine_after_days: 30
-      quarantine_recheck_interval_days: 10
-      stop_checking_after_days: 90
-      batch_size: 30
-      batch_delay_sec: 15
-
     # Proxy configuration
     proxy_config:
       mode: "none" # "none", "static", or "stealth"
@@ -90,6 +74,27 @@ providers:
       read: 20.0
       write: 10.0
       pool: 5.0
+
+    # Health check policy for the background worker
+    worker_health_policy:
+      # Intervals in Minutes
+      on_server_error_min: 30
+      on_overload_min: 30
+      # Intervals in Hours
+      on_other_error_hr: 1
+      on_success_hr: 24
+      on_rate_limit_hr: 1
+      on_no_quota_hr: 1
+      # Intervals in Days
+      on_invalid_key_days: 10
+      on_no_access_days: 10
+      # Quarantine Policies
+      quarantine_after_days: 30
+      quarantine_recheck_interval_days: 10
+      stop_checking_after_days: 90
+      # Batching Configuration
+      batch_size: 10
+      batch_delay_sec: 30
 
     # Gateway specific policies
     gateway_policy:

@@ -88,7 +88,7 @@ class KeyProbe(IResourceProbe):
 
         # The core logic is now encapsulated in this calculation.
         next_check_time = self._calculate_next_check_time(
-            policy=provider_config.health_policy,
+            policy=provider_config.worker_health_policy,
             result=result,
             failing_since=failing_since
         )

@@ -253,7 +253,7 @@ class ProviderConfig:
     # omitted from the user's YAML file. This is the key to the new design and
     # directly implements the user's requirement for "optional sections".
     access_control: AccessControlConfig = field(default_factory=AccessControlConfig)
-    health_policy: HealthPolicyConfig = field(default_factory=HealthPolicyConfig)
+    worker_health_policy: HealthPolicyConfig = field(default_factory=HealthPolicyConfig)
     proxy_config: ProxyConfig = field(default_factory=ProxyConfig)
     timeouts: TimeoutConfig = field(default_factory=TimeoutConfig)
     gateway_policy: GatewayPolicyConfig = field(default_factory=GatewayPolicyConfig)
