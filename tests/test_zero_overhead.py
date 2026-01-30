@@ -7,18 +7,32 @@ from src.core.models import CheckResult
 from src.providers.base import AIBaseProvider
 import httpx
 
-# Mock concrete implementation
-class MockProvider(AIBaseProvider):
+# --- Realistic Mock Provider ---
+class RealisticMockProvider(AIBaseProvider):
+    """
+    Simulates a real provider (like OpenAILike) to test the Base class pipeline.
+    """
     async def _parse_proxy_error(self, response, content=None):
-        # Simply return success so we can check if content was passed
-        reason = ErrorReason.UNKNOWN
-        msg = "Content was None"
-        if content:
-             msg = "Content was Read"
+        # Simulate standard mapping logic found in real providers
+        status = response.status_code
         
-        return CheckResult.fail(reason, msg, status_code=response.status_code)
+        # Logic: If content is None, we MUST rely on status code (Zero-Overhead)
+        # If content is present, we might refine it (simulated here)
+        
+        msg = "Body NOT read"
+        if content:
+             msg = "Body READ"
+        
+        if status == 400:
+            return CheckResult.fail(ErrorReason.BAD_REQUEST, msg, status_code=status)
+        if status == 401:
+            return CheckResult.fail(ErrorReason.INVALID_KEY, msg, status_code=status)
+        if status == 500:
+            return CheckResult.fail(ErrorReason.SERVER_ERROR, msg, status_code=status)
+            
+        return CheckResult.fail(ErrorReason.UNKNOWN, msg, status_code=status)
     
-    # Stubs
+    # Stubs for abstract methods
     async def parse_request_details(self, path, content): pass
     def _get_headers(self, token): return {}
     async def check(self, client, token, **kwargs): pass
@@ -38,14 +52,67 @@ def mock_response():
     response.is_success = False
     response.headers = {}
     response.aclose = AsyncMock()
-    response.aread = AsyncMock(return_value=b'{"error": "parsed_error"}')
+    # If read is called, return dummy JSON
+    response.aread = AsyncMock(return_value=b'{"error": {"type": "context_length_exceeded"}}')
     return response
 
+# --- 1. DEFAULT BEHAVIOR TESTS ---
+
 @pytest.mark.asyncio
-async def test_unsafe_mapping_fast_fail(mock_client, mock_response):
+async def test_default_400_behavior(mock_client, mock_response):
     """
-    Scenario: Unsafe mapping is configured for 400.
-    Expectation: Fast fail (aclose called), body NOT read.
+    Scenario: Default config, Status 400.
+    Expectation: 
+    - Body NOT read (Zero Overhead).
+    - Reason is BAD_REQUEST (No penalty).
+    """
+    config = ProviderConfig(provider_type="mock")
+    provider = RealisticMockProvider("test", config)
+    
+    mock_response.status_code = 400
+    mock_client.send.return_value = mock_response
+    request = httpx.Request("POST", "http://test")
+
+    _, result = await provider._send_proxy_request(mock_client, request)
+
+    # Assertions
+    assert result.error_reason == ErrorReason.BAD_REQUEST
+    assert result.message == "Body NOT read"
+    mock_response.aread.assert_not_called()  # Critical
+    mock_response.aclose.assert_called_once() # Resource cleanup
+
+@pytest.mark.asyncio
+async def test_default_401_behavior(mock_client, mock_response):
+    """
+    Scenario: Default config, Status 401.
+    Expectation: 
+    - Body NOT read (Zero Overhead).
+    - Reason is INVALID_KEY (Penalty applies downstream).
+    """
+    config = ProviderConfig(provider_type="mock")
+    provider = RealisticMockProvider("test", config)
+    
+    mock_response.status_code = 401
+    mock_client.send.return_value = mock_response
+    request = httpx.Request("POST", "http://test")
+
+    _, result = await provider._send_proxy_request(mock_client, request)
+
+    # Assertions
+    assert result.error_reason == ErrorReason.INVALID_KEY
+    assert result.message == "Body NOT read"
+    mock_response.aread.assert_not_called()
+    mock_response.aclose.assert_called_once()
+
+# --- 2. UNSAFE MAPPING TESTS ---
+
+@pytest.mark.asyncio
+async def test_unsafe_400_mapping(mock_client, mock_response):
+    """
+    Scenario: Unsafe mapping {400: "invalid_key"}.
+    Expectation:
+    - Body NOT read.
+    - Reason is INVALID_KEY (Overridden).
     """
     config = ProviderConfig(
         provider_type="mock",
@@ -53,22 +120,87 @@ async def test_unsafe_mapping_fast_fail(mock_client, mock_response):
             unsafe_status_mapping={400: "invalid_key"}
         )
     )
-    provider = MockProvider("test", config)
+    provider = RealisticMockProvider("test", config)
+    
+    mock_response.status_code = 400
     mock_client.send.return_value = mock_response
     request = httpx.Request("POST", "http://test")
 
-    resp, result = await provider._send_proxy_request(mock_client, request)
+    _, result = await provider._send_proxy_request(mock_client, request)
 
-    assert result.error_reason == ErrorReason.INVALID_KEY
+    # Assertions
+    assert result.error_reason == ErrorReason.INVALID_KEY # Mapped!
     assert "Fast fail" in result.message
     mock_response.aread.assert_not_called()
     mock_response.aclose.assert_called_once()
 
+# --- 3. TARGETED ERROR PARSING TESTS ---
+
 @pytest.mark.asyncio
-async def test_debug_mode_reads_body(mock_client, mock_response):
+async def test_error_parsing_triggered(mock_client, mock_response):
+    """
+    Scenario: Parsing enabled for 400. Status is 400.
+    Expectation:
+    - Body IS read (to look for details).
+    """
+    config = ProviderConfig(
+        provider_type="mock",
+        gateway_policy=GatewayPolicyConfig(
+            error_parsing=ErrorParsingConfig(
+                enabled=True,
+                rules=[ErrorParsingRule(status_code=400, error_path="e", match_pattern="p", map_to="x")]
+            )
+        )
+    )
+    provider = RealisticMockProvider("test", config)
+    
+    mock_response.status_code = 400
+    mock_client.send.return_value = mock_response
+    request = httpx.Request("POST", "http://test")
+
+    _, result = await provider._send_proxy_request(mock_client, request)
+
+    # Assertions
+    assert result.message == "Body READ"
+    mock_response.aread.assert_called_once()
+
+@pytest.mark.asyncio
+async def test_error_parsing_ignored_on_mismatch(mock_client, mock_response):
+    """
+    Scenario: Parsing enabled for 400. Status is 500.
+    Expectation:
+    - Body NOT read (Optimization).
+    - Returns SERVER_ERROR based on status.
+    """
+    config = ProviderConfig(
+        provider_type="mock",
+        gateway_policy=GatewayPolicyConfig(
+            error_parsing=ErrorParsingConfig(
+                enabled=True,
+                rules=[ErrorParsingRule(status_code=400, error_path="e", match_pattern="p", map_to="x")]
+            )
+        )
+    )
+    provider = RealisticMockProvider("test", config)
+    
+    mock_response.status_code = 500 # Mismatch
+    mock_client.send.return_value = mock_response
+    request = httpx.Request("POST", "http://test")
+
+    _, result = await provider._send_proxy_request(mock_client, request)
+
+    # Assertions
+    assert result.error_reason == ErrorReason.SERVER_ERROR
+    assert result.message == "Body NOT read"
+    mock_response.aread.assert_not_called()
+
+# --- 4. DEBUG MODE TESTS ---
+
+@pytest.mark.asyncio
+async def test_debug_mode_force_read(mock_client, mock_response):
     """
     Scenario: Debug mode is 'full_body'.
-    Expectation: Body IS read.
+    Expectation: Body IS read regardless of status.
     """
     config = ProviderConfig(
         provider_type="mock",
@@ -76,79 +208,14 @@ async def test_debug_mode_reads_body(mock_client, mock_response):
             debug_mode="full_body"
         )
     )
-    provider = MockProvider("test", config)
-    mock_client.send.return_value = mock_response
-    request = httpx.Request("POST", "http://test")
-
-    resp, result = await provider._send_proxy_request(mock_client, request)
-
-    mock_response.aread.assert_called_once()
-    assert result.message == "Content was Read"
-
-@pytest.mark.asyncio
-async def test_error_parsing_triggered_reads_body(mock_client, mock_response):
-    """
-    Scenario: Error parsing enabled AND rule exists for status code.
-    Expectation: Body IS read.
-    """
-    config = ProviderConfig(
-        provider_type="mock",
-        gateway_policy=GatewayPolicyConfig(
-            error_parsing=ErrorParsingConfig(
-                enabled=True,
-                rules=[ErrorParsingRule(status_code=400, error_path="e", match_pattern="p", map_to="x")]
-            )
-        )
-    )
-    provider = MockProvider("test", config)
-    mock_client.send.return_value = mock_response
-    request = httpx.Request("POST", "http://test")
-
-    resp, result = await provider._send_proxy_request(mock_client, request)
-
-    mock_response.aread.assert_called_once()
-    assert result.message == "Content was Read"
-
-@pytest.mark.asyncio
-async def test_error_parsing_ignored_does_not_read_body(mock_client, mock_response):
-    """
-    Scenario: Error parsing enabled BUT NO rule for this status code (e.g., 500 vs 400).
-    Expectation: Body NOT read (Fast Fallback).
-    """
-    mock_response.status_code = 500 # Rule is for 400
+    provider = RealisticMockProvider("test", config)
     
-    config = ProviderConfig(
-        provider_type="mock",
-        gateway_policy=GatewayPolicyConfig(
-            error_parsing=ErrorParsingConfig(
-                enabled=True,
-                rules=[ErrorParsingRule(status_code=400, error_path="e", match_pattern="p", map_to="x")]
-            )
-        )
-    )
-    provider = MockProvider("test", config)
+    mock_response.status_code = 500
     mock_client.send.return_value = mock_response
     request = httpx.Request("POST", "http://test")
 
-    resp, result = await provider._send_proxy_request(mock_client, request)
+    _, result = await provider._send_proxy_request(mock_client, request)
 
-    mock_response.aread.assert_not_called()
-    mock_response.aclose.assert_called_once()
-    assert result.message == "Content was None"
-
-@pytest.mark.asyncio
-async def test_default_behavior_fast_fallback(mock_client, mock_response):
-    """
-    Scenario: No config.
-    Expectation: Body NOT read (Fast Fallback).
-    """
-    config = ProviderConfig(provider_type="mock")
-    provider = MockProvider("test", config)
-    mock_client.send.return_value = mock_response
-    request = httpx.Request("POST", "http://test")
-
-    resp, result = await provider._send_proxy_request(mock_client, request)
-
-    mock_response.aread.assert_not_called()
-    mock_response.aclose.assert_called_once()
-    assert result.message == "Content was None"
+    # Assertions
+    assert result.message == "Body READ"
+    mock_response.aread.assert_called_once()
