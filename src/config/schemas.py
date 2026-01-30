@@ -321,7 +321,6 @@ class Config:
     The main configuration object for the entire llmGateway application.
     It serves as the root of the configuration tree.
     """
-    debug: bool = False
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     worker: WorkerConfig = field(default_factory=WorkerConfig)

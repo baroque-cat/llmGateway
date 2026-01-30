@@ -10,8 +10,7 @@ def get_default_config() -> Dict[str, Any]:
     """
     return {
         # --- GLOBAL SETTINGS ---
-        "debug": False,
-
+        
         # --- WORKER SETTINGS ---
         "worker": {
             # Concurrency limit for the background worker's probes.

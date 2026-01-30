@@ -17,9 +17,8 @@ def setup_logging(accessor: ConfigAccessor):
     Args:
         accessor: The ConfigAccessor instance providing access to configuration.
     """
-    # REFACTORED: Use the accessor's method to determine the log level.
-    # This decouples the logging setup from the direct structure of the Config object.
-    log_level = logging.DEBUG if accessor.is_debug_mode() else logging.INFO
+    # Use INFO as the default log level for the application.
+    log_level = logging.INFO
 
     # Define the format for log messages for consistency across the application.
     # Format includes timestamp, logger name, log level, and the message itself.
