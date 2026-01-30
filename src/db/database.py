@@ -137,11 +137,20 @@ class ProviderRepository:
                 providers_in_db = {row['name'] for row in rows}
                 
                 new_providers = set(provider_names_from_config) - providers_in_db
+                obsolete_providers = providers_in_db - set(provider_names_from_config)
                 
                 if new_providers:
                     to_insert = [(name,) for name in new_providers]
                     await conn.copy_records_to_table('providers', records=to_insert, columns=['name'])
                     logger.info(f"SYNC: Added {len(new_providers)} new providers to the database: {new_providers}")
+                
+                if obsolete_providers:
+                    # Delete obsolete providers. CASCADE will automatically remove 
+                    # all associated api_keys and key_model_status records.
+                    placeholders = ', '.join(f'${i+1}' for i in range(len(obsolete_providers)))
+                    query = f"DELETE FROM providers WHERE name IN ({placeholders})"
+                    await conn.execute(query, *list(obsolete_providers))
+                    logger.info(f"SYNC: Removed {len(obsolete_providers)} obsolete providers from the database: {obsolete_providers}")
 
     async def get_id_map(self) -> Dict[str, int]:
         """Fetches a mapping of all provider names to their database IDs."""
@@ -238,11 +247,19 @@ class KeyRepository:
                     # --- MODIFIED BLOCK END ---
                     logger.info(f"SYNC '{provider_name}': Removed {len(models_to_remove)} obsolete key-model associations.")
 
-    async def get_keys_to_check(self) -> List[Dict[str, Any]]:
+    async def get_keys_to_check(self, enabled_provider_names: List[str]) -> List[Dict[str, Any]]:
         """
         Fetches all key-model pairs that are due for a health check.
         It crucially retrieves the `failing_since` timestamp for the probe's logic.
+        
+        Args:
+            enabled_provider_names: A list of provider names that are currently 
+                                   enabled in the configuration. Only keys for 
+                                   these providers will be returned.
         """
+        if not enabled_provider_names:
+            return []
+            
         query = """
         SELECT
             k.id AS key_id,
@@ -254,9 +271,10 @@ class KeyRepository:
         JOIN key_model_status AS s ON k.id = s.key_id
         JOIN providers AS p ON k.provider_id = p.id
         WHERE s.next_check_time <= NOW() AT TIME ZONE 'utc'
+        AND p.name = ANY($1)
         """
         async with self._pool.acquire() as conn:
-            rows = await conn.fetch(query)
+            rows = await conn.fetch(query, enabled_provider_names)
         
         results = []
         checked_keys_for_shared_providers = set()

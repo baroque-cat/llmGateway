@@ -27,7 +27,8 @@ class KeyProbe(IResourceProbe):
         This method relies on the repository to return the `failing_since` timestamp
         for each resource that has previously failed.
         """
-        return await self.db_manager.keys.get_keys_to_check()
+        enabled_providers = list(self.accessor.get_enabled_providers().keys())
+        return await self.db_manager.keys.get_keys_to_check(enabled_providers)
 
     async def _check_resource(self, resource: Dict[str, Any]) -> CheckResult:
         """
@@ -86,12 +87,30 @@ class KeyProbe(IResourceProbe):
                  raise KeyError(f"Provider '{provider_name}' not found")
         except KeyError as e:
             logger.error(f"Cannot update key status due to config error. {e}.")
+            # Safety net: If provider is missing from config, push the check far into the future
+            # to prevent tight loops. This should only happen if DB sync fails.
+            now = datetime.now(timezone.utc)
+            fallback_next_check = now + timedelta(hours=24)  # Check again in 24 hours
+            logger.warning(f"Applying fallback update for key ID {key_id}: next_check_time = {fallback_next_check}")
+            await self.db_manager.keys.update_status(
+                key_id=key_id,
+                model_name=model_name,
+                provider_name=provider_name,
+                result=result,
+                next_check_time=fallback_next_check
+            )
             return
 
         # The core logic is now encapsulated in this calculation.
         # REFACTORED: Use accessor to get the health policy.
+        health_policy = self.accessor.get_health_policy(provider_name)
+        if health_policy is None:
+            logger.error(f"Health policy not found for provider '{provider_name}'. Using default policy.")
+            # This should not happen if the provider exists, but as a safety measure
+            health_policy = HealthPolicyConfig()
+        
         next_check_time = self._calculate_next_check_time(
-            policy=self.accessor.get_health_policy(provider_name),
+            policy=health_policy,
             result=result,
             failing_since=failing_since
         )
