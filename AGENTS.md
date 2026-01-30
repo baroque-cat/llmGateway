@@ -38,6 +38,49 @@ poetry run pytest tests/path/to/test_file.py::test_function_name
 poetry run pytest -v
 ```
 
+#### Error Parsing Testing
+The project includes comprehensive tests for error parsing functionality. These tests ensure that 400 errors with different meanings (e.g., Qwen's "Arrearage" errors vs format errors) are correctly classified.
+
+**Test Files:**
+- `tests/test_error_parsing_validation.py` - Configuration validation tests
+- `tests/test_error_parsing_base.py` - Base provider logic tests  
+- `tests/test_error_parsing_openai_like.py` - OpenAI-like provider integration tests
+- `tests/test_error_parsing_gemini.py` - Gemini provider integration tests
+- `tests/test_error_parsing_scenarios.py` - End-to-end scenario tests
+- `tests/test_error_parsing_edge_cases.py` - Edge case and performance tests
+
+**Running Error Parsing Tests:**
+```bash
+# Run all error parsing tests
+poetry run pytest tests/test_error_parsing*.py
+
+# Run specific test categories
+poetry run pytest tests/test_error_parsing_scenarios.py -v
+```
+
+**Example Test Scenario:**
+```python
+# Testing Qwen "Arrearage" error mapping
+async def test_qwen_arrearage_scenario(self):
+    provider = create_mock_openai_provider(
+        error_config=ErrorParsingConfig(
+            enabled=True,
+            rules=[
+                ErrorParsingRule(
+                    status_code=400,
+                    error_path="error.type",
+                    match_pattern="Arrearage|BillingHardLimit",
+                    map_to="invalid_key",
+                    priority=10
+                )
+            ]
+        )
+    )
+    # Mock 400 response with Arrearage error
+    result = await provider._parse_proxy_error(mock_response)
+    assert result.error_reason == ErrorReason.INVALID_KEY
+```
+
 ### Linting & Formatting
 Currently, the project does not enforce strict linter configuration in `pyproject.toml`. Agents should strive to match existing code style:
 - **Format**: Follow standard PEP 8 (4 spaces indent).
@@ -136,12 +179,60 @@ providers:
 ### Priority Logic
 Provider-specific settings take precedence over global settings. If a provider's `streaming_mode` is set to `"auto"`, it will inherit the global setting.
 
-## 4. Git & Commit Protocol
+## 5. Error Parsing Configuration
+
+The gateway service includes sophisticated error parsing to distinguish between different types of HTTP errors (e.g., authentication errors vs quota errors vs bad requests). This is particularly important for 400 errors which can have different meanings across providers.
+
+### Configuration Structure
+Error parsing is configured in each provider's `gateway_policy` section:
+
+```yaml
+providers:
+  my_provider:
+    gateway_policy:
+      error_parsing:
+        enabled: true
+        require_buffering: false
+        rules:
+          - status_code: 400
+            error_path: "error.type"
+            match_pattern: "Arrearage|BillingHardLimit"
+            map_to: "invalid_key"
+            priority: 10
+            description: "Payment overdue or billing limit"
+          - status_code: 400
+            error_path: "error.code"
+            match_pattern: "insufficient_quota"
+            map_to: "no_quota"
+            priority: 5
+            description: "Insufficient quota or credits"
+```
+
+### Rule Fields
+- **status_code**: HTTP status code to match (e.g., 400, 429)
+- **error_path**: Dot-separated JSON path to extract error details (e.g., "error.type", "error.code")
+- **match_pattern**: Regex pattern to match against the extracted value
+- **map_to**: ErrorReason enum value (see `src.core.enums.ErrorReason`)
+- **priority**: Higher priority rules win when multiple rules match (default: 0)
+- **description**: Optional human-readable description
+
+### Example Scenarios
+1. **Qwen "Arrearage" errors**: Map 400 with error.type="Arrearage" to INVALID_KEY
+2. **OpenAI quota errors**: Map 400 with error.code="insufficient_quota" to NO_QUOTA
+3. **Gemini authentication**: Map 400 with error.status="INVALID_ARGUMENT" to INVALID_KEY
+
+### Priority System
+When multiple rules match, the highest priority rule determines the error mapping. This allows fine-grained control over error classification.
+
+### Default Behavior
+When error parsing is disabled (`enabled: false`) or no rules match, the system falls back to provider-specific HTTP status code mapping.
+
+## 6. Git & Commit Protocol
 - **Atomic Commits**: Group related changes.
 - **Message Format**: `<type>: <description>` (e.g., `feat: add deepseek provider`, `fix: correct retry logic`).
 - **Safety**: Do not commit secrets (API keys, .env files).
 
-## 5. Agent Behavior
+## 7. Agent Behavior
 - **Analyze First**: Read related files before modifying.
 - **Incremental Changes**: Make small, verifiable changes.
 - **Verify**: Run `pytest` after implementation.
