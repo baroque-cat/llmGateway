@@ -6,6 +6,15 @@ from typing import List, Set
 # Import the full dataclass definitions for type checking.
 from src.config.schemas import Config, ProviderConfig, HealthPolicyConfig, ErrorParsingConfig
 
+# Import core enums for validation against a single source of truth.
+from src.core.enums import (
+    DebugMode,
+    StreamingMode,
+    ProxyMode,
+    CircuitBreakerMode,
+    ErrorReason
+)
+
 logger = logging.getLogger(__name__)
 
 class ConfigValidator:
@@ -109,8 +118,8 @@ class ConfigValidator:
 
         # --- Mode Validation (Proxy, Circuit Breaker) ---
         proxy_mode = conf.proxy_config.mode
-        valid_proxy_modes = {'none', 'static', 'stealth'}
-        if proxy_mode not in valid_proxy_modes:
+        if proxy_mode not in ProxyMode._value2member_map_:
+            valid_proxy_modes = list(ProxyMode._value2member_map_.keys())
             self._add_error(f"Provider '{name}': Invalid proxy mode '{proxy_mode}'. Must be one of {valid_proxy_modes}.")
         
         if proxy_mode == 'static' and not conf.proxy_config.static_url:
@@ -121,9 +130,13 @@ class ConfigValidator:
 
         cb_conf = conf.gateway_policy.circuit_breaker
         if cb_conf.enabled:
-            valid_cb_modes = {'auto_recovery', 'manual_reset'}
-            if cb_conf.mode not in valid_cb_modes:
+            if cb_conf.mode not in CircuitBreakerMode._value2member_map_:
+                valid_cb_modes = list(CircuitBreakerMode._value2member_map_.keys())
                 self._add_error(f"Provider '{name}': Invalid circuit breaker mode '{cb_conf.mode}'. Must be one of {valid_cb_modes}.")
+        
+        # --- NEW: Gateway Policy Validation ---
+        # This call validates all strict-mode settings in the gateway policy.
+        self._validate_gateway_policy(name, conf.gateway_policy)
         
         # --- NEW: Health Policy Validation ---
         # This call integrates the new validation logic as planned.
@@ -132,6 +145,49 @@ class ConfigValidator:
         # --- NEW: Error Parsing Validation ---
         # Validate error parsing configuration if enabled
         self._validate_error_parsing(name, conf.gateway_policy.error_parsing)
+
+    def _validate_gateway_policy(self, name: str, policy):
+        """
+        Validates the strict-mode settings within the GatewayPolicyConfig.
+        Ensures that all mode fields use only allowed enum values and that
+        unsafe_status_mapping values are valid ErrorReasons.
+        """
+        # Validate debug_mode against DebugMode enum
+        debug_mode_value = policy.debug_mode
+        if debug_mode_value not in DebugMode._value2member_map_:
+            valid_modes = list(DebugMode._value2member_map_.keys())
+            self._add_error(
+                f"Provider '{name}': Invalid debug mode '{debug_mode_value}'. "
+                f"Must be one of {valid_modes}."
+            )
+
+        # Validate streaming_mode against StreamingMode enum
+        streaming_mode_value = policy.streaming_mode
+        if streaming_mode_value not in StreamingMode._value2member_map_:
+            valid_modes = list(StreamingMode._value2member_map_.keys())
+            self._add_error(
+                f"Provider '{name}': Invalid streaming mode '{streaming_mode_value}'. "
+                f"Must be one of {valid_modes}."
+            )
+
+        # Validate unsafe_status_mapping values against ErrorReason enum
+        unsafe_mapping = policy.unsafe_status_mapping
+        valid_error_reasons = set(ErrorReason._value2member_map_.keys())
+        for status_code, error_reason_str in unsafe_mapping.items():
+            # Validate status code is an integer in the HTTP range
+            if not isinstance(status_code, int) or status_code < 100 or status_code >= 600:
+                self._add_error(
+                    f"Provider '{name}': In 'unsafe_status_mapping', key '{status_code}' "
+                    f"is not a valid HTTP status code (100-599)."
+                )
+            
+            # Validate the error reason string
+            if error_reason_str not in valid_error_reasons:
+                self._add_error(
+                    f"Provider '{name}': In 'unsafe_status_mapping', value '{error_reason_str}' "
+                    f"for status code {status_code} is not a valid ErrorReason. "
+                    f"Valid options are: {sorted(valid_error_reasons)}."
+                )
 
     def _validate_health_policy(self, name: str, policy: HealthPolicyConfig):
         """
@@ -229,4 +285,3 @@ class ConfigValidator:
                     f"Provider '{name}': error_parsing.rules[{i}].priority "
                     f"must be non-negative, got {rule.priority}."
                 )
-

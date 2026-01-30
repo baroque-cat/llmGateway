@@ -99,3 +99,42 @@ class Status(str, Enum):
     NO_QUOTA = "no_quota"
     NO_MODEL = "no_model"
 
+
+# --- New Enums for Configuration Validation ---
+
+@unique
+class DebugMode(Enum):
+    """
+    Defines the allowed debug logging modes for a provider instance.
+    """
+    DISABLED = "disabled"
+    HEADERS_ONLY = "headers_only"
+    FULL_BODY = "full_body"
+
+
+@unique
+class StreamingMode(Enum):
+    """
+    Defines the allowed streaming modes for a provider instance.
+    """
+    AUTO = "auto"
+    DISABLED = "disabled"
+
+
+@unique
+class ProxyMode(Enum):
+    """
+    Defines the allowed proxy modes for a provider instance.
+    """
+    NONE = "none"
+    STATIC = "static"
+    STEALTH = "stealth"
+
+
+@unique
+class CircuitBreakerMode(Enum):
+    """
+    Defines the allowed circuit breaker modes for a provider instance.
+    """
+    AUTO_RECOVERY = "auto_recovery"
+    MANUAL_RESET = "manual_reset"

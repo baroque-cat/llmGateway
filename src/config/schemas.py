@@ -3,6 +3,11 @@
 from dataclasses import dataclass, field
 from typing import Dict, Any, Optional, Literal, List
 
+# Import core enums for type hints in schemas.
+# This improves IDE support and documentation clarity,
+# even though runtime validation is performed by the ConfigValidator.
+from src.core.enums import DebugMode, StreamingMode
+
 # ==============================================================================
 # 1. ATOMIC AND NESTED CONFIGURATION CLASSES
 # ==============================================================================
@@ -203,14 +208,11 @@ class ErrorParsingConfig:
 class GatewayPolicyConfig:
     """Groups all policies applied by the API Gateway during live request processing."""
     # Controls whether streaming is enabled for this provider instance.
-    # - "auto": Streaming is enabled when technically possible (current behavior).
-    # - "disabled": Streaming is explicitly disabled in both directions (request and response).
+    # See src.core.enums.StreamingMode for allowed values.
     streaming_mode: Literal["auto", "disabled"] = "auto"
     
     # Controls the debug logging mode for this provider instance.
-    # - "disabled": No additional debug logging.
-    # - "headers_only": Log request and response headers only.
-    # - "full_body": Log request and response headers and body content (truncated to 10KB).
+    # See src.core.enums.DebugMode for allowed values.
     debug_mode: Literal["disabled", "headers_only", "full_body"] = "disabled"
     
     # Configuration for parsing error responses to refine error classification

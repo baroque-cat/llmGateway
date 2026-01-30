@@ -226,3 +226,43 @@ When error parsing is disabled (`enabled: false`) or no rules match, the system 
 - **Incremental Changes**: Make small, verifiable changes.
 - **Verify**: Run `pytest` after implementation.
 - **Match Context**: Adopt the style of the file you are editing.
+
+## 8. Configuration System Architecture
+
+The project employs a robust, type-safe configuration system located in `src/config/` with a facade in `src/core/accessor.py`.
+
+### Components Overview
+
+1. **Schemas (`src/config/schemas.py`)**
+   - **Role**: Defines the configuration data models using Python `dataclasses`.
+   - **Details**: Provides strict type hinting for all configuration options (Database, Worker, Providers, Policies). It ensures that the configuration structure is well-defined and predictable for IDEs and static analysis.
+
+2. **Loader (`src/config/loader.py`)**
+   - **Role**: Handles the loading lifecycle: YAML reading -> Env Var Resolution -> Merging -> Object Instantiation.
+   - **Workflow**:
+     1. Reads `config/providers.yaml`.
+     2. Resolves `${VAR_NAME}` placeholders using environment variables.
+     3. Merges user config with `src/config/defaults.py` to ensure all fields exist.
+     4. Converts the resulting dictionary into nested `dataclass` objects.
+
+3. **Validator (`src/config/validator.py`)**
+   - **Role**: Enforces business logic and integrity checks on the loaded configuration.
+   - **Details**: Runs after loading. Checks for logical errors (e.g., negative timeouts, invalid modes, missing keys) and accumulates all errors into a single report to guide the user in fixing them.
+
+4. **Defaults (`src/config/defaults.py`)**
+   - **Role**: Provides the "Source of Truth" for default values.
+   - **Details**: Returns a dictionary that acts as a base for the merge process, ensuring that even if a user omits optional sections, the application receives valid default settings.
+
+5. **Accessor (`src/core/accessor.py`)**
+   - **Role**: The public API (Facade) for accessing configuration data.
+   - **Details**:
+     - Decouples the rest of the application (Worker, Gateway) from the internal structure of `src/config`.
+     - Provides safe "getter" methods (e.g., `get_provider(name)`) that handle potential `None` values or lookups.
+     - **Rule**: Application code should NEVER import `Config` directly; it should always use `ConfigAccessor`.
+
+### Configuration Flow
+
+1. **Startup**: `main.py` initializes `ConfigLoader`.
+2. **Load**: `ConfigLoader.load()` reads YAML, resolves env vars, merges defaults, and creates the `Config` object.
+3. **Validate**: `ConfigValidator.validate(config)` checks the object. If valid, proceeds.
+4. **Access**: A `ConfigAccessor` is instantiated with the valid config and passed to services.
