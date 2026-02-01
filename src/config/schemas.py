@@ -46,9 +46,9 @@ class RetryOnErrorConfig:
     # Number of retry attempts for this error type. 0 means no retries.
     attempts: int = 0
     # Initial delay in seconds before the first retry.
-    backoff_sec: float = 1.0
+    backoff_sec: float = 0.1
     # Multiplier for the delay for subsequent retries (e.g., 2.0 for exponential backoff).
-    backoff_factor: float = 2.0
+    backoff_factor: float = 1.5
 
 
 @dataclass
