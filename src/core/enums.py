@@ -53,10 +53,25 @@ class ErrorReason(Enum):
             ErrorReason.SERVER_ERROR,
             ErrorReason.SERVICE_UNAVAILABLE,
             ErrorReason.OVERLOADED,
-            ErrorReason.INVALID_KEY,
-            ErrorReason.NO_ACCESS,
         }
         return self in retryable_errors
+
+    def is_fatal(self) -> bool:
+        """
+        Check if the error is fatal for the specific API key being used.
+        These errors indicate that the key itself is invalid, revoked, has no access,
+        or has run out of quota/credits.
+        
+        Returns:
+            bool: True if the error implies the key should be marked invalid/unusable.
+        """
+        fatal_errors = {
+            ErrorReason.INVALID_KEY,
+            ErrorReason.NO_ACCESS,
+            ErrorReason.NO_QUOTA,
+            ErrorReason.NO_MODEL,
+        }
+        return self in fatal_errors
 
     def is_client_error(self) -> bool:
         """
