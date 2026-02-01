@@ -38,3 +38,5 @@ providers:
     # You can override specific policies here if needed:
     # worker_health_policy:
     #   on_success_hr: 24
+    #   verification_attempts: 3
+    #   verification_delay_sec: 65

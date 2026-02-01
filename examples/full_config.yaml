@@ -95,6 +95,12 @@ providers:
       # Batching Configuration
       batch_size: 10
       batch_delay_sec: 30
+      # Verification Loop Configuration
+      # How many times to re-verify a key after a retryable error (e.g., rate limit).
+      verification_attempts: 3
+      # Hard delay between verification attempts (seconds). 
+      # Should be >60 seconds to survive minute-based rate limits.
+      verification_delay_sec: 65
 
     # Gateway specific policies
     gateway_policy:
