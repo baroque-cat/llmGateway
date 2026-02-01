@@ -216,6 +216,7 @@ class ConfigValidator:
             'quarantine_after_days': policy.quarantine_after_days,
             'quarantine_recheck_interval_days': policy.quarantine_recheck_interval_days,
             'stop_checking_after_days': policy.stop_checking_after_days,
+            'verification_delay_sec': policy.verification_delay_sec,
         }
 
         for field_name, value in time_fields_to_check.items():
@@ -231,6 +232,12 @@ class ConfigValidator:
         # Batch delay can be zero, so we check for negative values.
         if policy.batch_delay_sec < 0:
              self._add_error(f"Provider '{name}': Health policy field 'batch_delay_sec' cannot be negative, but got {policy.batch_delay_sec}.")
+
+        # --- Verification Loop Configuration ---
+        if policy.verification_attempts <= 0:
+            self._add_error(f"Provider '{name}': Health policy field 'verification_attempts' must be a positive integer, but got {policy.verification_attempts}.")
+        if policy.verification_delay_sec < 60:
+            self._add_error(f"Provider '{name}': Health policy field 'verification_delay_sec' must be at least 60 seconds to survive minute-based rate limits, but got {policy.verification_delay_sec}.")
 
     def _validate_error_parsing(self, name: str, config: ErrorParsingConfig):
         """

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import logging
+import asyncio
 from typing import List, Dict, Any, Optional
 # --- STEP 1: ADD THE REQUIRED IMPORT AS PLANNED ---
 # Added 'timezone' to create timezone-aware datetime objects.
@@ -39,7 +40,7 @@ class KeyProbe(IResourceProbe):
         model_name = resource['model_name']
         key_id = resource['key_id']
 
-        logger.debug(f"Checking key (ID: {key_id}) for provider '{provider_name}', model '{model_name}'.")
+        logger.debug(f'Checking key (ID: {key_id}) for provider "{provider_name}", model "{model_name}".')
 
         try:
             # Use the accessor to get provider config. A missing config is a critical error.
@@ -51,25 +52,76 @@ class KeyProbe(IResourceProbe):
             # Get the provider logic instance using the provider factory.
             provider_instance = get_provider(provider_name, provider_config)
             
-            # The 'check' call is clean, without any proxy-related logic.
+            # Get health policy for verification configuration
+            health_policy = self.accessor.get_health_policy(provider_name)
+            if health_policy is None:
+                logger.warning(f'Health policy not found for provider "{provider_name}". Using default policy.')
+                health_policy = HealthPolicyConfig()
+            
+            # The initial check call
             result = await provider_instance.check(
                 client=client,
                 token=key_value,
                 model=model_name,
             )
+            
+            # 1. Fast Fail: if the error is fatal, return immediately (no verification)
+            if not result.ok and result.error_reason.is_fatal():
+                logger.info(f'Key ID {key_id} failed with fatal error {result.error_reason}. Skipping verification.')
+                return result
+            
+            # 2. Success: if key is valid, return immediately
+            if result.ok:
+                logger.debug(f'Key ID {key_id} is valid.')
+                return result
+            
+            # 3. Retryable error: start verification loop
+            if result.error_reason.is_retryable():
+                logger.info(
+                    f'Key ID {key_id} failed with retryable error {result.error_reason}. '
+                    f'Starting verification loop (attempts={health_policy.verification_attempts}, '
+                    f'delay={health_policy.verification_delay_sec}s).'
+                )
+                retry_result = result
+                for attempt in range(health_policy.verification_attempts):
+                    await asyncio.sleep(health_policy.verification_delay_sec)
+                    logger.debug(f'Verification attempt {attempt + 1} for key ID {key_id}')
+                    retry_result = await provider_instance.check(
+                        client=client,
+                        token=key_value,
+                        model=model_name,
+                    )
+                    if retry_result.ok:
+                        logger.info(f'Key ID {key_id} recovered after {attempt + 1} verification attempt(s).')
+                        return retry_result
+                    if retry_result.error_reason.is_fatal():
+                        logger.info(f'Key ID {key_id} failed with fatal error {retry_result.error_reason} during verification.')
+                        return retry_result
+                    # else still retryable, continue loop
+                
+                # All attempts exhausted, key still failing
+                logger.info(
+                    f'Key ID {key_id} still failing after {health_policy.verification_attempts} verification attempts. '
+                    f'Returning last error: {retry_result.error_reason}'
+                )
+                # Return the last retry result (which is the latest error)
+                return retry_result
+            
+            # 4. Any other error (e.g., BAD_REQUEST) - treat as fatal
+            logger.debug(f'Key ID {key_id} failed with non-retryable error {result.error_reason}. No verification.')
             return result
 
         except KeyError as e:
             # This specifically catches the error from get_provider_or_raise.
-            logger.error(f"Configuration mismatch: {e}. Cannot check key ID {key_id}.")
+            logger.error(f'Configuration mismatch: {e}. Cannot check key ID {key_id}.')
             return CheckResult.fail(ErrorReason.BAD_REQUEST, str(e))
         except Exception as e:
             logger.error(
-                f"An unexpected exception occurred during check for key ID {key_id} "
-                f"for provider '{provider_name}': {e}",
+                f'An unexpected exception occurred during check for key ID {key_id} '
+                f'for provider "{provider_name}": {e}',
                 exc_info=True
             )
-            return CheckResult.fail(ErrorReason.UNKNOWN, f"Probe-level exception: {e}")
+            return CheckResult.fail(ErrorReason.UNKNOWN, f'Probe-level exception: {e}')
 
     async def _update_resource_status(self, resource: Dict[str, Any], result: CheckResult):
         """

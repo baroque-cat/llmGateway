@@ -129,6 +129,12 @@ class HealthPolicyConfig:
     # Delay in seconds between batches to avoid overwhelming the API.
     batch_delay_sec: int = 15
 
+    # --- Verification Loop Configuration (for retryable errors) ---
+    # How many times to re-verify a key after a retryable error (e.g., rate limit).
+    verification_attempts: int = 3
+    # Hard delay between verification attempts (seconds). Should be >60 seconds to survive minute-based rate limits.
+    verification_delay_sec: int = 65
+
 
 @dataclass
 class ProxyConfig:

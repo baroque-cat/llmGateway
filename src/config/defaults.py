@@ -88,6 +88,9 @@ def get_default_config() -> Dict[str, Any]:
                     # Batching Configuration
                     "batch_size": 10,
                     "batch_delay_sec": 30,
+                    # Verification Loop Configuration
+                    "verification_attempts": 3,
+                    "verification_delay_sec": 65,
                 },
 
                 # Policies applied only by the API Gateway during request processing.
