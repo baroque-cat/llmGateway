@@ -40,3 +40,8 @@ providers:
     #   on_success_hr: 24
     #   verification_attempts: 3
     #   verification_delay_sec: 65
+    #
+    # gateway_policy:
+    #   retry:
+    #     on_key_error:
+    #       backoff_sec: 0.1 # Protect DB from key storms

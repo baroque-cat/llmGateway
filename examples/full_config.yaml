@@ -137,6 +137,10 @@ providers:
         enabled: true
         on_key_error:
           attempts: 3
+          # Key Storm Protection:
+          # Delays key rotation to prevent hammering the DB if all keys are failing.
+          backoff_sec: 0.1
+          backoff_factor: 1.5
         on_server_error:
           attempts: 5
           backoff_sec: 0.5
