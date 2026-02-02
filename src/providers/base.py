@@ -162,6 +162,45 @@ class AIBaseProvider(IProvider):
             else:
                 return None
         return current
+    
+    async def _check_fast_fail(self, response: httpx.Response) -> Optional[CheckResult]:
+        """
+        Checks if the response status code matches any entry in the worker's fast_status_mapping.
+        If a match is found, returns a CheckResult with the mapped ErrorReason immediately.
+        This enables "fast fail" behavior for worker health checks without reading the response body.
+        
+        Args:
+            response: The HTTP response from the upstream API
+            
+        Returns:
+            CheckResult if a fast fail condition is met, None otherwise
+        """
+        status_code = response.status_code
+        health_policy = self.config.worker_health_policy
+        
+        if status_code in health_policy.fast_status_mapping:
+            reason_str = health_policy.fast_status_mapping[status_code]
+            try:
+                reason = ErrorReason(reason_str)
+            except ValueError:
+                logger.warning(
+                    f"Invalid ErrorReason '{reason_str}' in worker_health_policy.fast_status_mapping "
+                    f"for provider '{self.name}'. Fallback to UNKNOWN."
+                )
+                reason = ErrorReason.UNKNOWN
+            
+            # Log the fast fail event
+            logger.debug(
+                f"Worker fast fail for provider '{self.name}': Status {status_code} mapped to {reason.value}"
+            )
+            
+            return CheckResult.fail(
+                reason=reason,
+                message=f"Worker fast fail: {reason.value} (Status {status_code})",
+                status_code=status_code
+            )
+        
+        return None
 
     # --- REFACTORED: Protected helper method for sending requests (Template Method pattern) ---
     async def _send_proxy_request(
@@ -196,9 +235,9 @@ class AIBaseProvider(IProvider):
                 status_code = upstream_response.status_code
                 gateway_policy = self.config.gateway_policy
                 
-                # 1. Unsafe Status Mapping (Highest Priority - Fast Fail)
-                if status_code in gateway_policy.unsafe_status_mapping:
-                    reason_str = gateway_policy.unsafe_status_mapping[status_code]
+                # 1. Fast Status Mapping (Highest Priority - Fast Fail)
+                if status_code in gateway_policy.fast_status_mapping:
+                    reason_str = gateway_policy.fast_status_mapping[status_code]
                     try:
                         reason = ErrorReason(reason_str)
                     except ValueError:

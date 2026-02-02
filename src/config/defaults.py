@@ -91,6 +91,9 @@ def get_default_config() -> Dict[str, Any]:
                     # Verification Loop Configuration
                     "verification_attempts": 3,
                     "verification_delay_sec": 65,
+                    
+                    # Fast Status Mapping for worker health checks
+                    "fast_status_mapping": {},
                 },
 
                 # Policies applied only by the API Gateway during request processing.
@@ -137,6 +140,11 @@ def get_default_config() -> Dict[str, Any]:
                             "factor": 2.0,
                         },
                     },
+                    
+                    # Mapping of HTTP status codes to ErrorReason strings for fast, body-less error handling.
+                    # When a status code matches an entry here, the gateway will IMMEDIATELY fail the request
+                    # with the mapped reason without reading the response body.
+                    "fast_status_mapping": {},
                 },
             },
         },

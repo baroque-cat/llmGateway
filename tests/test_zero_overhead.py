@@ -104,12 +104,12 @@ async def test_default_401_behavior(mock_client, mock_response):
     mock_response.aread.assert_not_called()
     mock_response.aclose.assert_called_once()
 
-# --- 2. UNSAFE MAPPING TESTS ---
+# --- 2. FAST MAPPING TESTS ---
 
 @pytest.mark.asyncio
-async def test_unsafe_400_mapping(mock_client, mock_response):
+async def test_fast_400_mapping(mock_client, mock_response):
     """
-    Scenario: Unsafe mapping {400: "invalid_key"}.
+    Scenario: Fast mapping {400: "invalid_key"}.
     Expectation:
     - Body NOT read.
     - Reason is INVALID_KEY (Overridden).
@@ -117,7 +117,7 @@ async def test_unsafe_400_mapping(mock_client, mock_response):
     config = ProviderConfig(
         provider_type="mock",
         gateway_policy=GatewayPolicyConfig(
-            unsafe_status_mapping={400: "invalid_key"}
+            fast_status_mapping={400: "invalid_key"}
         )
     )
     provider = RealisticMockProvider("test", config)

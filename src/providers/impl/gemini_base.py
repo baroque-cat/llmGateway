@@ -229,6 +229,11 @@ class GeminiBaseProvider(AIBaseProvider):
             response = e.response
             status_code = response.status_code
             
+            # NEW: Check for fast fail condition before any other processing
+            fast_fail_result = await self._check_fast_fail(response)
+            if fast_fail_result:
+                return fast_fail_result
+            
             # Special handling for worker: 400 errors in check() likely indicate invalid key
             # since the request format is predetermined and correct
             if status_code == 400:

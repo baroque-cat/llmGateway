@@ -101,16 +101,21 @@ providers:
       # Hard delay between verification attempts (seconds). 
       # Should be >60 seconds to survive minute-based rate limits.
       verification_delay_sec: 65
+      
+      # Fast Status Mapping for worker health checks
+      # Immediately fails health checks with these status codes without reading the response body.
+      fast_status_mapping:
+        # 418: "no_quota"   # Example: Map 418 Teapot to NO_QUOTA
 
     # Gateway specific policies
     gateway_policy:
       streaming_mode: "auto" # "auto" or "disabled"
       debug_mode: "disabled" # "disabled", "headers_only", "full_body"
       
-      # NEW: Unsafe Status Mapping (Fast Fail)
+      # Fast Status Mapping (Fast Fail)
       # Immediately fails requests with these status codes without reading the response body.
       # This provides maximum performance but prevents forwarding upstream error messages.
-      unsafe_status_mapping:
+      fast_status_mapping:
         400: "bad_request"   # 400 -> BAD_REQUEST (No penalty, no body read)
         # 403: "no_access"   # Uncomment to force fast fail on 403
       

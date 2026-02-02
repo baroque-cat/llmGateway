@@ -134,6 +134,12 @@ class HealthPolicyConfig:
     verification_attempts: int = 3
     # Hard delay between verification attempts (seconds). Should be >60 seconds to survive minute-based rate limits.
     verification_delay_sec: int = 65
+    
+    # --- Fast Status Mapping (for worker health checks) ---
+    # Mapping of HTTP status codes to ErrorReason strings for fast, body-less error handling.
+    # When a status code matches an entry here, the worker will IMMEDIATELY fail the check
+    # with the mapped reason without reading the response body.
+    fast_status_mapping: Dict[int, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -234,7 +240,7 @@ class GatewayPolicyConfig:
     # When a status code matches an entry here, the gateway will IMMEDIATELY fail the request
     # with the mapped reason without reading the response body.
     # WARNING: This prevents forwarding specific upstream error messages to the client.
-    unsafe_status_mapping: Dict[int, str] = field(default_factory=dict)
+    fast_status_mapping: Dict[int, str] = field(default_factory=dict)
 
 
 @dataclass

@@ -79,9 +79,9 @@ def test_invalid_streaming_mode_should_fail_validation():
     assert "Invalid streaming mode 'full_stream'" in error_message
 
 
-def test_invalid_unsafe_mapping_value_should_fail():
+def test_invalid_fast_mapping_value_should_fail():
     """
-    Test that an invalid ErrorReason in unsafe_status_mapping causes validation to fail.
+    Test that an invalid ErrorReason in fast_status_mapping causes validation to fail.
     """
     mock_yaml_content = """providers:
   test_provider:
@@ -92,7 +92,7 @@ def test_invalid_unsafe_mapping_value_should_fail():
     access_control:
       gateway_access_token: "test_token"
     gateway_policy:
-      unsafe_status_mapping:
+      fast_status_mapping:
         400: "invalid_typo_reason"  # This ErrorReason doesn't exist
 """
 
@@ -126,7 +126,7 @@ def test_valid_config_should_pass_validation():
     gateway_policy:
       debug_mode: "disabled"
       streaming_mode: "auto"
-      unsafe_status_mapping:
+      fast_status_mapping:
         400: "bad_request"
 """
 

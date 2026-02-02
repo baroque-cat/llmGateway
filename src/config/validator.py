@@ -170,21 +170,21 @@ class ConfigValidator:
                 f"Must be one of {valid_modes}."
             )
 
-        # Validate unsafe_status_mapping values against ErrorReason enum
-        unsafe_mapping = policy.unsafe_status_mapping
+        # Validate fast_status_mapping values against ErrorReason enum
+        fast_mapping = policy.fast_status_mapping
         valid_error_reasons = set(ErrorReason._value2member_map_.keys())
-        for status_code, error_reason_str in unsafe_mapping.items():
+        for status_code, error_reason_str in fast_mapping.items():
             # Validate status code is an integer in the HTTP range
             if not isinstance(status_code, int) or status_code < 100 or status_code >= 600:
                 self._add_error(
-                    f"Provider '{name}': In 'unsafe_status_mapping', key '{status_code}' "
+                    f"Provider '{name}': In 'fast_status_mapping', key '{status_code}' "
                     f"is not a valid HTTP status code (100-599)."
                 )
             
             # Validate the error reason string
             if error_reason_str not in valid_error_reasons:
                 self._add_error(
-                    f"Provider '{name}': In 'unsafe_status_mapping', value '{error_reason_str}' "
+                    f"Provider '{name}': In 'fast_status_mapping', value '{error_reason_str}' "
                     f"for status code {status_code} is not a valid ErrorReason. "
                     f"Valid options are: {sorted(valid_error_reasons)}."
                 )
@@ -238,6 +238,26 @@ class ConfigValidator:
             self._add_error(f"Provider '{name}': Health policy field 'verification_attempts' must be a positive integer, but got {policy.verification_attempts}.")
         if policy.verification_delay_sec < 60:
             self._add_error(f"Provider '{name}': Health policy field 'verification_delay_sec' must be at least 60 seconds to survive minute-based rate limits, but got {policy.verification_delay_sec}.")
+        
+        # --- Fast Status Mapping Validation ---
+        # Validate fast_status_mapping values against ErrorReason enum
+        fast_mapping = policy.fast_status_mapping
+        valid_error_reasons = set(ErrorReason._value2member_map_.keys())
+        for status_code, error_reason_str in fast_mapping.items():
+            # Validate status code is an integer in the HTTP range
+            if not isinstance(status_code, int) or status_code < 100 or status_code >= 600:
+                self._add_error(
+                    f"Provider '{name}': In 'worker_health_policy.fast_status_mapping', key '{status_code}' "
+                    f"is not a valid HTTP status code (100-599)."
+                )
+            
+            # Validate the error reason string
+            if error_reason_str not in valid_error_reasons:
+                self._add_error(
+                    f"Provider '{name}': In 'worker_health_policy.fast_status_mapping', value '{error_reason_str}' "
+                    f"for status code {status_code} is not a valid ErrorReason. "
+                    f"Valid options are: {sorted(valid_error_reasons)}."
+                )
 
     def _validate_error_parsing(self, name: str, config: ErrorParsingConfig):
         """
