@@ -73,7 +73,7 @@ class ProxySyncer(IResourceSyncer):
         self,
         provider_id_map: dict[str, int],
         desired_state: dict[str, ProviderProxyState],
-    ):
+    ) -> None:
         """
         Performs a full synchronization for proxies by applying the desired state to the database.
 

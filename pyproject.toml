@@ -84,3 +84,16 @@ line-ending = "auto"
 [tool.ruff.lint.isort]
 # Group imports by type
 known-first-party = ["src"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+ignore_missing_imports = false
+
+[[tool.mypy.overrides]]
+module = "asyncpg.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "apscheduler.*"
+ignore_missing_imports = true

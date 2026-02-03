@@ -3,6 +3,7 @@
 import asyncio
 import collections
 import logging
+from typing import Deque, Tuple, DefaultDict
 
 from src.core.accessor import ConfigAccessor
 from src.core.constants import ALL_MODELS_MARKER
@@ -46,7 +47,7 @@ class GatewayCache:
         # This lock must be used by ALL methods that write to _key_pool.
         self._refresh_lock = asyncio.Lock()
 
-    def _populate_auth_map(self):
+    def _populate_auth_map(self) -> None:
         """
         Populates the authentication token cache from the configuration.
         This is a synchronous operation performed once at startup.
@@ -71,7 +72,7 @@ class GatewayCache:
             f"Authentication token cache populated with {len(self._auth_token_map)} tokens."
         )
 
-    async def refresh_key_pool(self):
+    async def refresh_key_pool(self) -> None:
         """
         Asynchronously refreshes the API key pool from the database.
 
@@ -88,7 +89,7 @@ class GatewayCache:
                 )
 
                 # 2. Build a new key pool in a temporary variable.
-                new_key_pool = collections.defaultdict(collections.deque)
+                new_key_pool: DefaultDict[str, Deque[Tuple[int, str]]] = collections.defaultdict(collections.deque)
                 for record in valid_keys_data:
                     key_id = record["key_id"]
                     provider_name = record["provider_name"]
@@ -112,7 +113,7 @@ class GatewayCache:
                     exc_info=e,
                 )
 
-    async def populate_caches(self):
+    async def populate_caches(self) -> None:
         """
         Performs the initial population of all caches.
         This should be called once when the gateway service starts.
@@ -177,7 +178,7 @@ class GatewayCache:
     # --- REFACTORED: Method is now aware of shared_key_status ---
     async def remove_key_from_pool(
         self, provider_name: str, model_name: str, key_id: int
-    ):
+    ) -> None:
         """
         Immediately removes a specific key from the live key pool cache.
 
@@ -207,7 +208,7 @@ class GatewayCache:
                 pool_key = f"{provider_name}:{model_name}"
                 self._remove_from_single_pool(pool_key, key_id)
 
-    def _remove_from_single_pool(self, pool_key: str, key_id: int):
+    def _remove_from_single_pool(self, pool_key: str, key_id: int) -> None:
         """
         A private helper to perform the removal logic on a single key pool.
         This avoids code duplication.

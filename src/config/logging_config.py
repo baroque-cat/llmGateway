@@ -8,7 +8,7 @@ import sys
 from src.core.accessor import ConfigAccessor
 
 
-def setup_logging(accessor: ConfigAccessor):
+def setup_logging(accessor: ConfigAccessor) -> None:
     """
     Configures the root logger for the entire application based on the global config.
 

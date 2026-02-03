@@ -6,6 +6,7 @@ import logging
 from src.config.schemas import (
     Config,
     ErrorParsingConfig,
+    GatewayPolicyConfig,
     HealthPolicyConfig,
     ProviderConfig,
 )
@@ -29,14 +30,14 @@ class ConfigValidator:
     from loading.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """
         Initializes the validator. It maintains a list of errors found during
         the validation process. This implements the "Error Accumulation" improvement.
         """
         self.errors: list[str] = []
 
-    def validate(self, config: Config):
+    def validate(self, config: Config) -> None:
         """
         The main public method to orchestrate the validation of the entire config object.
         This follows Step 1 of the plan.
@@ -63,11 +64,11 @@ class ConfigValidator:
 
         logger.info("Configuration passed all validation checks.")
 
-    def _add_error(self, message: str):
+    def _add_error(self, message: str) -> None:
         """A helper to add an error message to the internal list."""
         self.errors.append(message)
 
-    def _validate_global_config(self, config: Config):
+    def _validate_global_config(self, config: Config) -> None:
         """
         Validates global configuration sections like 'worker' and 'database'.
         This corresponds to Step 2 of the plan.
@@ -82,7 +83,7 @@ class ConfigValidator:
                 "'database.password' is not set. It should be loaded from an environment variable."
             )
 
-    def _validate_providers_config(self, config: Config):
+    def _validate_providers_config(self, config: Config) -> None:
         """
         Validates the 'providers' section, iterating through each instance.
         This is the most complex validation part, as planned in Step 2.
@@ -101,7 +102,7 @@ class ConfigValidator:
 
     def _validate_single_provider(
         self, name: str, conf: ProviderConfig, used_tokens: set[str]
-    ):
+    ) -> None:
         """
         Performs detailed validation for a single, enabled provider instance.
         This provides context-aware error messages, an identified improvement.
@@ -171,7 +172,7 @@ class ConfigValidator:
         # Validate error parsing configuration if enabled
         self._validate_error_parsing(name, conf.gateway_policy.error_parsing)
 
-    def _validate_gateway_policy(self, name: str, policy):
+    def _validate_gateway_policy(self, name: str, policy: GatewayPolicyConfig) -> None:
         """
         Validates the strict-mode settings within the GatewayPolicyConfig.
         Ensures that all mode fields use only allowed enum values and that
@@ -218,7 +219,7 @@ class ConfigValidator:
                     f"Valid options are: {sorted(valid_error_reasons)}."
                 )
 
-    def _validate_health_policy(self, name: str, policy: HealthPolicyConfig):
+    def _validate_health_policy(self, name: str, policy: HealthPolicyConfig) -> None:
         """
         Validates the business logic and consistency of the HealthPolicyConfig.
         This new method modularizes the validation logic as planned.
@@ -300,7 +301,7 @@ class ConfigValidator:
                     f"Valid options are: {sorted(valid_error_reasons)}."
                 )
 
-    def _validate_error_parsing(self, name: str, config: ErrorParsingConfig):
+    def _validate_error_parsing(self, name: str, config: ErrorParsingConfig) -> None:
         """
         Validates the error parsing configuration for a provider.
 

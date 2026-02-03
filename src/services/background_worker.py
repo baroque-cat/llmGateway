@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+from typing import Any
 
 import asyncpg
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -28,7 +29,7 @@ from src.services.synchronizers.proxy_sync import _read_proxies_from_directory
 CONFIG_PATH = "config/providers.yaml"
 
 
-def _setup_directories(accessor: ConfigAccessor):
+def _setup_directories(accessor: ConfigAccessor) -> None:
     """
     Ensures that all necessary directories specified in the config exist.
     Creates them if they don't, using the ConfigAccessor.
@@ -75,7 +76,7 @@ async def run_sync_cycle(
     accessor: ConfigAccessor,
     db_manager: DatabaseManager,
     all_syncers: list[IResourceSyncer],
-):
+) -> None:
     """
     Orchestrates a single, two-phase synchronization cycle.
     This function centralizes the synchronization logic, making it more robust and readable.
@@ -89,7 +90,7 @@ async def run_sync_cycle(
         logger.info(
             "Sync Phase 1 (Read): Collecting desired state from files and config..."
         )
-        desired_state: dict[str, dict] = {"keys": {}, "proxies": {}}
+        desired_state: dict[str, dict[str, Any]] = {"keys": {}, "proxies": {}}
 
         enabled_providers = accessor.get_enabled_providers()
         for provider_name, provider_config in enabled_providers.items():
@@ -105,7 +106,7 @@ async def run_sync_cycle(
             # For ProxySyncer (runs only if mode is 'stealth')
             # REFACTORED: Use accessor to get proxy config safely
             proxy_config = accessor.get_proxy_config(provider_name)
-            if proxy_config and proxy_config.mode == "stealth":
+            if proxy_config and proxy_config.mode == "stealth" and proxy_config.pool_list_path:
                 proxies_from_file = _read_proxies_from_directory(
                     proxy_config.pool_list_path
                 )
@@ -152,7 +153,7 @@ async def run_sync_cycle(
     logger.info("Synchronization cycle finished.")
 
 
-async def run_worker():
+async def run_worker() -> None:
     """
     The main async function for the background worker service.
     Orchestrates all background tasks using the new accessor-based architecture.

@@ -86,7 +86,7 @@ CREATE INDEX IF NOT EXISTS idx_key_status_gateway_lookup ON key_model_status(sta
 # --- Component 1: Connection Management ---
 
 
-async def init_db_pool(dsn: str):
+async def init_db_pool(dsn: str) -> None:
     """
     Initializes the asynchronous connection pool to the PostgreSQL database.
     This should be called once when the application starts.
@@ -105,7 +105,7 @@ async def init_db_pool(dsn: str):
         raise
 
 
-async def close_db_pool():
+async def close_db_pool() -> None:
     """
     Closes the database connection pool gracefully.
     This should be called once when the application shuts down.
@@ -139,7 +139,7 @@ class ProviderRepository:
     def __init__(self, pool: Pool):
         self._pool = pool
 
-    async def sync(self, provider_names_from_config: list[str]):
+    async def sync(self, provider_names_from_config: list[str]) -> None:
         """Ensures the providers table is in sync with the configuration."""
         async with self._pool.acquire() as conn:
             async with conn.transaction():
@@ -193,7 +193,7 @@ class KeyRepository:
         provider_id: int,
         keys_from_file: set[str],
         provider_models: list[str],
-    ):
+    ) -> None:
         """
         Synchronizes keys and their model associations for a single provider.
         This method is a core part of the two-phase synchronization cycle.
@@ -386,7 +386,7 @@ class KeyRepository:
         provider_name: str,
         result: CheckResult,
         next_check_time: datetime,
-    ):
+    ) -> None:
         """
         Updates the status of a key-model pair based on a check result.
         This method contains the core logic for managing the `failing_since` timestamp.
@@ -544,7 +544,7 @@ class ProxyRepository:
 
     async def sync(
         self, provider_name: str, proxies_from_file: set[str], provider_id: int
-    ):
+    ) -> None:
         # This remains a placeholder as its implementation is outside the current scope.
         pass
 
@@ -564,7 +564,7 @@ class DatabaseManager:
         self.keys = KeyRepository(pool, accessor)
         self.proxies = ProxyRepository(pool)
 
-    async def initialize_schema(self):
+    async def initialize_schema(self) -> None:
         """Creates all database tables if they don't exist."""
         try:
             pool = get_pool()
@@ -588,7 +588,7 @@ class DatabaseManager:
             logger.error(f"Database connection check failed: {e}")
             return False
 
-    async def run_vacuum(self):
+    async def run_vacuum(self) -> None:
         """Executes the VACUUM command to optimize the database."""
         pool = get_pool()
         async with pool.acquire() as conn:

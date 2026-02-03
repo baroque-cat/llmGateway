@@ -51,7 +51,7 @@ class IResourceProbe(ABC):
         concurrency_limit = self.accessor.get_worker_concurrency()
         self.semaphore = asyncio.Semaphore(concurrency_limit)
 
-    async def run_cycle(self):
+    async def run_cycle(self) -> None:
         """
         Executes one full checking cycle for all resources concurrently.
         This is the main entry point called by the background worker.
@@ -100,7 +100,7 @@ class IResourceProbe(ABC):
 
     async def _process_provider_batch(
         self, provider_name: str, resources: list[dict[str, Any]]
-    ):
+    ) -> None:
         """
         Processes all resources for a single provider, respecting its batching policy.
         This coroutine is executed concurrently for different providers.
@@ -147,7 +147,7 @@ class IResourceProbe(ABC):
                 f"Successfully finished processing batch for provider '{provider_name}'."
             )
 
-    async def _check_and_update_resource(self, resource: dict[str, Any]):
+    async def _check_and_update_resource(self, resource: dict[str, Any]) -> None:
         """
         Helper coroutine to wrap the check and update logic for a single resource.
         This allows us to run multiple of these concurrently within a batch.
@@ -180,7 +180,7 @@ class IResourceProbe(ABC):
     @abstractmethod
     async def _update_resource_status(
         self, resource: dict[str, Any], result: CheckResult
-    ):
+    ) -> None:
         """
         Updates the resource's status in the database. (Async)
         Must be implemented by subclasses.

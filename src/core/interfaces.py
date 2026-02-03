@@ -74,7 +74,7 @@ class IProvider(ABC):
 
     @abstractmethod
     async def check(
-        self, client: httpx.AsyncClient, token: str, **kwargs
+        self, client: httpx.AsyncClient, token: str, **kwargs: Any
     ) -> CheckResult:
         """
         Checks if an API token is valid for this provider. (Async)
@@ -95,7 +95,7 @@ class IProvider(ABC):
 
     @abstractmethod
     async def inspect(
-        self, client: httpx.AsyncClient, token: str, **kwargs
+        self, client: httpx.AsyncClient, token: str, **kwargs: Any
     ) -> list[str]:
         """
         Inspects the capabilities associated with a token. (Async)
@@ -120,7 +120,7 @@ class IProvider(ABC):
         client: httpx.AsyncClient,
         token: str,
         method: str,
-        headers: dict,
+        headers: dict[str, str],
         path: str,
         query_params: str,
         content: bytes,
@@ -174,7 +174,7 @@ class IResourceSyncer(ABC):
     @abstractmethod
     async def apply_state(
         self, provider_id_map: dict[str, int], desired_state: dict[str, Any]
-    ):
+    ) -> None:
         """
         Executes one full synchronization cycle for the specific resource type
         based on a pre-built desired state. (Async)

@@ -142,7 +142,7 @@ class HttpClientFactory:
                 # Re-raise the exception so the caller knows something went wrong.
                 raise
 
-    async def close_all(self):
+    async def close_all(self) -> None:
         """
         Gracefully closes all cached httpx.AsyncClient instances.
 

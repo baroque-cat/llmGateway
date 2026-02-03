@@ -72,7 +72,7 @@ class KeySyncer(IResourceSyncer):
         self,
         provider_id_map: dict[str, int],
         desired_state: dict[str, ProviderKeyState],
-    ):
+    ) -> None:
         """
         Performs a full synchronization for API keys by applying the desired state to the database.
 

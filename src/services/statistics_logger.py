@@ -39,7 +39,7 @@ class StatisticsLogger:
         self._loggers: dict[str, logging.Logger] = {}
         self._setup_loggers()
 
-    def _setup_loggers(self):
+    def _setup_loggers(self) -> None:
         """
         Dynamically configures individual loggers for each provider instance.
         This method uses RotatingFileHandler to manage log file size and backups
@@ -80,7 +80,7 @@ class StatisticsLogger:
                 f"Configured statistics logger for provider '{provider_name}'."
             )
 
-    async def run_cycle(self):
+    async def run_cycle(self) -> None:
         """
         Executes one full statistics gathering and logging cycle.
         This is the main async method called by the background scheduler.

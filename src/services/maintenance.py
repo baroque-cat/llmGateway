@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 # now self-regulating.
 
 
-async def run_periodic_vacuum(db_manager: DatabaseManager):
+async def run_periodic_vacuum(db_manager: DatabaseManager) -> None:
     """
     Service-level task to perform a VACUUM operation on the database (Async Version).
     In PostgreSQL, this complements the autovacuum daemon and is useful for reclaiming
