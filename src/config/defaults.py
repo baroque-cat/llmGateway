@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 
-from typing import Any, Dict
+from typing import Any
 
-def get_default_config() -> Dict[str, Any]:
+
+def get_default_config() -> dict[str, Any]:
     """
     Returns the default configuration structure as a dictionary.
     This serves as a template for generating the initial providers.yaml file.
@@ -10,13 +11,11 @@ def get_default_config() -> Dict[str, Any]:
     """
     return {
         # --- GLOBAL SETTINGS ---
-        
         # --- WORKER SETTINGS ---
         "worker": {
             # Concurrency limit for the background worker's probes.
             "max_concurrent_providers": 10,
         },
-        
         "database": {
             "host": "localhost",
             "port": 5433,
@@ -27,46 +26,38 @@ def get_default_config() -> Dict[str, Any]:
             "password": "${DB_PASSWORD}",
             "dbname": "llmgateway",
         },
-
         "logging": {
             "summary_log_path": "logs/summary/",
             "summary_interval_min": 30,
             "summary_log_max_size_mb": 5,
             "summary_log_backup_count": 3,
         },
-        
         # --- PROVIDER-SPECIFIC SETTINGS ---
         # This section serves as a generic template for any new provider instance.
         "providers": {
             "llm_provider_default": {
                 # This will be overridden by the template (e.g., 'gemini', 'deepseek').
-                "provider_type": "placeholder_type", 
+                "provider_type": "placeholder_type",
                 "enabled": True,
                 # This path is customized by the config manager.
                 "keys_path": "keys/llm_provider_default/",
-                
                 "api_base_url": "https://api.example.com/v1",
-                
                 "models": {},
-                
                 "access_control": {
                     "gateway_access_token": "${LLM_PROVIDER_DEFAULT_TOKEN}",
                 },
-
                 "proxy_config": {
                     "mode": "none",
                     "static_url": None,
                     # This path is customized by the config manager.
                     "pool_list_path": "proxies/llm_provider_default/",
                 },
-                
                 "timeouts": {
                     "connect": 5.0,
                     "read": 20.0,
                     "write": 10.0,
                     "pool": 5.0,
                 },
-
                 # Policy for the background worker's health checks.
                 # REFACTORED: This section now perfectly matches the updated HealthPolicyConfig schema.
                 "worker_health_policy": {
@@ -91,31 +82,23 @@ def get_default_config() -> Dict[str, Any]:
                     # Verification Loop Configuration
                     "verification_attempts": 3,
                     "verification_delay_sec": 65,
-                    
                     # Fast Status Mapping for worker health checks
                     "fast_status_mapping": {},
                 },
-
                 # Policies applied only by the API Gateway during request processing.
                 "gateway_policy": {
                     # Controls whether streaming is enabled for this provider instance.
                     # - "auto": Streaming is enabled when technically possible (current behavior).
                     # - "disabled": Streaming is explicitly disabled in both directions (request and response).
                     "streaming_mode": "auto",
-                    
                     # Controls the debug logging mode for this provider instance.
                     # - "disabled": No additional debug logging.
                     # - "headers_only": Log request and response headers only.
                     # - "full_body": Log request and response headers and body content (truncated to 10KB).
                     "debug_mode": "disabled",
-                    
                     # Configuration for parsing error responses to refine error classification
                     # This enables distinguishing between different error types with the same HTTP status code
-                    "error_parsing": {
-                        "enabled": False,
-                        "rules": []
-                    },
-                    
+                    "error_parsing": {"enabled": False, "rules": []},
                     # Retry policies for failed requests.
                     "retry": {
                         "enabled": False,
@@ -131,7 +114,7 @@ def get_default_config() -> Dict[str, Any]:
                     # Circuit breaker to protect against cascading failures.
                     "circuit_breaker": {
                         "enabled": False,
-                        "mode": "auto_recovery", # manual_reset
+                        "mode": "auto_recovery",  # manual_reset
                         "failure_threshold": 20,
                         "jitter_sec": 5,
                         "backoff": {
@@ -140,7 +123,6 @@ def get_default_config() -> Dict[str, Any]:
                             "factor": 2.0,
                         },
                     },
-                    
                     # Mapping of HTTP status codes to ErrorReason strings for fast, body-less error handling.
                     # When a status code matches an entry here, the gateway will IMMEDIATELY fail the request
                     # with the mapped reason without reading the response body.

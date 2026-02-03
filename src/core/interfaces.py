@@ -9,7 +9,7 @@ ensuring a modular and extensible architecture.
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Tuple, Dict, Any, Set, TypedDict
+from typing import Any, TypedDict
 
 import httpx
 
@@ -22,17 +22,22 @@ from src.db.database import DatabaseManager
 # These structures provide type safety for the data collected during the
 # "Read Phase" of the background worker's synchronization cycle.
 
+
 class ProviderKeyState(TypedDict):
     """Represents the desired state for keys of a single provider."""
-    keys_from_files: Set[str]
-    models_from_config: List[str]
+
+    keys_from_files: set[str]
+    models_from_config: list[str]
+
 
 class ProviderProxyState(TypedDict):
     """Represents the desired state for proxies of a single provider."""
-    proxies_from_files: Set[str]
+
+    proxies_from_files: set[str]
 
 
 # --- Core Interfaces ---
+
 
 class IProvider(ABC):
     """
@@ -61,14 +66,16 @@ class IProvider(ABC):
         Returns:
             A RequestDetails object containing standardized information, like
             the requested model name, that the gateway can understand and act upon.
-        
+
         Raises:
             ValueError: If parsing fails due to invalid format or missing data.
         """
         pass
 
     @abstractmethod
-    async def check(self, client: httpx.AsyncClient, token: str, **kwargs) -> CheckResult:
+    async def check(
+        self, client: httpx.AsyncClient, token: str, **kwargs
+    ) -> CheckResult:
         """
         Checks if an API token is valid for this provider. (Async)
 
@@ -87,7 +94,9 @@ class IProvider(ABC):
         pass
 
     @abstractmethod
-    async def inspect(self, client: httpx.AsyncClient, token: str, **kwargs) -> List[str]:
+    async def inspect(
+        self, client: httpx.AsyncClient, token: str, **kwargs
+    ) -> list[str]:
         """
         Inspects the capabilities associated with a token. (Async)
 
@@ -107,8 +116,15 @@ class IProvider(ABC):
     # --- MODIFIED: Added query_params to the method signature ---
     @abstractmethod
     async def proxy_request(
-        self, client: httpx.AsyncClient, token: str, method: str, headers: Dict, path: str, query_params: str, content: bytes
-    ) -> Tuple[httpx.Response, CheckResult]:
+        self,
+        client: httpx.AsyncClient,
+        token: str,
+        method: str,
+        headers: dict,
+        path: str,
+        query_params: str,
+        content: bytes,
+    ) -> tuple[httpx.Response, CheckResult]:
         """
         Proxies an incoming client request to the target API provider. (Async)
 
@@ -156,7 +172,9 @@ class IResourceSyncer(ABC):
         pass
 
     @abstractmethod
-    async def apply_state(self, provider_id_map: Dict[str, int], desired_state: Dict[str, Any]):
+    async def apply_state(
+        self, provider_id_map: dict[str, int], desired_state: dict[str, Any]
+    ):
         """
         Executes one full synchronization cycle for the specific resource type
         based on a pre-built desired state. (Async)
@@ -168,4 +186,3 @@ class IResourceSyncer(ABC):
                            the complete desired state for that provider's resources.
         """
         pass
-

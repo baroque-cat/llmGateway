@@ -1,6 +1,7 @@
-# src/services/maintenance.py 
+# src/services/maintenance.py
 
 import logging
+
 from src.db.database import DatabaseManager
 
 # Initialize a logger for this module.
@@ -11,6 +12,7 @@ logger = logging.getLogger(__name__)
 # The new state-aware logic in KeyProbe and the `failing_since` mechanism
 # in the database make a separate amnesty service obsolete. The system is
 # now self-regulating.
+
 
 async def run_periodic_vacuum(db_manager: DatabaseManager):
     """
@@ -28,5 +30,6 @@ async def run_periodic_vacuum(db_manager: DatabaseManager):
         # keeping the service layer decoupled from the direct database connection logic.
         await db_manager.run_vacuum()
     except Exception as e:
-        logger.error("An error occurred during the VACUUM maintenance task.", exc_info=e)
-
+        logger.error(
+            "An error occurred during the VACUUM maintenance task.", exc_info=e
+        )

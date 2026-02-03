@@ -1,19 +1,19 @@
 # src/services/gateway_service.py
 
-import logging
 import asyncio
-from datetime import datetime, timedelta, timezone
-from typing import Optional, AsyncGenerator, Set
+import logging
+from collections.abc import AsyncGenerator
+from datetime import UTC, datetime, timedelta
 
-from fastapi import FastAPI, Request, Response, Header
-from fastapi.responses import JSONResponse, StreamingResponse, Response
+from fastapi import FastAPI, Header, Request, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 # Import core application components
 from src.core.accessor import ConfigAccessor
-from src.core.http_client_factory import HttpClientFactory
-from src.core.models import CheckResult
 from src.core.enums import ErrorReason  # Added explicitly for error type checking
-from src.core.types import IProvider
+from src.core.http_client_factory import HttpClientFactory
+from src.core.interfaces import IProvider
+from src.core.models import CheckResult
 from src.db import database
 from src.db.database import DatabaseManager
 from src.providers import get_provider
@@ -35,7 +35,7 @@ app_state: dict = {
 # These are headers that control the connection between two nodes (e.g., client and this proxy).
 # They MUST NOT be blindly forwarded to the upstream server, as this can cause protocol conflicts.
 # Headers are lowercase for case-insensitive comparison.
-HOP_BY_HOP_HEADERS: Set[str] = {
+HOP_BY_HOP_HEADERS: set[str] = {
     "connection",
     "keep-alive",
     "proxy-authenticate",
@@ -58,9 +58,9 @@ MAX_DEBUG_BODY_SIZE = 10 * 1024
 
 
 def _get_token_from_headers(
-    authorization: Optional[str] = Header(None),
-    x_goog_api_key: Optional[str] = Header(None),
-) -> Optional[str]:
+    authorization: str | None = Header(None),
+    x_goog_api_key: str | None = Header(None),
+) -> str | None:
     """
     Extracts the API token from request headers with a defined priority.
     1. Checks for 'Authorization: Bearer <token>'.
@@ -102,7 +102,7 @@ async def _report_key_failure(
     """
     try:
         # The next_check_time here is a placeholder. The KeyProbe's logic will calculate the real one.
-        placeholder_next_check = datetime.now(timezone.utc) + timedelta(minutes=1)
+        placeholder_next_check = datetime.now(UTC) + timedelta(minutes=1)
         await db_manager.keys.update_status(
             key_id=key_id,
             model_name=model_name,
@@ -133,7 +133,7 @@ async def _log_debug_info(
 ):
     """
     Logs debug information based on the debug mode setting.
-    
+
     Args:
         debug_mode: The effective debug mode ("headers_only" or "full_body").
         instance_name: The name of the provider instance.
@@ -148,18 +148,18 @@ async def _log_debug_info(
     # Log basic request info
     logger.info(f"Request to {instance_name}: {request_method} {request_path}")
     logger.info(f"Request headers: {dict(request_headers)}")
-    
+
     # Log request body if in full_body mode
     if debug_mode == "full_body":
         request_body_preview = request_body[:MAX_DEBUG_BODY_SIZE]
         if len(request_body) > MAX_DEBUG_BODY_SIZE:
             request_body_preview += b"... (truncated)"
         logger.info(f"Request body: {request_body_preview}")
-    
+
     # Log response info
     logger.info(f"Response from {instance_name}: {response_status}")
     logger.info(f"Response headers: {dict(response_headers)}")
-    
+
     # Log response body if in full_body mode
     if debug_mode == "full_body":
         response_body_preview = response_body[:MAX_DEBUG_BODY_SIZE]
@@ -173,7 +173,7 @@ async def _log_debug_info(
 
 async def _generate_streaming_body(
     upstream_response: Response,
-) -> AsyncGenerator[bytes, None]:
+) -> AsyncGenerator[bytes]:
     """
     An async generator that streams the response body from the upstream service.
     This helper function follows the DRY principle.
@@ -343,13 +343,15 @@ async def _handle_buffered_request(
 
     if check_result.ok:
         # Case 1: Success. Check if debug logging is needed.
-        effective_debug_mode = request.app.state.debug_mode_map.get(instance_name, "disabled")
-        
+        effective_debug_mode = request.app.state.debug_mode_map.get(
+            instance_name, "disabled"
+        )
+
         if effective_debug_mode != "disabled":
             # Read the entire response body for logging
             response_body = await upstream_response.aread()
             await upstream_response.aclose()
-            
+
             # Log debug information
             await _log_debug_info(
                 debug_mode=effective_debug_mode,
@@ -362,14 +364,14 @@ async def _handle_buffered_request(
                 response_headers=dict(upstream_response.headers),
                 response_body=response_body,
             )
-            
+
             # Filter out hop-by-hop headers for the final response
             filtered_headers = {
                 key: value
                 for key, value in upstream_response.headers.items()
                 if key.lower() not in HOP_BY_HOP_HEADERS
             }
-            
+
             # Return buffered response (not streaming) since we've read the entire body
             return Response(
                 content=response_body,
@@ -388,9 +390,11 @@ async def _handle_buffered_request(
         )
         response_body = await upstream_response.aread()
         await upstream_response.aclose()
-        
+
         # Log debug information for client errors too
-        effective_debug_mode = request.app.state.debug_mode_map.get(instance_name, "disabled")
+        effective_debug_mode = request.app.state.debug_mode_map.get(
+            instance_name, "disabled"
+        )
         if effective_debug_mode != "disabled":
             await _log_debug_info(
                 debug_mode=effective_debug_mode,
@@ -403,7 +407,7 @@ async def _handle_buffered_request(
                 response_headers=dict(upstream_response.headers),
                 response_body=response_body,
             )
-        
+
         filtered_headers = {
             key: value
             for key, value in upstream_response.headers.items()
@@ -499,13 +503,15 @@ async def _handle_buffered_retryable_request(
 
         if check_result.ok:
             # Case 1: Success. Check if debug logging is needed.
-            effective_debug_mode = request.app.state.debug_mode_map.get(instance_name, "disabled")
-            
+            effective_debug_mode = request.app.state.debug_mode_map.get(
+                instance_name, "disabled"
+            )
+
             if effective_debug_mode != "disabled":
                 # Read the entire response body for logging
                 response_body = await upstream_response.aread()
                 await upstream_response.aclose()
-                
+
                 # Log debug information
                 await _log_debug_info(
                     debug_mode=effective_debug_mode,
@@ -518,14 +524,14 @@ async def _handle_buffered_retryable_request(
                     response_headers=dict(upstream_response.headers),
                     response_body=response_body,
                 )
-                
+
                 # Filter out hop-by-hop headers for the final response
                 filtered_headers = {
                     key: value
                     for key, value in upstream_response.headers.items()
                     if key.lower() not in HOP_BY_HOP_HEADERS
                 }
-                
+
                 # Return buffered response (not streaming) since we've read the entire body
                 return Response(
                     content=response_body,
@@ -548,9 +554,11 @@ async def _handle_buffered_retryable_request(
             )
             response_body = await upstream_response.aread()
             await upstream_response.aclose()
-            
+
             # Log debug information for client errors too
-            effective_debug_mode = request.app.state.debug_mode_map.get(instance_name, "disabled")
+            effective_debug_mode = request.app.state.debug_mode_map.get(
+                instance_name, "disabled"
+            )
             if effective_debug_mode != "disabled":
                 await _log_debug_info(
                     debug_mode=effective_debug_mode,
@@ -563,7 +571,7 @@ async def _handle_buffered_retryable_request(
                     response_headers=dict(upstream_response.headers),
                     response_body=response_body,
                 )
-            
+
             filtered_headers = {
                 key: value
                 for key, value in upstream_response.headers.items()
@@ -584,7 +592,7 @@ async def _handle_buffered_retryable_request(
         if (not reason.is_retryable()) or (reason == ErrorReason.OVERLOADED):
             # Phase 0 fix: Immediate penalty if fatal
             # (Note: reason.is_fatal() is now true for INVALID_KEY, NO_QUOTA etc from previous refactor)
-            
+
             logger.warning(
                 f"Key fault detected (Reason: {reason.value}). "
                 f"Marking key_id {key_id} as failed and removing from pool."
@@ -641,25 +649,31 @@ async def _handle_buffered_retryable_request(
                 # Treat exhaustion as a key failure: Penalize and Rotate
                 asyncio.create_task(
                     _report_key_failure(
-                        db_manager, key_id, instance_name, details.model_name, check_result
+                        db_manager,
+                        key_id,
+                        instance_name,
+                        details.model_name,
+                        check_result,
                     )
                 )
                 asyncio.create_task(
-                    cache.remove_key_from_pool(instance_name, details.model_name, key_id)
+                    cache.remove_key_from_pool(
+                        instance_name, details.model_name, key_id
+                    )
                 )
 
                 # Fall through to Key Rotation logic
                 key_error_attempts += 1
                 if key_error_attempts < key_error_policy.attempts:
-                     delay = key_error_policy.backoff_sec * (
+                    delay = key_error_policy.backoff_sec * (
                         key_error_policy.backoff_factor ** (key_error_attempts - 1)
                     )
-                     logger.info(
+                    logger.info(
                         f"Rotating key after server retry exhaustion... Backoff {delay:.2f}s."
-                     )
-                     await asyncio.sleep(delay)
-                     server_error_attempts = 0 # Reset server attempts for the new key
-                     continue
+                    )
+                    await asyncio.sleep(delay)
+                    server_error_attempts = 0  # Reset server attempts for the new key
+                    continue
                 else:
                     last_error_response = JSONResponse(
                         status_code=503,
@@ -713,7 +727,7 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
 
                 # Determine the effective debug mode for this provider.
                 effective_debug_mode = config.gateway_policy.debug_mode
-                
+
                 # Store the effective debug mode for use during request handling.
                 app.state.debug_mode_map[name] = effective_debug_mode
 
@@ -830,14 +844,14 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
             )
 
         # Get the effective debug mode for this provider
-        effective_debug_mode = request.app.state.debug_mode_map.get(instance_name, "disabled")
-        
+        effective_debug_mode = request.app.state.debug_mode_map.get(
+            instance_name, "disabled"
+        )
+
         # Dispatch to the correct handler based on pre-calculated logic.
         # Debug mode has highest priority and forces buffered requests.
         if effective_debug_mode != "disabled":
-            return await _handle_buffered_request(
-                request, provider, instance_name
-            )
+            return await _handle_buffered_request(request, provider, instance_name)
         elif provider_config.gateway_policy.retry.enabled:
             return await _handle_buffered_retryable_request(
                 request, provider, instance_name

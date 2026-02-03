@@ -1,11 +1,11 @@
 # src/services/synchronizers/__init__.py
 
 import logging
-from typing import Dict, Type, List
+from typing import Dict, List, Type
 
-from src.core.types import IResourceSyncer
 # REFACTORED: Import the dependencies that are now required by the factory.
 from src.core.accessor import ConfigAccessor
+from src.core.interfaces import IResourceSyncer
 from src.db.database import DatabaseManager
 
 # Import concrete syncer implementations
@@ -16,13 +16,16 @@ logger = logging.getLogger(__name__)
 
 # A registry to map syncer type names to their classes.
 # This allows for easy extension with new resource types in the future.
-_SYNCER_CLASSES: Dict[str, Type[IResourceSyncer]] = {
+_SYNCER_CLASSES: dict[str, type[IResourceSyncer]] = {
     "keys": KeySyncer,
     "proxies": ProxySyncer,
 }
 
+
 # REFACTORED: The function signature is updated to accept dependencies.
-def get_all_syncers(accessor: ConfigAccessor, db_manager: DatabaseManager) -> List[IResourceSyncer]:
+def get_all_syncers(
+    accessor: ConfigAccessor, db_manager: DatabaseManager
+) -> list[IResourceSyncer]:
     """
     Factory function to create instances of all registered synchronizers.
 
@@ -37,7 +40,7 @@ def get_all_syncers(accessor: ConfigAccessor, db_manager: DatabaseManager) -> Li
     Returns:
         A list of initialized synchronizer instances.
     """
-    all_syncers: List[IResourceSyncer] = []
+    all_syncers: list[IResourceSyncer] = []
     for syncer_name, syncer_class in _SYNCER_CLASSES.items():
         try:
             # REFACTORED: Pass the required dependencies to the constructor.
@@ -47,6 +50,8 @@ def get_all_syncers(accessor: ConfigAccessor, db_manager: DatabaseManager) -> Li
             all_syncers.append(instance)
             logger.debug(f"Successfully initialized synchronizer: '{syncer_name}'")
         except Exception as e:
-            logger.error(f"Failed to initialize synchronizer '{syncer_name}': {e}", exc_info=True)
-            
+            logger.error(
+                f"Failed to initialize synchronizer '{syncer_name}': {e}", exc_info=True
+            )
+
     return all_syncers

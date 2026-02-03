@@ -7,6 +7,7 @@ import sys
 # This makes the function dependent on the safe interface, not the data structure.
 from src.core.accessor import ConfigAccessor
 
+
 def setup_logging(accessor: ConfigAccessor):
     """
     Configures the root logger for the entire application based on the global config.
@@ -22,7 +23,7 @@ def setup_logging(accessor: ConfigAccessor):
 
     # Define the format for log messages for consistency across the application.
     # Format includes timestamp, logger name, log level, and the message itself.
-    log_format = '%(name)s - [%(levelname)s] - %(message)s'
+    log_format = "%(name)s - [%(levelname)s] - %(message)s"
 
     # Get the root logger. All other loggers created with logging.getLogger(__name__)
     # will inherit this configuration.
@@ -46,8 +47,10 @@ def setup_logging(accessor: ConfigAccessor):
 
     # Reduce the log level for third-party libraries that can be very verbose.
     # This keeps the application's logs clean and focused.
-    logging.getLogger('apscheduler.executors.default').setLevel(logging.WARNING)
-    logging.getLogger('urllib3.connectionpool').setLevel(logging.INFO)
+    logging.getLogger("apscheduler.executors.default").setLevel(logging.WARNING)
+    logging.getLogger("urllib3.connectionpool").setLevel(logging.INFO)
 
     # A log message to confirm that logging has been successfully configured.
-    logging.getLogger(__name__).info(f"Logging configured successfully. Level set to {logging.getLevelName(log_level)}.")
+    logging.getLogger(__name__).info(
+        f"Logging configured successfully. Level set to {logging.getLevelName(log_level)}."
+    )

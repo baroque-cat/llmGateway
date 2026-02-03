@@ -11,10 +11,10 @@ def test_no_enabled_providers():
     config = Config()
     config.providers = {
         "disabled_provider1": ProviderConfig(enabled=False),
-        "disabled_provider2": ProviderConfig(enabled=False)
+        "disabled_provider2": ProviderConfig(enabled=False),
     }
-    
+
     accessor = ConfigAccessor(config)
     enabled_providers = accessor.get_enabled_providers()
-    
+
     assert len(enabled_providers) == 0

@@ -1,14 +1,12 @@
 # src/core/http_client_factory.py
 
-import logging
 import asyncio
-from typing import Dict
+import logging
 
 import httpx
 
 # REFACTORED: Import ConfigAccessor instead of the raw Config schema.
 from src.core.accessor import ConfigAccessor
-from src.config.schemas import ProviderConfig
 
 
 class HttpClientFactory:
@@ -33,15 +31,15 @@ class HttpClientFactory:
         """
         self.accessor: ConfigAccessor = accessor
         self.logger: logging.Logger = logging.getLogger(__name__)
-        
+
         # The cache to store long-lived client instances.
         # The key is a unique identifier for the client's configuration (e.g., proxy URL).
-        self._clients: Dict[str, httpx.AsyncClient] = {}
-        
+        self._clients: dict[str, httpx.AsyncClient] = {}
+
         # A dictionary to hold asyncio.Lock objects, one for each potential cache key.
         # This prevents race conditions where multiple coroutines try to create the
         # same client simultaneously.
-        self._locks: Dict[str, asyncio.Lock] = {}
+        self._locks: dict[str, asyncio.Lock] = {}
 
     def _get_cache_key_for_provider(self, provider_name: str) -> str:
         """
@@ -50,12 +48,12 @@ class HttpClientFactory:
         # REFACTORED: Use accessor to get proxy config
         proxy_config = self.accessor.get_proxy_config(provider_name)
         if not proxy_config:
-             raise ValueError(f"Proxy config not found for provider '{provider_name}'")
+            raise ValueError(f"Proxy config not found for provider '{provider_name}'")
 
-        if proxy_config.mode == 'none':
+        if proxy_config.mode == "none":
             # A constant key for all direct connections.
             return "__none__"
-        elif proxy_config.mode == 'static':
+        elif proxy_config.mode == "static":
             # The proxy URL itself is the unique key. This ensures providers
             # sharing the same static proxy also share the same client instance.
             if not proxy_config.static_url:
@@ -63,7 +61,9 @@ class HttpClientFactory:
             return proxy_config.static_url
         else:
             # Future-proofing for 'stealth' mode or other modes.
-            raise NotImplementedError(f"Proxy mode '{proxy_config.mode}' is not supported by the factory yet.")
+            raise NotImplementedError(
+                f"Proxy mode '{proxy_config.mode}' is not supported by the factory yet."
+            )
 
     async def get_client_for_provider(self, provider_name: str) -> httpx.AsyncClient:
         """
@@ -78,49 +78,56 @@ class HttpClientFactory:
 
         Returns:
             An httpx.AsyncClient instance ready for use.
-        
+
         Raises:
             KeyError: If the provider_name is not found in the configuration.
         """
         # Check existence first
         if not self.accessor.get_provider(provider_name):
-             raise KeyError(f"Provider '{provider_name}' not found")
+            raise KeyError(f"Provider '{provider_name}' not found")
 
         cache_key = self._get_cache_key_for_provider(provider_name)
 
         # First, check the cache for a quick return without locking.
         if cache_key in self._clients:
             return self._clients[cache_key]
-        
+
         # If not in cache, acquire a lock specific to this key to prevent race conditions.
         # setdefault is an atomic operation, ensuring only one lock is created per key.
         lock = self._locks.setdefault(cache_key, asyncio.Lock())
-        
+
         async with lock:
             # Double-check the cache. Another coroutine might have created the client
             # while this one was waiting for the lock.
             if cache_key in self._clients:
                 return self._clients[cache_key]
 
-            self.logger.info(f"Cache miss for key '{cache_key}'. Creating new HTTP/2 client...")
+            self.logger.info(
+                f"Cache miss for key '{cache_key}'. Creating new HTTP/2 client..."
+            )
 
             proxy_url = None
             # REFACTORED: Use accessor for proxy config
             proxy_config = self.accessor.get_proxy_config(provider_name)
-            if proxy_config and proxy_config.mode == 'static':
+            if proxy_config and proxy_config.mode == "static":
                 proxy_url = proxy_config.static_url
 
             try:
                 client = httpx.AsyncClient(
-                    http2=True,      # Enable HTTP/2 for better performance.
-                    proxy=proxy_url  # Set the proxy URL if one is required.
+                    http2=True,  # Enable HTTP/2 for better performance.
+                    proxy=proxy_url,  # Set the proxy URL if one is required.
                 )
-                
+
                 self._clients[cache_key] = client
-                self.logger.info(f"Successfully created and cached new client for key '{cache_key}'.")
+                self.logger.info(
+                    f"Successfully created and cached new client for key '{cache_key}'."
+                )
                 return client
             except Exception as e:
-                self.logger.critical(f"Failed to create httpx.AsyncClient for key '{cache_key}': {e}", exc_info=True)
+                self.logger.critical(
+                    f"Failed to create httpx.AsyncClient for key '{cache_key}': {e}",
+                    exc_info=True,
+                )
                 # Re-raise the exception so the caller knows something went wrong.
                 raise
 
@@ -136,12 +143,13 @@ class HttpClientFactory:
             return
 
         self.logger.info(f"Closing {len(self._clients)} cached HTTP client(s)...")
-        
+
         # Concurrently close all clients.
         closing_tasks = [client.aclose() for client in self._clients.values()]
         await asyncio.gather(*closing_tasks, return_exceptions=True)
-        
+
         self._clients.clear()
         self._locks.clear()
-        self.logger.info("All HTTP clients have been closed and cache has been cleared.")
-
+        self.logger.info(
+            "All HTTP clients have been closed and cache has been cleared."
+        )

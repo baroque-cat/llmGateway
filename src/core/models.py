@@ -8,8 +8,8 @@ These models represent the fundamental entities and data structures, ensuring
 type safety and clear contracts between different parts of the system.
 """
 
-from dataclasses import dataclass, field
-from typing import Any, Optional
+from dataclasses import dataclass
+from typing import Any
 
 from src.core.enums import ErrorReason
 
@@ -18,12 +18,13 @@ from src.core.enums import ErrorReason
 class RequestDetails:
     """
     A data transfer object (DTO) that holds essential details parsed from an incoming request.
-    
+
     This standardized, immutable structure is returned by a provider's `parse_request_details`
     method. It serves as a decoupling mechanism, allowing the gateway to perform
     actions like model authorization without needing to understand the provider-specific
     request format (e.g., model in URL path vs. model in JSON body).
     """
+
     model_name: str
 
 
@@ -42,7 +43,7 @@ class CheckResult:
     error_reason: ErrorReason = ErrorReason.UNKNOWN
     message: str = ""
     response_time: float = 0.0
-    status_code: Optional[int] = None
+    status_code: int | None = None
 
     @property
     def ok(self) -> bool:
@@ -50,13 +51,18 @@ class CheckResult:
         return self.available
 
     @classmethod
-    def success(cls, message: str = "Key is valid and operational.", response_time: float = 0.0, status_code: int = 200) -> "CheckResult":
+    def success(
+        cls,
+        message: str = "Key is valid and operational.",
+        response_time: float = 0.0,
+        status_code: int = 200,
+    ) -> "CheckResult":
         """
         Factory method to create a successful check result.
         """
         return cls(
             available=True,
-            error_reason=ErrorReason.UNKNOWN, # No error reason on success
+            error_reason=ErrorReason.UNKNOWN,  # No error reason on success
             message=message,
             response_time=response_time,
             status_code=status_code,
@@ -64,7 +70,11 @@ class CheckResult:
 
     @classmethod
     def fail(
-        cls, reason: ErrorReason, message: str = "", response_time: float = 0.0, status_code: Optional[int] = None
+        cls,
+        reason: ErrorReason,
+        message: str = "",
+        response_time: float = 0.0,
+        status_code: int | None = None,
     ) -> "CheckResult":
         """
         Factory method to create a failed check result.
@@ -90,4 +100,3 @@ class CheckResult:
             "response_time": self.response_time,
             "status_code": self.status_code,
         }
-

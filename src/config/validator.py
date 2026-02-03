@@ -1,21 +1,26 @@
 #!/usr/bin/env python3
 
 import logging
-from typing import List, Set
 
 # Import the full dataclass definitions for type checking.
-from src.config.schemas import Config, ProviderConfig, HealthPolicyConfig, ErrorParsingConfig
+from src.config.schemas import (
+    Config,
+    ErrorParsingConfig,
+    HealthPolicyConfig,
+    ProviderConfig,
+)
 
 # Import core enums for validation against a single source of truth.
 from src.core.enums import (
-    DebugMode,
-    StreamingMode,
-    ProxyMode,
     CircuitBreakerMode,
-    ErrorReason
+    DebugMode,
+    ErrorReason,
+    ProxyMode,
+    StreamingMode,
 )
 
 logger = logging.getLogger(__name__)
+
 
 class ConfigValidator:
     """
@@ -29,7 +34,7 @@ class ConfigValidator:
         Initializes the validator. It maintains a list of errors found during
         the validation process. This implements the "Error Accumulation" improvement.
         """
-        self.errors: List[str] = []
+        self.errors: list[str] = []
 
     def validate(self, config: Config):
         """
@@ -52,8 +57,10 @@ class ConfigValidator:
         if self.errors:
             # Combine all found errors into a single, user-friendly message.
             error_summary = "\n- ".join(self.errors)
-            raise ValueError(f"Configuration validation failed with {len(self.errors)} error(s):\n- {error_summary}")
-        
+            raise ValueError(
+                f"Configuration validation failed with {len(self.errors)} error(s):\n- {error_summary}"
+            )
+
         logger.info("Configuration passed all validation checks.")
 
     def _add_error(self, message: str):
@@ -66,10 +73,14 @@ class ConfigValidator:
         This corresponds to Step 2 of the plan.
         """
         if config.worker.max_concurrent_providers <= 0:
-            self._add_error("'worker.max_concurrent_providers' must be a positive integer.")
-        
+            self._add_error(
+                "'worker.max_concurrent_providers' must be a positive integer."
+            )
+
         if not config.database.password:
-            self._add_error("'database.password' is not set. It should be loaded from an environment variable.")
+            self._add_error(
+                "'database.password' is not set. It should be loaded from an environment variable."
+            )
 
     def _validate_providers_config(self, config: Config):
         """
@@ -80,15 +91,17 @@ class ConfigValidator:
             logger.warning("Configuration validation: No providers are defined.")
             return
 
-        used_tokens: Set[str] = set()
+        used_tokens: set[str] = set()
 
         for name, provider_conf in config.providers.items():
             if not provider_conf.enabled:
                 continue
-            
+
             self._validate_single_provider(name, provider_conf, used_tokens)
 
-    def _validate_single_provider(self, name: str, conf: ProviderConfig, used_tokens: Set[str]):
+    def _validate_single_provider(
+        self, name: str, conf: ProviderConfig, used_tokens: set[str]
+    ):
         """
         Performs detailed validation for a single, enabled provider instance.
         This provides context-aware error messages, an identified improvement.
@@ -102,9 +115,13 @@ class ConfigValidator:
         # --- Access Token Validation ---
         token = conf.access_control.gateway_access_token
         if not token:
-            self._add_error(f"Provider '{name}': 'access_control.gateway_access_token' must be set.")
+            self._add_error(
+                f"Provider '{name}': 'access_control.gateway_access_token' must be set."
+            )
         elif token in used_tokens:
-            self._add_error(f"Provider '{name}': Duplicate 'gateway_access_token' found. Each enabled provider must have a unique token.")
+            self._add_error(
+                f"Provider '{name}': Duplicate 'gateway_access_token' found. Each enabled provider must have a unique token."
+            )
         else:
             used_tokens.add(token)
 
@@ -120,28 +137,36 @@ class ConfigValidator:
         proxy_mode = conf.proxy_config.mode
         if proxy_mode not in ProxyMode._value2member_map_:
             valid_proxy_modes = list(ProxyMode._value2member_map_.keys())
-            self._add_error(f"Provider '{name}': Invalid proxy mode '{proxy_mode}'. Must be one of {valid_proxy_modes}.")
-        
-        if proxy_mode == 'static' and not conf.proxy_config.static_url:
-            self._add_error(f"Provider '{name}': Proxy mode is 'static' but 'static_url' is not set.")
-        
-        if proxy_mode == 'stealth' and not conf.proxy_config.pool_list_path:
-             self._add_error(f"Provider '{name}': Proxy mode is 'stealth' but 'pool_list_path' is not set.")
+            self._add_error(
+                f"Provider '{name}': Invalid proxy mode '{proxy_mode}'. Must be one of {valid_proxy_modes}."
+            )
+
+        if proxy_mode == "static" and not conf.proxy_config.static_url:
+            self._add_error(
+                f"Provider '{name}': Proxy mode is 'static' but 'static_url' is not set."
+            )
+
+        if proxy_mode == "stealth" and not conf.proxy_config.pool_list_path:
+            self._add_error(
+                f"Provider '{name}': Proxy mode is 'stealth' but 'pool_list_path' is not set."
+            )
 
         cb_conf = conf.gateway_policy.circuit_breaker
         if cb_conf.enabled:
             if cb_conf.mode not in CircuitBreakerMode._value2member_map_:
                 valid_cb_modes = list(CircuitBreakerMode._value2member_map_.keys())
-                self._add_error(f"Provider '{name}': Invalid circuit breaker mode '{cb_conf.mode}'. Must be one of {valid_cb_modes}.")
-        
+                self._add_error(
+                    f"Provider '{name}': Invalid circuit breaker mode '{cb_conf.mode}'. Must be one of {valid_cb_modes}."
+                )
+
         # --- NEW: Gateway Policy Validation ---
         # This call validates all strict-mode settings in the gateway policy.
         self._validate_gateway_policy(name, conf.gateway_policy)
-        
+
         # --- NEW: Health Policy Validation ---
         # This call integrates the new validation logic as planned.
         self._validate_health_policy(name, conf.worker_health_policy)
-        
+
         # --- NEW: Error Parsing Validation ---
         # Validate error parsing configuration if enabled
         self._validate_error_parsing(name, conf.gateway_policy.error_parsing)
@@ -175,12 +200,16 @@ class ConfigValidator:
         valid_error_reasons = set(ErrorReason._value2member_map_.keys())
         for status_code, error_reason_str in fast_mapping.items():
             # Validate status code is an integer in the HTTP range
-            if not isinstance(status_code, int) or status_code < 100 or status_code >= 600:
+            if (
+                not isinstance(status_code, int)
+                or status_code < 100
+                or status_code >= 600
+            ):
                 self._add_error(
                     f"Provider '{name}': In 'fast_status_mapping', key '{status_code}' "
                     f"is not a valid HTTP status code (100-599)."
                 )
-            
+
             # Validate the error reason string
             if error_reason_str not in valid_error_reasons:
                 self._add_error(
@@ -205,18 +234,18 @@ class ConfigValidator:
         # --- Positive Value Checks for Time Intervals ---
         # This ensures that all time-based settings are sensible.
         time_fields_to_check = {
-            'on_server_error_min': policy.on_server_error_min,
-            'on_overload_min': policy.on_overload_min,
-            'on_other_error_hr': policy.on_other_error_hr,
-            'on_success_hr': policy.on_success_hr,
-            'on_rate_limit_hr': policy.on_rate_limit_hr,
-            'on_no_quota_hr': policy.on_no_quota_hr,
-            'on_invalid_key_days': policy.on_invalid_key_days,
-            'on_no_access_days': policy.on_no_access_days,
-            'quarantine_after_days': policy.quarantine_after_days,
-            'quarantine_recheck_interval_days': policy.quarantine_recheck_interval_days,
-            'stop_checking_after_days': policy.stop_checking_after_days,
-            'verification_delay_sec': policy.verification_delay_sec,
+            "on_server_error_min": policy.on_server_error_min,
+            "on_overload_min": policy.on_overload_min,
+            "on_other_error_hr": policy.on_other_error_hr,
+            "on_success_hr": policy.on_success_hr,
+            "on_rate_limit_hr": policy.on_rate_limit_hr,
+            "on_no_quota_hr": policy.on_no_quota_hr,
+            "on_invalid_key_days": policy.on_invalid_key_days,
+            "on_no_access_days": policy.on_no_access_days,
+            "quarantine_after_days": policy.quarantine_after_days,
+            "quarantine_recheck_interval_days": policy.quarantine_recheck_interval_days,
+            "stop_checking_after_days": policy.stop_checking_after_days,
+            "verification_delay_sec": policy.verification_delay_sec,
         }
 
         for field_name, value in time_fields_to_check.items():
@@ -224,33 +253,45 @@ class ConfigValidator:
                 self._add_error(
                     f"Provider '{name}': Health policy field '{field_name}' must be a positive integer, but got {value}."
                 )
-        
+
         # --- Positive Value Checks for Batching ---
         if policy.batch_size <= 0:
-            self._add_error(f"Provider '{name}': Health policy field 'batch_size' must be a positive integer, but got {policy.batch_size}.")
+            self._add_error(
+                f"Provider '{name}': Health policy field 'batch_size' must be a positive integer, but got {policy.batch_size}."
+            )
 
         # Batch delay can be zero, so we check for negative values.
         if policy.batch_delay_sec < 0:
-             self._add_error(f"Provider '{name}': Health policy field 'batch_delay_sec' cannot be negative, but got {policy.batch_delay_sec}.")
+            self._add_error(
+                f"Provider '{name}': Health policy field 'batch_delay_sec' cannot be negative, but got {policy.batch_delay_sec}."
+            )
 
         # --- Verification Loop Configuration ---
         if policy.verification_attempts <= 0:
-            self._add_error(f"Provider '{name}': Health policy field 'verification_attempts' must be a positive integer, but got {policy.verification_attempts}.")
+            self._add_error(
+                f"Provider '{name}': Health policy field 'verification_attempts' must be a positive integer, but got {policy.verification_attempts}."
+            )
         if policy.verification_delay_sec < 60:
-            self._add_error(f"Provider '{name}': Health policy field 'verification_delay_sec' must be at least 60 seconds to survive minute-based rate limits, but got {policy.verification_delay_sec}.")
-        
+            self._add_error(
+                f"Provider '{name}': Health policy field 'verification_delay_sec' must be at least 60 seconds to survive minute-based rate limits, but got {policy.verification_delay_sec}."
+            )
+
         # --- Fast Status Mapping Validation ---
         # Validate fast_status_mapping values against ErrorReason enum
         fast_mapping = policy.fast_status_mapping
         valid_error_reasons = set(ErrorReason._value2member_map_.keys())
         for status_code, error_reason_str in fast_mapping.items():
             # Validate status code is an integer in the HTTP range
-            if not isinstance(status_code, int) or status_code < 100 or status_code >= 600:
+            if (
+                not isinstance(status_code, int)
+                or status_code < 100
+                or status_code >= 600
+            ):
                 self._add_error(
                     f"Provider '{name}': In 'worker_health_policy.fast_status_mapping', key '{status_code}' "
                     f"is not a valid HTTP status code (100-599)."
                 )
-            
+
             # Validate the error reason string
             if error_reason_str not in valid_error_reasons:
                 self._add_error(
@@ -262,16 +303,16 @@ class ConfigValidator:
     def _validate_error_parsing(self, name: str, config: ErrorParsingConfig):
         """
         Validates the error parsing configuration for a provider.
-        
+
         This ensures that error parsing rules are properly configured and
         map to valid ErrorReason values.
         """
         if not config.enabled:
             return
-        
+
         # Import ErrorReason here to avoid circular imports
         from src.core.enums import ErrorReason
-        
+
         # Validate each rule
         for i, rule in enumerate(config.rules):
             # Validate status code (should be 4xx or 5xx)
@@ -280,21 +321,21 @@ class ConfigValidator:
                     f"Provider '{name}': error_parsing.rules[{i}].status_code "
                     f"must be a 4xx or 5xx HTTP status code, got {rule.status_code}."
                 )
-            
+
             # Validate error_path is not empty
             if not rule.error_path or not isinstance(rule.error_path, str):
                 self._add_error(
                     f"Provider '{name}': error_parsing.rules[{i}].error_path "
                     f"must be a non-empty string, got '{rule.error_path}'."
                 )
-            
+
             # Validate match_pattern is not empty
             if not rule.match_pattern or not isinstance(rule.match_pattern, str):
                 self._add_error(
                     f"Provider '{name}': error_parsing.rules[{i}].match_pattern "
                     f"must be a non-empty string, got '{rule.match_pattern}'."
                 )
-            
+
             # Validate map_to is a valid ErrorReason value
             try:
                 ErrorReason(rule.map_to)
@@ -305,7 +346,7 @@ class ConfigValidator:
                     f"must be a valid ErrorReason value, got '{rule.map_to}'. "
                     f"Valid values: {valid_values}"
                 )
-            
+
             # Validate priority is non-negative
             if rule.priority < 0:
                 self._add_error(

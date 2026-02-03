@@ -10,6 +10,9 @@ The project uses **Poetry** for dependency management and **Python 3.13**.
 ```bash
 # Install dependencies
 poetry install
+
+# Install development dependencies (for linting, type checking, etc.)
+poetry install --with dev
 ```
 
 ### Running the Application
@@ -38,53 +41,38 @@ poetry run pytest tests/path/to/test_file.py::test_function_name
 poetry run pytest -v
 ```
 
-#### Error Parsing Testing
-The project includes comprehensive tests for error parsing functionality. These tests ensure that 400 errors with different meanings (e.g., Qwen's "Arrearage" errors vs format errors) are correctly classified.
+### Development Tools
+The project includes comprehensive development tooling for code quality:
 
-**Test Files:**
-- `tests/test_error_parsing_validation.py` - Configuration validation tests
-- `tests/test_error_parsing_base.py` - Base provider logic tests  
-- `tests/test_error_parsing_openai_like.py` - OpenAI-like provider integration tests
-- `tests/test_error_parsing_gemini.py` - Gemini provider integration tests
-- `tests/test_error_parsing_scenarios.py` - End-to-end scenario tests
-- `tests/test_error_parsing_edge_cases.py` - Edge case and performance tests
-
-**Running Error Parsing Tests:**
+#### Type Checking
 ```bash
-# Run all error parsing tests
-poetry run pytest tests/test_error_parsing*.py
-
-# Run specific test categories
-poetry run pytest tests/test_error_parsing_scenarios.py -v
+# Run mypy type checking
+poetry run mypy src/ --strict
 ```
 
-**Example Test Scenario:**
-```python
-# Testing Qwen "Arrearage" error mapping
-async def test_qwen_arrearage_scenario(self):
-    provider = create_mock_openai_provider(
-        error_config=ErrorParsingConfig(
-            enabled=True,
-            rules=[
-                ErrorParsingRule(
-                    status_code=400,
-                    error_path="error.type",
-                    match_pattern="Arrearage|BillingHardLimit",
-                    map_to="invalid_key",
-                    priority=10
-                )
-            ]
-        )
-    )
-    # Mock 400 response with Arrearage error
-    result = await provider._parse_proxy_error(mock_response)
-    assert result.error_reason == ErrorReason.INVALID_KEY
+#### Linting
+```bash
+# Run ruff linting
+poetry run ruff check src/ tests/
+
+# Auto-fix linting issues
+poetry run ruff check src/ tests/ --fix
 ```
 
-### Linting & Formatting
-Currently, the project does not enforce strict linter configuration in `pyproject.toml`. Agents should strive to match existing code style:
-- **Format**: Follow standard PEP 8 (4 spaces indent).
-- **Imports**: Sort imports (Standard lib -> Third party -> Local). Use absolute imports (e.g., `from src.core.models import ...`).
+#### Formatting
+```bash
+# Check formatting with black
+poetry run black --check src/ tests/
+
+# Auto-format code
+poetry run black src/ tests/
+```
+
+#### Code Coverage
+```bash
+# Run tests with coverage report
+poetry run pytest --cov=src --cov-report=term-missing
+```
 
 ## 2. Code Style Guidelines
 
@@ -98,21 +86,6 @@ Currently, the project does not enforce strict linter configuration in `pyprojec
 - Use `typing.Optional`, `typing.List`, `typing.Dict`, `typing.Any` (sparingly).
 - Use `dataclasses` for data structures.
 
-```python
-# GOOD
-from dataclasses import dataclass
-from typing import Optional
-
-@dataclass
-class UserConfig:
-    user_id: int
-    name: str
-    is_active: bool = True
-
-async def fetch_user(user_id: int) -> Optional[UserConfig]:
-    ...
-```
-
 ### Naming Conventions
 - **Variables/Functions**: `snake_case` (e.g., `fetch_data`, `user_id`)
 - **Classes**: `PascalCase` (e.g., `GatewayService`, `check_result`)
@@ -122,28 +95,11 @@ async def fetch_user(user_id: int) -> Optional[UserConfig]:
 ### Documentation
 - **Docstrings**: Required for all public modules, classes, and functions.
 - **Style**: Use a summary line, followed by a blank line, then a detailed description.
-- **Arguments**: Document complex arguments if not obvious from type hints.
-
-```python
-def parse_request(data: dict) -> RequestDetails:
-    """
-    Parses raw request data into a structured object.
-
-    This ensures the gateway can handle the request in a standardized way
-    regardless of the input format.
-    """
-    ...
-```
 
 ### Error Handling
 - **Typed Exceptions**: Use custom exceptions or specific standard exceptions. Avoid bare `except Exception:`.
 - **Enums**: Use `src.core.enums.ErrorReason` for standardized error reporting in `CheckResult`.
 - **Fail Gracefully**: The system is designed for high availability. One failure should not crash the worker.
-
-### Architecture Patterns
-- **Factory Pattern**: Used for creating providers and clients (e.g., `HttpClientFactory`).
-- **Facade**: `accessor.py` provides a clean interface to configuration.
-- **Dependency Injection**: Pass dependencies (like DB pools or Config objects) into services/providers rather than using global state.
 
 ## 3. Project Structure
 - `src/config`: Configuration logic (loader, schemas, validator).
@@ -205,16 +161,8 @@ providers:
 - **priority**: Higher priority rules win when multiple rules match (default: 0)
 - **description**: Optional human-readable description
 
-### Example Scenarios
-1. **Qwen "Arrearage" errors**: Map 400 with error.type="Arrearage" to INVALID_KEY
-2. **OpenAI quota errors**: Map 400 with error.code="insufficient_quota" to NO_QUOTA
-3. **Gemini authentication**: Map 400 with error.status="INVALID_ARGUMENT" to INVALID_KEY
-
 ### Priority System
 When multiple rules match, the highest priority rule determines the error mapping. This allows fine-grained control over error classification.
-
-### Default Behavior
-When error parsing is disabled (`enabled: false`) or no rules match, the system falls back to provider-specific HTTP status code mapping.
 
 ## 6. Git & Commit Protocol
 - **Atomic Commits**: Group related changes.
@@ -260,9 +208,26 @@ The project employs a robust, type-safe configuration system located in `src/con
      - Provides safe "getter" methods (e.g., `get_provider(name)`) that handle potential `None` values or lookups.
      - **Rule**: Application code should NEVER import `Config` directly; it should always use `ConfigAccessor`.
 
-### Configuration Flow
+## 9. Shared Key Optimization Implementation
 
-1. **Startup**: `main.py` initializes `ConfigLoader`.
-2. **Load**: `ConfigLoader.load()` reads YAML, resolves env vars, merges defaults, and creates the `Config` object.
-3. **Validate**: `ConfigValidator.validate(config)` checks the object. If valid, proceeds.
-4. **Access**: A `ConfigAccessor` is instantiated with the valid config and passed to services.
+### Completed Work Summary
+The shared key optimization refactoring has been successfully implemented using a "Virtual Model" pattern. Key achievements include:
+
+1. **Reduced Database Redundancy**: When `shared_key_status=True`, only one row per key is stored instead of one per model, significantly reducing database size.
+
+2. **Optimized Cache Usage**: Shared keys are stored in a single virtual pool (`provider:__ALL_MODELS__`) instead of being duplicated across all model pools.
+
+3. **Efficient Worker Checks**: The background worker only checks one model per key for shared providers, saving resources while maintaining proper health monitoring.
+
+4. **Backward Compatibility**: Normal (non-shared) keys continue to work exactly as before with no changes required.
+
+5. **Proper Error Handling**: Failed shared keys are correctly removed from the virtual pool and status updates target the correct `__ALL_MODELS__` marker.
+
+### Implementation Details
+- **Constants**: Added `ALL_MODELS_MARKER = "__ALL_MODELS__"` in `src/core/constants.py`
+- **Database Layer**: Updated `KeyRepository` methods to handle virtual model pattern
+- **Gateway Cache**: Modified cache logic to use virtual pools for shared keys
+- **Worker Probe**: Enhanced to resolve real models for API calls while using virtual markers for status updates
+- **Testing**: Added verification tests and confirmed all existing tests pass
+
+This optimization is particularly beneficial for providers with account-level rate limits or shared key status, where all models share the same key validity state.

@@ -1,11 +1,11 @@
 # src/services/statistics_logger.py
 
+import json
 import logging
 import logging.handlers
-import json
 import os
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 # REFACTORED: Import ConfigAccessor to replace the direct dependency on Config.
 from src.core.accessor import ConfigAccessor
@@ -13,6 +13,7 @@ from src.db.database import DatabaseManager
 
 # Get a logger for this module. The main application entry point will configure its output.
 module_logger = logging.getLogger(__name__)
+
 
 class StatisticsLogger:
     """
@@ -64,10 +65,10 @@ class StatisticsLogger:
                 filename=os.path.join(log_dir, f"{provider_name}.jsonl"),
                 maxBytes=log_config.summary_log_max_size_mb * 1024 * 1024,
                 backupCount=log_config.summary_log_backup_count,
-                encoding='utf-8'
+                encoding="utf-8",
             )
 
-            formatter = logging.Formatter('%(message)s')
+            formatter = logging.Formatter("%(message)s")
             handler.setFormatter(formatter)
 
             if l.hasHandlers():
@@ -75,7 +76,9 @@ class StatisticsLogger:
             l.addHandler(handler)
 
             self._loggers[logger_name] = l
-            module_logger.debug(f"Configured statistics logger for provider '{provider_name}'.")
+            module_logger.debug(
+                f"Configured statistics logger for provider '{provider_name}'."
+            )
 
     async def run_cycle(self):
         """
@@ -94,9 +97,9 @@ class StatisticsLogger:
             # 2. Group the data by provider for separate file logging.
             grouped_data = defaultdict(list)
             for record in summary_data:
-                grouped_data[record['provider']].append(record)
+                grouped_data[record["provider"]].append(record)
 
-            timestamp = datetime.now(timezone.utc).isoformat()
+            timestamp = datetime.now(UTC).isoformat()
 
             # 3. Iterate and log data for each provider.
             for provider_name, records in grouped_data.items():
@@ -112,23 +115,30 @@ class StatisticsLogger:
                     self._setup_loggers()
                     summary_logger = self._loggers.get(logger_name)
                     if not summary_logger:
-                         module_logger.error(f"Failed to setup logger for '{provider_name}'. Skipping.")
-                         continue
+                        module_logger.error(
+                            f"Failed to setup logger for '{provider_name}'. Skipping."
+                        )
+                        continue
 
                 for record in records:
                     log_entry = {
                         "timestamp": timestamp,
-                        "provider": record['provider'],
-                        "model": record['model'],
-                        "status": record['status'],
-                        "count": record['count']
+                        "provider": record["provider"],
+                        "model": record["model"],
+                        "status": record["status"],
+                        "count": record["count"],
                     }
                     # Log the JSON string. The handler will write it to the correct file.
                     summary_logger.info(json.dumps(log_entry))
-            
-            module_logger.info(f"Successfully logged statistics for {len(grouped_data)} providers.")
+
+            module_logger.info(
+                f"Successfully logged statistics for {len(grouped_data)} providers."
+            )
 
         except Exception:
-            module_logger.critical("A critical error occurred in the statistics logger cycle.", exc_info=True)
-        
+            module_logger.critical(
+                "A critical error occurred in the statistics logger cycle.",
+                exc_info=True,
+            )
+
         module_logger.info("Statistics summary cycle finished.")

@@ -1,5 +1,5 @@
-import pytest
 from src.core.enums import ErrorReason
+
 
 class TestErrorReasonLogic:
     """
@@ -18,7 +18,7 @@ class TestErrorReasonLogic:
             ErrorReason.OVERLOADED,
             ErrorReason.RATE_LIMITED,
         ]
-        
+
         for error in retryable:
             assert error.is_retryable() is True, f"{error} should be retryable"
 
@@ -33,7 +33,7 @@ class TestErrorReasonLogic:
             ErrorReason.NO_QUOTA,
             ErrorReason.NO_MODEL,
         ]
-        
+
         for error in fatal_non_retryable:
             assert error.is_retryable() is False, f"{error} should NOT be retryable"
 
@@ -54,7 +54,7 @@ class TestErrorReasonLogic:
             ErrorReason.NO_QUOTA,
             ErrorReason.NO_MODEL,
         ]
-        
+
         for error in fatal_errors:
             assert error.is_fatal() is True, f"{error} should be fatal"
 
@@ -69,6 +69,6 @@ class TestErrorReasonLogic:
             ErrorReason.BAD_REQUEST,
             ErrorReason.UNKNOWN,
         ]
-        
+
         for error in non_fatal_errors:
             assert error.is_fatal() is False, f"{error} should NOT be fatal"

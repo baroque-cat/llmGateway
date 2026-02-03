@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-import pytest
 from src.core.constants import ALL_MODELS_MARKER
 
 

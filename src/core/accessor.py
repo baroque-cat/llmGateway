@@ -1,6 +1,5 @@
 # src/core/accessor.py
 
-from typing import Dict, Optional
 
 # This import structure assumes that the application is run from the root
 # directory and 'src' is in the Python path, as configured in main.py.
@@ -12,15 +11,16 @@ from src.config.schemas import (
     LoggingConfig,
     ModelInfo,
     ProviderConfig,
-    WorkerConfig,
     ProxyConfig,
-    TimeoutConfig
+    TimeoutConfig,
+    WorkerConfig,
 )
+
 
 class ConfigAccessor:
     """
     Provides a safe and convenient interface for accessing configuration values.
-    
+
     This class acts as a "Facade" to the complex, nested Config object. It decouples
     the application's business logic from the specific structure of the configuration,
     making future refactoring of the config schemas much easier.
@@ -65,11 +65,11 @@ class ConfigAccessor:
     # --- Step 3: Provider-level Accessors ---
     # These methods manage access to the dictionary of provider instances.
 
-    def get_all_providers(self) -> Dict[str, ProviderConfig]:
+    def get_all_providers(self) -> dict[str, ProviderConfig]:
         """Returns a dictionary of all configured provider instances."""
         return self._config.providers
 
-    def get_enabled_providers(self) -> Dict[str, ProviderConfig]:
+    def get_enabled_providers(self) -> dict[str, ProviderConfig]:
         """
         Returns a dictionary of only the enabled provider instances.
         This is a key improvement for convenience, as most services will only
@@ -79,7 +79,7 @@ class ConfigAccessor:
             name: conf for name, conf in self._config.providers.items() if conf.enabled
         }
 
-    def get_provider(self, name: str) -> Optional[ProviderConfig]:
+    def get_provider(self, name: str) -> ProviderConfig | None:
         """
         Safely retrieves a provider's configuration by its instance name.
 
@@ -101,7 +101,7 @@ class ConfigAccessor:
 
         Returns:
             The ProviderConfig object.
-        
+
         Raises:
             KeyError: If no provider with the given name is found.
         """
@@ -113,23 +113,23 @@ class ConfigAccessor:
     # These methods provide convenient access to specific, often nested,
     # configuration values for a given provider. This is the core value of the accessor.
 
-    def get_gateway_token_for_provider(self, name: str) -> Optional[str]:
+    def get_gateway_token_for_provider(self, name: str) -> str | None:
         """
         Retrieves the gateway access token for a specific provider instance.
-        
+
         Args:
             name: The name of the provider instance.
-            
+
         Returns:
             The token string, or None if the provider does not exist.
         """
         provider = self.get_provider(name)
         return provider.access_control.gateway_access_token if provider else None
 
-    def get_health_policy(self, name: str) -> Optional[HealthPolicyConfig]:
+    def get_health_policy(self, name: str) -> HealthPolicyConfig | None:
         """
         Retrieves the health check policy for a specific provider instance.
-        
+
         NOTE: This maps to 'worker_health_policy' in the configuration schema.
         The method name is kept as 'get_health_policy' to maintain the facade interface
         for existing consumers (like the background worker).
@@ -143,7 +143,7 @@ class ConfigAccessor:
         provider = self.get_provider(name)
         return provider.worker_health_policy if provider else None
 
-    def get_proxy_config(self, name: str) -> Optional[ProxyConfig]:
+    def get_proxy_config(self, name: str) -> ProxyConfig | None:
         """
         Retrieves the proxy configuration for a specific provider instance.
 
@@ -156,7 +156,7 @@ class ConfigAccessor:
         provider = self.get_provider(name)
         return provider.proxy_config if provider else None
 
-    def get_timeout_config(self, name: str) -> Optional[TimeoutConfig]:
+    def get_timeout_config(self, name: str) -> TimeoutConfig | None:
         """
         Retrieves the timeout configuration for a specific provider instance.
 
@@ -169,7 +169,7 @@ class ConfigAccessor:
         provider = self.get_provider(name)
         return provider.timeouts if provider else None
 
-    def get_model_info(self, provider_name: str, model_name: str) -> Optional[ModelInfo]:
+    def get_model_info(self, provider_name: str, model_name: str) -> ModelInfo | None:
         """
         Retrieves the detailed configuration for a specific model of a provider.
 
@@ -185,7 +185,7 @@ class ConfigAccessor:
             return provider.models.get(model_name)
         return None
 
-    def get_default_model_info(self, provider_name: str) -> Optional[ModelInfo]:
+    def get_default_model_info(self, provider_name: str) -> ModelInfo | None:
         """
         Retrieves the configuration for the provider's designated default model.
         This method encapsulates logic, as planned, making it a valuable improvement.

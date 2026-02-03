@@ -6,9 +6,10 @@ These tests ensure that the ConfigValidator correctly rejects invalid enum value
 in the configuration, such as 'diabled' for debug_mode.
 """
 
-import os
-import pytest
 from unittest.mock import mock_open, patch
+
+import pytest
+
 from src.config.loader import ConfigLoader
 from src.config.validator import ConfigValidator
 
@@ -32,18 +33,20 @@ def test_invalid_debug_mode_should_fail_validation():
 """
 
     # Mock the file reading in ConfigLoader
-    with patch("os.path.exists", return_value=True), \
-         patch("builtins.open", mock_open(read_data=mock_yaml_content)):
+    with (
+        patch("os.path.exists", return_value=True),
+        patch("builtins.open", mock_open(read_data=mock_yaml_content)),
+    ):
         loader = ConfigLoader(path="dummy_path.yaml")
         config = loader.load()
 
     # Now validate the loaded config
     validator = ConfigValidator()
-    
+
     # The validation should fail with a specific error message
     with pytest.raises(ValueError) as exc_info:
         validator.validate(config)
-    
+
     error_message = str(exc_info.value)
     assert "Invalid debug mode 'diabled'" in error_message
     assert "'disabled'" in error_message  # Should suggest the correct value
@@ -65,16 +68,18 @@ def test_invalid_streaming_mode_should_fail_validation():
       streaming_mode: "full_stream"  # Invalid value
 """
 
-    with patch("os.path.exists", return_value=True), \
-         patch("builtins.open", mock_open(read_data=mock_yaml_content)):
+    with (
+        patch("os.path.exists", return_value=True),
+        patch("builtins.open", mock_open(read_data=mock_yaml_content)),
+    ):
         loader = ConfigLoader(path="dummy_path.yaml")
         config = loader.load()
 
     validator = ConfigValidator()
-    
+
     with pytest.raises(ValueError) as exc_info:
         validator.validate(config)
-    
+
     error_message = str(exc_info.value)
     assert "Invalid streaming mode 'full_stream'" in error_message
 
@@ -96,16 +101,18 @@ def test_invalid_fast_mapping_value_should_fail():
         400: "invalid_typo_reason"  # This ErrorReason doesn't exist
 """
 
-    with patch("os.path.exists", return_value=True), \
-         patch("builtins.open", mock_open(read_data=mock_yaml_content)):
+    with (
+        patch("os.path.exists", return_value=True),
+        patch("builtins.open", mock_open(read_data=mock_yaml_content)),
+    ):
         loader = ConfigLoader(path="dummy_path.yaml")
         config = loader.load()
 
     validator = ConfigValidator()
-    
+
     with pytest.raises(ValueError) as exc_info:
         validator.validate(config)
-    
+
     error_message = str(exc_info.value)
     assert "is not a valid ErrorReason" in error_message
     assert "invalid_typo_reason" in error_message
@@ -130,12 +137,14 @@ def test_valid_config_should_pass_validation():
         400: "bad_request"
 """
 
-    with patch("os.path.exists", return_value=True), \
-         patch("builtins.open", mock_open(read_data=mock_yaml_content)):
+    with (
+        patch("os.path.exists", return_value=True),
+        patch("builtins.open", mock_open(read_data=mock_yaml_content)),
+    ):
         loader = ConfigLoader(path="dummy_path.yaml")
         config = loader.load()
 
     validator = ConfigValidator()
-    
+
     # This should not raise any exception
     validator.validate(config)

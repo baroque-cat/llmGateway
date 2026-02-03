@@ -1,27 +1,29 @@
 # src/config/loader.py
 
+import logging
 import os
 import re
-import logging
-from typing import Any, Dict, Type, TypeVar, get_type_hints, get_origin, get_args
-from dataclasses import is_dataclass, fields
+from dataclasses import fields, is_dataclass
+from typing import Any, TypeVar, get_args, get_origin, get_type_hints
 
-from ruamel.yaml import YAML
-from dotenv import load_dotenv
 from deepmerge import always_merger
+from dotenv import load_dotenv
+from ruamel.yaml import YAML
+
+from src.config.defaults import get_default_config
 
 # Import schemas and default templates
-from src.config.schemas import Config, ProviderConfig
-from src.config.defaults import get_default_config
+from src.config.schemas import Config
 
 logger = logging.getLogger(__name__)
 
 # This is a generic TypeVar used for our recursive dataclass conversion.
 # It allows for type hinting that returns the same type as the input class.
-T = TypeVar('T')
+T = TypeVar("T")
 
 # Regex to find environment variable placeholders like ${VAR_NAME}
 ENV_VAR_PATTERN = re.compile(r"^\$\{(?P<name>[A-Z0-9_]+)\}$")
+
 
 class ConfigLoader:
     """
@@ -47,13 +49,15 @@ class ConfigLoader:
         """
         # Step 1: Read and prepare raw data (Plan Step 3.1)
         if not os.path.exists(self.config_path):
-            raise FileNotFoundError(f"Configuration file not found at '{self.config_path}'.")
+            raise FileNotFoundError(
+                f"Configuration file not found at '{self.config_path}'."
+            )
 
         # Load environment variables from a .env file if it exists.
         if load_dotenv():
             logger.info("Loaded environment variables from .env file.")
 
-        with open(self.config_path, 'r', encoding='utf-8') as f:
+        with open(self.config_path, encoding="utf-8") as f:
             user_config_raw = self.yaml.load(f) or {}
 
         # Step 2: Resolve environment variables (Plan Step 3.2)
@@ -66,11 +70,13 @@ class ConfigLoader:
         try:
             app_config = self._dict_to_dataclass(Config, final_config_dict)
         except (TypeError, ValueError) as e:
-            logger.error(f"Failed to parse configuration into dataclasses. Check for type mismatches in your YAML. Error: {e}")
+            logger.error(
+                f"Failed to parse configuration into dataclasses. Check for type mismatches in your YAML. Error: {e}"
+            )
             raise TypeError(f"Configuration parsing error: {e}") from e
 
         logger.info("Configuration loaded and parsed successfully.")
-        
+
         # Step 6: Return the result, ready for the validator (Plan Step 3.6)
         return app_config
 
@@ -82,7 +88,7 @@ class ConfigLoader:
         """
         if isinstance(config_value, dict):
             return {k: self._resolve_env_vars(v) for k, v in config_value.items()}
-        
+
         if isinstance(config_value, list):
             return [self._resolve_env_vars(item) for item in config_value]
 
@@ -96,10 +102,10 @@ class ConfigLoader:
                         f"Configuration error: Environment variable '{var_name}' is not set, but is required by the config."
                     )
                 return var_value
-        
+
         return config_value
 
-    def _build_and_merge_config(self, user_config: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_and_merge_config(self, user_config: dict[str, Any]) -> dict[str, Any]:
         """
         Constructs the full configuration dictionary by merging user-defined values
         on top of layered defaults and templates. This is the core logic.
@@ -110,31 +116,35 @@ class ConfigLoader:
         # Merge user's global settings over the base defaults.
         # This uses the 'always_merger' from the deepmerge library, as planned.
         final_config = always_merger.merge(base_config, user_config)
-        
+
         # Now, handle the providers section with special template-based logic.
         final_providers = {}
-        user_providers = user_config.get('providers', {})
+        user_providers = user_config.get("providers", {})
 
         for name, user_provider_conf in user_providers.items():
             # This check handles a potential error we identified: missing provider_type.
-            provider_type = user_provider_conf.get('provider_type')
+            provider_type = user_provider_conf.get("provider_type")
             if not provider_type:
-                raise ValueError(f"Provider '{name}' must have a 'provider_type' defined in the configuration.")
+                raise ValueError(
+                    f"Provider '{name}' must have a 'provider_type' defined in the configuration."
+                )
 
             # 1. Start with the generic provider template from defaults.py
-            provider_base = get_default_config()['providers']['llm_provider_default']
-            
+            provider_base = get_default_config()["providers"]["llm_provider_default"]
+
             # 2. Merge the user's specific configuration for this instance.
             # Since we have removed automatic template injection (provider_templates.py),
             # the user config must contain all necessary fields (api_base_url, models, etc.).
-            final_provider_instance = always_merger.merge(provider_base, user_provider_conf)
-            
+            final_provider_instance = always_merger.merge(
+                provider_base, user_provider_conf
+            )
+
             final_providers[name] = final_provider_instance
-            
-        final_config['providers'] = final_providers
+
+        final_config["providers"] = final_providers
         return final_config
 
-    def _dict_to_dataclass(self, dclass: Type[T], data: Dict[str, Any]) -> T:
+    def _dict_to_dataclass(self, dclass: type[T], data: dict[str, Any]) -> T:
         """
         Recursively converts a dictionary to a dataclass instance.
         This is the "Improvement" identified in the planning phase, removing the need for
@@ -150,9 +160,9 @@ class ConfigLoader:
             if f.name in data:
                 field_value = data[f.name]
                 field_type = type_hints[f.name]
-                
+
                 origin_type = get_origin(field_type)
-                
+
                 if origin_type is dict:
                     # Handle nested dictionaries of dataclasses, e.g., Dict[str, ModelInfo]
                     item_type = get_args(field_type)[1]
@@ -165,10 +175,11 @@ class ConfigLoader:
                         field_data[f.name] = field_value
                 elif is_dataclass(field_type):
                     # Handle nested single dataclasses, e.g., HealthPolicyConfig
-                    field_data[f.name] = self._dict_to_dataclass(field_type, field_value)
+                    field_data[f.name] = self._dict_to_dataclass(
+                        field_type, field_value
+                    )
                 else:
                     # Handle primitive types
                     field_data[f.name] = field_value
-        
-        return dclass(**field_data)
 
+        return dclass(**field_data)

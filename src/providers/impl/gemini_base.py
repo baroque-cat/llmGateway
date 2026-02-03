@@ -1,9 +1,8 @@
 # src/providers/impl/gemini_base.py
 
-import re
 import logging
+import re
 from abc import abstractmethod
-from typing import Dict, List, Optional, Tuple
 
 import httpx
 
@@ -29,7 +28,7 @@ class GeminiBaseProvider(AIBaseProvider):
 
     # --- Methods with Concrete Implementations (Shared Logic) ---
 
-    def _get_headers(self, token: str) -> Optional[Dict[str, str]]:
+    def _get_headers(self, token: str) -> dict[str, str] | None:
         """
         Constructs headers for Gemini API, which uses the 'x-goog-api-key' header.
         This is common across all Google GenAI services.
@@ -42,7 +41,9 @@ class GeminiBaseProvider(AIBaseProvider):
         }
 
     # --- Implementation of the error parsing contract from AIBaseProvider ---
-    async def _parse_proxy_error(self, response: httpx.Response, content: Optional[bytes] = None) -> CheckResult:
+    async def _parse_proxy_error(
+        self, response: httpx.Response, content: bytes | None = None
+    ) -> CheckResult:
         """
         Parses a failed Gemini API response into a standardized CheckResult.
 
@@ -53,17 +54,17 @@ class GeminiBaseProvider(AIBaseProvider):
         Now enhanced with error parsing rules from configuration.
         """
         status_code = response.status_code
-        
+
         # 1. Use pre-read content if available
         response_bytes = content
         response_text = ""
-        
+
         if response_bytes:
             response_text = response_bytes.decode(errors="ignore")
             # If content was read, .elapsed is safe to access (response is closed or read)
             # However, in the Zero-Overhead path (content=None), response is closed but not read.
             # httpx 0.23+ allows elapsed access after close.
-            
+
         # 2. Access .elapsed (safe after .read() or .close() in base provider)
         try:
             response_time = response.elapsed.total_seconds()
@@ -72,21 +73,23 @@ class GeminiBaseProvider(AIBaseProvider):
 
         # 3. Get default reason using the centralized mapping logic.
         default_reason = self._map_error_to_reason(status_code, response_text)
-        
+
         # 4. Refine reason using error parsing rules (if configured AND content is available)
         refined_reason = default_reason
         if response_bytes:
             refined_reason = await self._refine_error_reason(
                 response=response,
                 default_reason=default_reason,
-                body_bytes=response_bytes
+                body_bytes=response_bytes,
             )
 
-        return CheckResult.fail(refined_reason, response_text, response_time, status_code)
+        return CheckResult.fail(
+            refined_reason, response_text, response_time, status_code
+        )
 
     async def inspect(
         self, client: httpx.AsyncClient, token: str, **kwargs
-    ) -> List[str]:
+    ) -> list[str]:
         """
         Inspects and returns a list of available models from the configuration.
         This logic is generic and reads keys from the multimodal 'models' dictionary.
@@ -162,18 +165,20 @@ class GeminiBaseProvider(AIBaseProvider):
         This method contains the shared logic for making requests and handling
         errors, while delegating the creation of the specific URL and payload
         to the concrete subclass via `_build_check_request_args`.
-        
+
         Args:
             client: The httpx.AsyncClient to use for the request.
             token: The API token to validate.
             **kwargs: Additional keyword arguments. Expected to contain 'model' key.
-            
+
         Returns:
             A CheckResult indicating the success or failure of the check.
         """
-        model = kwargs.get('model')
+        model = kwargs.get("model")
         if not model:
-            return CheckResult.fail(ErrorReason.BAD_REQUEST, "Missing 'model' parameter in check method.")
+            return CheckResult.fail(
+                ErrorReason.BAD_REQUEST, "Missing 'model' parameter in check method."
+            )
         logger.debug(
             f"Checking Gemini key ending '...{token[-4:]}' for model '{model}'."
         )
@@ -228,21 +233,23 @@ class GeminiBaseProvider(AIBaseProvider):
         except httpx.HTTPStatusError as e:
             response = e.response
             status_code = response.status_code
-            
+
             # NEW: Check for fast fail condition before any other processing
             fast_fail_result = await self._check_fast_fail(response)
             if fast_fail_result:
                 return fast_fail_result
-            
+
             # Special handling for worker: 400 errors in check() likely indicate invalid key
             # since the request format is predetermined and correct
             if status_code == 400:
                 reason = ErrorReason.INVALID_KEY
-                logger.debug(f"Worker check received 400 error, treating as {reason.value} for key validation")
+                logger.debug(
+                    f"Worker check received 400 error, treating as {reason.value} for key validation"
+                )
             else:
                 # Use the centralized error mapping method.
                 reason = self._map_error_to_reason(status_code, response.text)
-            
+
             return CheckResult.fail(
                 reason=reason,
                 message=response.text,
@@ -255,7 +262,7 @@ class GeminiBaseProvider(AIBaseProvider):
     # --- Abstract Methods (Contracts for Subclasses) ---
 
     @abstractmethod
-    def _build_check_request_args(self, model: str) -> Dict:
+    def _build_check_request_args(self, model: str) -> dict:
         """
         (Abstract) Constructs the API URL and payload for a health check.
         Must be implemented by concrete subclasses.
@@ -271,11 +278,11 @@ class GeminiBaseProvider(AIBaseProvider):
         client: httpx.AsyncClient,
         token: str,
         method: str,
-        headers: Dict,
+        headers: dict,
         path: str,
         query_params: str,
         content: bytes,
-    ) -> Tuple[httpx.Response, CheckResult]:
+    ) -> tuple[httpx.Response, CheckResult]:
         """
         (Abstract) Proxies an incoming client request to the target API provider.
         Must be implemented by concrete subclasses.

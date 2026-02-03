@@ -26,7 +26,7 @@ class ErrorReason(Enum):
     SERVER_ERROR = "server_error"
     SERVICE_UNAVAILABLE = "service_unavailable"
     OVERLOADED = "overloaded"
-    
+
     # Client-Side & Authentication Errors
     BAD_REQUEST = "bad_request"
     INVALID_KEY = "invalid_key"
@@ -37,12 +37,11 @@ class ErrorReason(Enum):
     NO_QUOTA = "no_quota"
     NO_MODEL = "no_model"
 
-
     def is_retryable(self) -> bool:
         """
         Check if an error reason suggests that the operation could succeed on a subsequent attempt.
         This is crucial for deciding whether to re-test a key after a failure.
-        
+
         Returns:
             bool: True if the error is transient and worth retrying, False otherwise.
         """
@@ -61,7 +60,7 @@ class ErrorReason(Enum):
         Check if the error is fatal for the specific API key being used.
         These errors indicate that the key itself is invalid, revoked, has no access,
         or has run out of quota/credits.
-        
+
         Returns:
             bool: True if the error implies the key should be marked invalid/unusable.
         """
@@ -91,15 +90,16 @@ class ErrorReason(Enum):
 class Status(str, Enum):
     """
     Represents all possible states for a resource's status in the database.
-    
+
     This enum is the single source of truth for the `status` column in tables
     like `key_model_status`. By inheriting from `str`, its members can be used
     directly in database queries without needing to call `.value`.
     """
+
     # Non-error statuses
     VALID = "valid"
     UNTESTED = "untested"
-    
+
     # Statuses corresponding to error reasons
     UNKNOWN = "unknown"
     NETWORK_ERROR = "network_error"
@@ -117,11 +117,13 @@ class Status(str, Enum):
 
 # --- New Enums for Configuration Validation ---
 
+
 @unique
 class DebugMode(Enum):
     """
     Defines the allowed debug logging modes for a provider instance.
     """
+
     DISABLED = "disabled"
     HEADERS_ONLY = "headers_only"
     FULL_BODY = "full_body"
@@ -132,6 +134,7 @@ class StreamingMode(Enum):
     """
     Defines the allowed streaming modes for a provider instance.
     """
+
     AUTO = "auto"
     DISABLED = "disabled"
 
@@ -141,6 +144,7 @@ class ProxyMode(Enum):
     """
     Defines the allowed proxy modes for a provider instance.
     """
+
     NONE = "none"
     STATIC = "static"
     STEALTH = "stealth"
@@ -151,5 +155,6 @@ class CircuitBreakerMode(Enum):
     """
     Defines the allowed circuit breaker modes for a provider instance.
     """
+
     AUTO_RECOVERY = "auto_recovery"
     MANUAL_RESET = "manual_reset"
