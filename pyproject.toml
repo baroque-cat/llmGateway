@@ -46,11 +46,9 @@ select = ["E", "F", "W", "I", "B", "C4", "SIM", "TID", "UP", "YTT"]
 ignore = [
     "E501", # line too long (handled by black)
 ]
-
 # Allow autofix for all enabled rules
 fixable = ["ALL"]
 unfixable = []
-
 # Exclude a variety of commonly ignored directories
 exclude = [
     ".git",
@@ -61,23 +59,18 @@ exclude = [
     "dist",
     "*.egg-info",
 ]
-
 # Set the maximum line length
 line-length = 88
-
 # Set the target Python version
 target-version = "py313"
 
 [tool.ruff.format]
 # Like Black, use double quotes for strings.
 quote-style = "double"
-
 # Like Black, indent with spaces, rather than tabs.
 indent-style = "space"
-
 # Like Black, respect magic trailing commas.
 skip-magic-trailing-comma = false
-
 # Like Black, automatically detect the appropriate line ending.
 line-ending = "auto"
 
@@ -86,14 +79,17 @@ line-ending = "auto"
 known-first-party = ["src"]
 
 [tool.mypy]
+# Specify the Python version in MAJOR.MINOR format
 python_version = "3.13"
 strict = true
 ignore_missing_imports = false
 
+# Per-module options:
+# Combined overrides for modules that lack type stubs.
+# The 'dotted_module_name.*' pattern matches the module and any submodules.
 [[tool.mypy.overrides]]
-module = "asyncpg.*"
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-module = "apscheduler.*"
+module = [
+    "asyncpg.*",
+    "apscheduler.*"
+]
 ignore_missing_imports = true
