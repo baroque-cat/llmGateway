@@ -209,7 +209,7 @@ class KeyProbe(IResourceProbe):
         status_str = "valid" if result.ok else result.error_reason.value
 
         if model_name == ALL_MODELS_MARKER:
-            log_model_name = "all models (shared key)"
+            log_model_name = f"{provider_name} (shared key)"
         else:
             log_model_name = model_name
 

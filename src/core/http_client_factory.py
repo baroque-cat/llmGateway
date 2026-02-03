@@ -102,13 +102,24 @@ class HttpClientFactory:
             if cache_key in self._clients:
                 return self._clients[cache_key]
 
+            # Create descriptive connection info for logging
+            proxy_config = self.accessor.get_proxy_config(provider_name)
+            if proxy_config and proxy_config.mode == "none":
+                connection_desc = f"provider '{provider_name}' (direct connection)"
+            elif proxy_config and proxy_config.mode == "static":
+                static_url = proxy_config.static_url or "unknown"
+                connection_desc = f"provider '{provider_name}' (proxy: {static_url})"
+            elif proxy_config:
+                connection_desc = f"provider '{provider_name}' (proxy mode: {proxy_config.mode})"
+            else:
+                connection_desc = f"provider '{provider_name}' (proxy config not found)"
+
             self.logger.info(
-                f"Cache miss for key '{cache_key}'. Creating new HTTP/2 client..."
+                f"Cache miss for {connection_desc}. Creating new HTTP/2 client..."
             )
 
             proxy_url = None
             # REFACTORED: Use accessor for proxy config
-            proxy_config = self.accessor.get_proxy_config(provider_name)
             if proxy_config and proxy_config.mode == "static":
                 proxy_url = proxy_config.static_url
 
@@ -120,7 +131,7 @@ class HttpClientFactory:
 
                 self._clients[cache_key] = client
                 self.logger.info(
-                    f"Successfully created and cached new client for key '{cache_key}'."
+                    f"Successfully created and cached new client for {connection_desc}."
                 )
                 return client
             except Exception as e:
