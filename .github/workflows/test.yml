@@ -25,6 +25,10 @@ jobs:
         run: |
           pip install poetry
 
+      - name: Update poetry lock
+        run: |
+          poetry lock
+
       - name: Install dependencies
         run: |
           poetry install
@@ -53,4 +57,3 @@ jobs:
           flags: unittests
           name: codecov-umbrella
           fail_ci_if_error: false
-
