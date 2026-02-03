@@ -530,27 +530,10 @@ class KeyRepository:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(query)
 
-        # Expand shared keys to all models for caching
-        expanded_rows = []
-        for row in rows:
-            provider_name = row["provider_name"]
-            model_name = row["model_name"]
-            provider_config = self.accessor.get_provider(provider_name)
-
-            if (
-                provider_config
-                and provider_config.shared_key_status
-                and model_name == ALL_MODELS_MARKER
-            ):
-                # For shared keys, we need to create an entry for each model
-                for model in provider_config.models.keys():
-                    expanded_row = dict(row)
-                    expanded_row["model_name"] = model
-                    expanded_rows.append(expanded_row)
-            else:
-                expanded_rows.append(dict(row))
-
-        return expanded_rows
+        # Return the raw rows from the database.
+        # The GatewayCache is now smart enough to handle the __ALL_MODELS__ marker
+        # for providers with shared_key_status=True.
+        return [dict(row) for row in rows]
 
 
 class ProxyRepository:

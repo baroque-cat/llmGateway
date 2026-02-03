@@ -208,8 +208,13 @@ class KeyProbe(IResourceProbe):
 
         status_str = "valid" if result.ok else result.error_reason.value
 
+        if model_name == ALL_MODELS_MARKER:
+            log_model_name = "all models (shared key)"
+        else:
+            log_model_name = model_name
+
         logger.info(
-            f"Updating status for key ID {key_id}, model '{model_name}': "
+            f"Updating status for key ID {key_id} ({log_model_name}): "
             f"Status -> [{status_str}], "
             f"Next check -> {next_check_time.strftime('%Y-%m-%d %H:%M:%S')}"
         )
