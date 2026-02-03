@@ -11,6 +11,7 @@ from asyncpg.pool import Pool
 from src.core.accessor import ConfigAccessor
 from src.core.models import CheckResult
 from src.core.enums import Status
+from src.core.constants import ALL_MODELS_MARKER
 
 # --- Module-level setup ---
 logger = logging.getLogger(__name__)
@@ -173,6 +174,10 @@ class KeyRepository:
         This method is a core part of the two-phase synchronization cycle.
         It adds/removes keys and adds/removes key-model status records to match the desired state.
         """
+        # Get provider config to check shared_key_status
+        provider_config = self.accessor.get_provider(provider_name)
+        is_shared_key = provider_config and provider_config.shared_key_status
+        
         async with self._pool.acquire() as conn:
             async with conn.transaction():
                 # Step 1: Sync the `api_keys` table.
@@ -203,7 +208,11 @@ class KeyRepository:
                     return
 
                 # Calculate the desired state of (key_id, model_name) pairs.
-                desired_model_state = {(key_id, model) for key_id in current_key_ids_in_db for model in provider_models}
+                if is_shared_key:
+                    # For shared keys, use ALL_MODELS_MARKER instead of individual models
+                    desired_model_state = {(key_id, ALL_MODELS_MARKER) for key_id in current_key_ids_in_db}
+                else:
+                    desired_model_state = {(key_id, model) for key_id in current_key_ids_in_db for model in provider_models}
 
                 # Get the current state from the DB.
                 rows = await conn.fetch("SELECT key_id, model_name FROM key_model_status WHERE key_id = ANY($1::int[])", list(current_key_ids_in_db))
@@ -290,7 +299,9 @@ class KeyRepository:
                 if key_id in checked_keys_for_shared_providers:
                     continue
                 
-                if row['model_name'] == provider_conf.default_model:
+                # For shared keys, we should only have entries with ALL_MODELS_MARKER
+                # But we need to resolve to a real model for the actual API call
+                if row['model_name'] == ALL_MODELS_MARKER:
                     results.append(dict(row))
                     checked_keys_for_shared_providers.add(key_id)
             else:
@@ -307,6 +318,7 @@ class KeyRepository:
         assert status_str in Status, f"Attempted to write invalid status '{status_str}' to the database!"
 
         provider_config = self.accessor.get_provider(provider_name)
+        actual_model_name = model_name
         
         async with self._pool.acquire() as conn:
             async with conn.transaction():
@@ -332,12 +344,12 @@ class KeyRepository:
                 ]
 
                 if provider_config and provider_config.shared_key_status:
-                    where_clause = "key_id = $7"
-                    params.append(key_id)
+                    where_clause = "key_id = $7 AND model_name = $8"
+                    params.extend([key_id, ALL_MODELS_MARKER])
                     await conn.execute(base_query.format(where_clause=where_clause), *params)
                 else:
                     where_clause = "key_id = $7 AND model_name = $8"
-                    params.extend([key_id, model_name])
+                    params.extend([key_id, actual_model_name])
                     await conn.execute(base_query.format(where_clause=where_clause), *params)
 
     async def get_available_key(self, provider_name: str, model_name: str) -> Optional[Dict[str, Any]]:
@@ -345,6 +357,12 @@ class KeyRepository:
         Retrieves a random available key for a given provider and model using
         the efficient COUNT + OFFSET method.
         """
+        # Check if provider has shared_key_status enabled
+        provider_config = self.accessor.get_provider(provider_name)
+        actual_model_name = model_name
+        if provider_config and provider_config.shared_key_status:
+            actual_model_name = ALL_MODELS_MARKER
+
         async with self._pool.acquire() as conn:
             # Step 1: Get the total count of valid keys.
             count_query = """
@@ -354,7 +372,7 @@ class KeyRepository:
                 JOIN providers AS p ON k.provider_id = p.id
                 WHERE p.name = $1 AND s.model_name = $2 AND s.status = 'valid'
             """
-            total_valid_keys = await conn.fetchval(count_query, provider_name, model_name)
+            total_valid_keys = await conn.fetchval(count_query, provider_name, actual_model_name)
 
             # Step 2: Handle the edge case of no available keys.
             if not total_valid_keys or total_valid_keys == 0:
@@ -375,7 +393,7 @@ class KeyRepository:
                 OFFSET $3
                 LIMIT 1
             """
-            row = await conn.fetchrow(get_key_query, provider_name, model_name, random_offset)
+            row = await conn.fetchrow(get_key_query, provider_name, actual_model_name, random_offset)
             
         return dict(row) if row else None
 
@@ -417,7 +435,24 @@ class KeyRepository:
         """
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(query)
-        return [dict(row) for row in rows]
+        
+        # Expand shared keys to all models for caching
+        expanded_rows = []
+        for row in rows:
+            provider_name = row['provider_name']
+            model_name = row['model_name']
+            provider_config = self.accessor.get_provider(provider_name)
+            
+            if provider_config and provider_config.shared_key_status and model_name == ALL_MODELS_MARKER:
+                # For shared keys, we need to create an entry for each model
+                for model in provider_config.models.keys():
+                    expanded_row = dict(row)
+                    expanded_row['model_name'] = model
+                    expanded_rows.append(expanded_row)
+            else:
+                expanded_rows.append(dict(row))
+        
+        return expanded_rows
 
 class ProxyRepository:
     """Manages data access for proxy-related tables."""

@@ -7,6 +7,7 @@ from typing import Dict, Optional, Deque, Tuple
 
 from src.core.accessor import ConfigAccessor
 from src.db.database import DatabaseManager
+from src.core.constants import ALL_MODELS_MARKER
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +134,15 @@ class GatewayCache:
         Returns:
             A tuple of (key_id, key_value) if a key is available, otherwise None.
         """
-        pool_key = f"{provider_name}:{model_name}"
+        # Check if provider has shared_key_status enabled
+        provider_config = self.accessor.get_provider(provider_name)
+        actual_model_name = model_name
+        
+        if provider_config and provider_config.shared_key_status:
+            # For shared keys, look in the virtual model pool
+            pool_key = f"{provider_name}:{ALL_MODELS_MARKER}"
+        else:
+            pool_key = f"{provider_name}:{model_name}"
         
         key_queue = self._key_pool.get(pool_key)
         
@@ -157,7 +166,7 @@ class GatewayCache:
         Immediately removes a specific key from the live key pool cache.
         
         If the provider has 'shared_key_status' enabled, this method will
-        remove the key from ALL model pools associated with that provider.
+        remove the key from the virtual model pool (ALL_MODELS_MARKER).
         Otherwise, it removes the key only from the specific model's pool.
         This is a write operation and is protected by a lock.
         
@@ -171,18 +180,12 @@ class GatewayCache:
             
             # --- NEW: Logic to decide removal strategy ---
             if provider_config and provider_config.shared_key_status:
-                # Broadcast removal: remove the key from all pools for this provider.
+                # Remove the key only from the virtual model pool
                 logger.info(
-                    f"Broadcasting removal of shared key_id {key_id} for all models of provider '{provider_name}'."
+                    f"Removing shared key_id {key_id} from virtual pool '{provider_name}:{ALL_MODELS_MARKER}' for provider '{provider_name}'."
                 )
-                # Find all pool keys that belong to this provider instance.
-                pools_to_update = [
-                    pool_key for pool_key in self._key_pool 
-                    if pool_key.startswith(f"{provider_name}:")
-                ]
-                
-                for pool_key in pools_to_update:
-                    self._remove_from_single_pool(pool_key, key_id)
+                pool_key = f"{provider_name}:{ALL_MODELS_MARKER}"
+                self._remove_from_single_pool(pool_key, key_id)
             else:
                 # Granular removal: remove the key only from the specific pool.
                 pool_key = f"{provider_name}:{model_name}"

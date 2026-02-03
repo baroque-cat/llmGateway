@@ -12,6 +12,7 @@ from src.core.models import CheckResult
 from src.core.enums import ErrorReason
 from src.config.schemas import HealthPolicyConfig
 from src.providers import get_provider
+from src.core.constants import ALL_MODELS_MARKER
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,21 @@ class KeyProbe(IResourceProbe):
         model_name = resource['model_name']
         key_id = resource['key_id']
 
-        logger.debug(f'Checking key (ID: {key_id}) for provider "{provider_name}", model "{model_name}".')
+        # Resolve actual model name for API call if using shared keys
+        actual_model_name = model_name
+        if model_name == ALL_MODELS_MARKER:
+            # Get provider config to resolve a real model name
+            provider_config = self.accessor.get_provider_or_raise(provider_name)
+            # Use default_model or first available model from config
+            if provider_config.default_model:
+                actual_model_name = provider_config.default_model
+            elif provider_config.models:
+                actual_model_name = next(iter(provider_config.models.keys()))
+            else:
+                logger.error(f'Cannot resolve model for shared key check: no default_model or models configured for provider "{provider_name}"')
+                return CheckResult.fail(ErrorReason.BAD_REQUEST, "No model available for shared key check")
+
+        logger.debug(f'Checking key (ID: {key_id}) for provider "{provider_name}", model "{actual_model_name}" (requested: "{model_name}").')
 
         try:
             # Use the accessor to get provider config. A missing config is a critical error.
@@ -62,7 +77,7 @@ class KeyProbe(IResourceProbe):
             result = await provider_instance.check(
                 client=client,
                 token=key_value,
-                model=model_name,
+                model=actual_model_name,
             )
             
             # 1. Fast Fail: if the error is fatal, return immediately (no verification)
@@ -89,7 +104,7 @@ class KeyProbe(IResourceProbe):
                     retry_result = await provider_instance.check(
                         client=client,
                         token=key_value,
-                        model=model_name,
+                        model=actual_model_name,
                     )
                     if retry_result.ok:
                         logger.info(f'Key ID {key_id} recovered after {attempt + 1} verification attempt(s).')
@@ -177,7 +192,7 @@ class KeyProbe(IResourceProbe):
 
         await self.db_manager.keys.update_status(
             key_id=key_id,
-            model_name=model_name,
+            model_name=model_name,  # Use original model_name (could be ALL_MODELS_MARKER)
             provider_name=provider_name,
             result=result,
             next_check_time=next_check_time
