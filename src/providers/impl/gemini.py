@@ -1,6 +1,7 @@
 # src/providers/impl/gemini.py
 
 import logging
+from typing import Any
 
 import httpx
 
@@ -19,7 +20,7 @@ class GeminiProvider(GeminiBaseProvider):
     for text/image generation, driven by the new multimodal configuration.
     """
 
-    def _build_check_request_args(self, model: str) -> dict:
+    def _build_check_request_args(self, model: str) -> dict[str, Any]:
         """
         Constructs the API URL and payload for a health check using config values.
         This implementation is specific to text and image models.
@@ -45,7 +46,7 @@ class GeminiProvider(GeminiBaseProvider):
         client: httpx.AsyncClient,
         token: str,
         method: str,
-        headers: dict,
+        headers: dict[str, str],
         path: str,
         query_params: str,
         content: bytes,
