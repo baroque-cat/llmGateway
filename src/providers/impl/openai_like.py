@@ -2,6 +2,7 @@
 
 import json
 import logging
+from typing import Any
 
 import httpx
 
@@ -138,7 +139,7 @@ class OpenAILikeProvider(AIBaseProvider):
         return ErrorReason.UNKNOWN
 
     async def check(
-        self, client: httpx.AsyncClient, token: str, **kwargs
+        self, client: httpx.AsyncClient, token: str, **kwargs: Any
     ) -> CheckResult:
         """
         Checks the validity of an API token by making an async, lightweight test request.
@@ -199,8 +200,10 @@ class OpenAILikeProvider(AIBaseProvider):
             )
 
         except httpx.TimeoutException:
+            # Use 0.0 as response time for timeouts since timeout.read can be None
+            response_time = timeout.read if timeout.read is not None else 0.0
             return CheckResult.fail(
-                ErrorReason.TIMEOUT, "Request timed out", timeout.read, 408
+                ErrorReason.TIMEOUT, "Request timed out", response_time, 408
             )
         except httpx.ProxyError as e:
             return CheckResult.fail(
@@ -239,7 +242,7 @@ class OpenAILikeProvider(AIBaseProvider):
             return CheckResult.fail(ErrorReason.NETWORK_ERROR, str(e), status_code=503)
 
     async def inspect(
-        self, client: httpx.AsyncClient, token: str, **kwargs
+        self, client: httpx.AsyncClient, token: str, **kwargs: Any
     ) -> list[str]:
         """
         Inspects and returns a list of available models from the configuration.
@@ -256,7 +259,7 @@ class OpenAILikeProvider(AIBaseProvider):
         client: httpx.AsyncClient,
         token: str,
         method: str,
-        headers: dict,
+        headers: dict[str, str],
         path: str,
         query_params: str,
         content: bytes,

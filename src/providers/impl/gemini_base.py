@@ -3,6 +3,7 @@
 import logging
 import re
 from abc import abstractmethod
+from typing import Any
 
 import httpx
 
@@ -88,7 +89,7 @@ class GeminiBaseProvider(AIBaseProvider):
         )
 
     async def inspect(
-        self, client: httpx.AsyncClient, token: str, **kwargs
+        self, client: httpx.AsyncClient, token: str, **kwargs: Any
     ) -> list[str]:
         """
         Inspects and returns a list of available models from the configuration.
@@ -157,7 +158,7 @@ class GeminiBaseProvider(AIBaseProvider):
         return ErrorReason.UNKNOWN
 
     async def check(
-        self, client: httpx.AsyncClient, token: str, **kwargs
+        self, client: httpx.AsyncClient, token: str, **kwargs: Any
     ) -> CheckResult:
         """
         Template Method for checking the validity of a Gemini API token.
@@ -219,8 +220,10 @@ class GeminiBaseProvider(AIBaseProvider):
             )
 
         except httpx.TimeoutException:
+            # Use 0.0 as response time for timeouts since timeout.read can be None
+            response_time = timeout.read if timeout.read is not None else 0.0
             return CheckResult.fail(
-                ErrorReason.TIMEOUT, "Request timed out", timeout.read, 504
+                ErrorReason.TIMEOUT, "Request timed out", response_time, 504
             )
         except httpx.ProxyError as e:
             return CheckResult.fail(
@@ -262,7 +265,7 @@ class GeminiBaseProvider(AIBaseProvider):
     # --- Abstract Methods (Contracts for Subclasses) ---
 
     @abstractmethod
-    def _build_check_request_args(self, model: str) -> dict:
+    def _build_check_request_args(self, model: str) -> dict[str, Any]:
         """
         (Abstract) Constructs the API URL and payload for a health check.
         Must be implemented by concrete subclasses.
@@ -278,7 +281,7 @@ class GeminiBaseProvider(AIBaseProvider):
         client: httpx.AsyncClient,
         token: str,
         method: str,
-        headers: dict,
+        headers: dict[str, str],
         path: str,
         query_params: str,
         content: bytes,
