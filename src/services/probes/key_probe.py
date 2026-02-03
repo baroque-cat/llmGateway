@@ -160,7 +160,7 @@ class KeyProbe(IResourceProbe):
 
     async def _update_resource_status(
         self, resource: dict[str, Any], result: CheckResult
-    ):
+    ) -> None:
         """
         Updates the key's status in the database, calculating the next check time
         using the new state-aware logic.

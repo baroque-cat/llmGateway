@@ -41,7 +41,7 @@ class AIBaseProvider(IProvider):
         self.name = provider_name
         self.config = config
 
-    def _prepare_proxy_headers(self, token: str, incoming_headers: dict) -> dict:
+    def _prepare_proxy_headers(self, token: str, incoming_headers: dict[str, str]) -> dict[str, str]:
         """
         Prepares headers for the outbound proxy request from a dictionary.
 
@@ -352,7 +352,7 @@ class AIBaseProvider(IProvider):
 
     @abstractmethod
     async def check(
-        self, client: httpx.AsyncClient, token: str, **kwargs
+        self, client: httpx.AsyncClient, token: str, **kwargs: Any
     ) -> CheckResult:
         """
         (Abstract) Checks if an API token is valid for this provider. (Async)
@@ -361,7 +361,7 @@ class AIBaseProvider(IProvider):
 
     @abstractmethod
     async def inspect(
-        self, client: httpx.AsyncClient, token: str, **kwargs
+        self, client: httpx.AsyncClient, token: str, **kwargs: Any
     ) -> list[str]:
         """
         (Abstract) Inspects the capabilities associated with a token. (Async)
@@ -374,7 +374,7 @@ class AIBaseProvider(IProvider):
         client: httpx.AsyncClient,
         token: str,
         method: str,
-        headers: dict,
+        headers: dict[str, str],
         path: str,
         query_params: str,
         content: bytes,

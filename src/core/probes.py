@@ -70,10 +70,14 @@ class IResourceProbe(ABC):
 
             grouped_resources = defaultdict(list)
             for resource in resources_to_check:
-                grouped_resources[resource.get("provider_name")].append(resource)
+                p_name = resource.get("provider_name")
+                if isinstance(p_name, str):
+                    grouped_resources[p_name].append(resource)
 
             tasks = [
-                self._process_provider_batch(provider_name, resources)
+                asyncio.create_task(
+                    self._process_provider_batch(provider_name, resources)
+                )
                 for provider_name, resources in grouped_resources.items()
             ]
 
@@ -106,7 +110,9 @@ class IResourceProbe(ABC):
         This coroutine is executed concurrently for different providers.
         """
         # Set the task name for better logging in case of an exception in gather
-        asyncio.current_task().set_name(provider_name)
+        current_task = asyncio.current_task()
+        if current_task:
+            current_task.set_name(provider_name)
 
         async with self.semaphore:
             # REFACTORED: Use the accessor to get the provider policy directly.
