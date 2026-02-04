@@ -34,11 +34,10 @@ build-backend = "poetry.core.masonry.api"
 
 [dependency-groups]
 dev = [
-    "mypy (>=1.19.1,<2.0.0)",
     "ruff (>=0.15.0,<0.16.0)",
     "black (>=26.1.0,<27.0.0)",
     "pytest-cov (>=7.0.0,<8.0.0)",
-    "asyncpg-stubs (>=0.31.1,<0.32.0)"
+    "pyright (>=1.1.408,<2.0.0)"
 ]
 
 [tool.ruff]
@@ -78,19 +77,3 @@ line-ending = "auto"
 [tool.ruff.lint.isort]
 # Group imports by type
 known-first-party = ["src"]
-
-[tool.mypy]
-# Specify the Python version in MAJOR.MINOR format
-python_version = "3.13"
-strict = true
-ignore_missing_imports = false
-
-# Per-module options:
-# Combined overrides for modules that lack type stubs.
-# The 'dotted_module_name.*' pattern matches the module and any submodules.
-[[tool.mypy.overrides]]
-module = [
-    "asyncpg.*",
-    "apscheduler.*"
-]
-ignore_missing_imports = true

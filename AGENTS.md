@@ -46,8 +46,8 @@ The project includes comprehensive development tooling for code quality:
 
 #### Type Checking
 ```bash
-# Run mypy type checking
-poetry run mypy src/ --strict
+# Run pyright type checking
+poetry run pyright
 ```
 
 #### Linting

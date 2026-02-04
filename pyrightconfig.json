@@ -1,0 +1,25 @@
+{
+  "include": ["src", "tests", "main.py"],
+  "exclude": [
+    "**/node_modules",
+    "**/__pycache__",
+    ".git",
+    ".venv",
+    "venv",
+    "build",
+    "dist",
+    "*.egg-info"
+  ],
+  "pythonVersion": "3.13",
+  "typeCheckingMode": "strict",
+  "reportMissingTypeStubs": false,
+  "reportUnknownMemberType": true,
+  "reportUnknownVariableType": true,
+  "reportUnknownArgumentType": true,
+  "reportUnknownLambdaType": true,
+  "reportUnknownParameterType": true,
+  "reportMissingTypeArgument": true,
+  "reportInvalidTypeVarUse": true,
+  "reportCallInDefaultInitializer": true,
+  "reportUnnecessaryTypeIgnoreComment": true
+}

@@ -33,9 +33,9 @@ jobs:
         run: |
           poetry install
 
-      - name: Run mypy type checking
+      - name: Run pyright type checking
         run: |
-          poetry run mypy src/ --strict
+          poetry run pyright
 
       - name: Run ruff linting
         run: |
