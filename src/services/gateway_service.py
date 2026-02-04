@@ -4,6 +4,7 @@ import asyncio
 import logging
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from fastapi import FastAPI, Header, Request, Response
 from fastapi.responses import JSONResponse, Response, StreamingResponse
@@ -24,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 # This will hold the application's state and dependencies.
 # It is populated during the FastAPI startup event.
-app_state: dict = {
+app_state: dict[str, Any] = {
     "accessor": None,
     "db_manager": None,
     "http_client_factory": None,
@@ -71,7 +72,7 @@ def _get_token_from_headers(
     return x_goog_api_key
 
 
-async def _cache_refresh_loop(cache: GatewayCache, interval_sec: int):
+async def _cache_refresh_loop(cache: GatewayCache, interval_sec: int) -> None:
     """
     An infinite loop that periodically refreshes the key pool cache.
     """
@@ -95,7 +96,7 @@ async def _report_key_failure(
     provider_name: str,
     model_name: str,
     result: CheckResult,
-):
+) -> None:
     """
     A fire-and-forget background task to report a key failure to the database.
     This implements the "fast feedback loop".
@@ -125,12 +126,12 @@ async def _log_debug_info(
     instance_name: str,
     request_method: str,
     request_path: str,
-    request_headers: dict,
+    request_headers: dict[str, str],
     request_body: bytes,
     response_status: int,
-    response_headers: dict,
+    response_headers: dict[str, str],
     response_body: bytes,
-):
+) -> None:
     """
     Logs debug information based on the debug mode setting.
 
@@ -702,7 +703,7 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
     app = FastAPI(title="llmGateway - API Gateway Service")
 
     @app.on_event("startup")
-    async def startup_event():
+    async def startup_event() -> None:
         """
         Application startup logic: initialize DB, HTTP clients, caches, and background tasks.
         """
@@ -797,7 +798,7 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
             raise
 
     @app.on_event("shutdown")
-    async def shutdown_event():
+    async def shutdown_event() -> None:
         """
         Application shutdown logic: gracefully close all resources.
         """
@@ -811,7 +812,7 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
 
     # --- The Core Catch-All Endpoint (Dispatcher) ---
     @app.api_route("/{full_path:path}", methods=["GET", "POST", "PUT", "DELETE"])
-    async def catch_all_endpoint(request: Request):
+    async def catch_all_endpoint(request: Request) -> Response:
         """
         This endpoint acts as a lean dispatcher. It authenticates the request
         and routes it to the correct specialized handler based on pre-calculated logic.
