@@ -27,3 +27,7 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+
+#opencode
+.opencode
+add-context*
