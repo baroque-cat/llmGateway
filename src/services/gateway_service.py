@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 # Import core application components
 from src.core.accessor import ConfigAccessor
-from src.core.enums import ErrorReason  # Added explicitly for error type checking
+from src.core.constants import ErrorReason  # Added explicitly for error type checking
 from src.core.http_client_factory import HttpClientFactory
 from src.core.interfaces import IProvider
 from src.core.models import CheckResult

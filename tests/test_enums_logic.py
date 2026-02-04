@@ -1,4 +1,4 @@
-from src.core.enums import ErrorReason
+from src.core.constants import ErrorReason
 
 
 class TestErrorReasonLogic:

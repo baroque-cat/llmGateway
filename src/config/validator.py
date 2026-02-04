@@ -12,7 +12,7 @@ from src.config.schemas import (
 )
 
 # Import core enums for validation against a single source of truth.
-from src.core.enums import (
+from src.core.constants import (
     CircuitBreakerMode,
     DebugMode,
     ErrorReason,
@@ -312,7 +312,7 @@ class ConfigValidator:
             return
 
         # Import ErrorReason here to avoid circular imports
-        from src.core.enums import ErrorReason
+        from src.core.constants import ErrorReason
 
         # Validate each rule
         for i, rule in enumerate(config.rules):

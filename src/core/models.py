@@ -11,7 +11,7 @@ type safety and clear contracts between different parts of the system.
 from dataclasses import dataclass
 from typing import Any
 
-from src.core.enums import ErrorReason
+from src.core.constants import ErrorReason
 
 
 @dataclass(frozen=True)

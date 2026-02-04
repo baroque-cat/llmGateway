@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import Request, Response
 
-from src.core.enums import ErrorReason
+from src.core.constants import ErrorReason
 from src.core.models import CheckResult
 from src.services.gateway_service import _handle_buffered_retryable_request
 

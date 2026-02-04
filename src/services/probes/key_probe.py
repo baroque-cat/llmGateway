@@ -10,7 +10,7 @@ from typing import Any
 
 from src.config.schemas import HealthPolicyConfig
 from src.core.constants import ALL_MODELS_MARKER
-from src.core.enums import ErrorReason
+from src.core.constants import ErrorReason
 from src.core.models import CheckResult
 from src.core.probes import IResourceProbe
 from src.providers import get_provider

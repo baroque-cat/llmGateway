@@ -10,7 +10,7 @@ from asyncpg.pool import Pool
 
 from src.core.accessor import ConfigAccessor
 from src.core.constants import ALL_MODELS_MARKER
-from src.core.enums import Status
+from src.core.constants import Status
 from src.core.models import CheckResult
 
 # --- Module-level setup ---
@@ -162,7 +162,7 @@ class ProviderRepository:
                     # Delete obsolete providers. CASCADE will automatically remove
                     # all associated api_keys and key_model_status records.
                     placeholders = ", ".join(
-                        f"${i+1}" for i in range(len(obsolete_providers))
+                        f"${i + 1}" for i in range(len(obsolete_providers))
                     )
                     query = f"DELETE FROM providers WHERE name IN ({placeholders})"
                     await conn.execute(query, *list(obsolete_providers))
@@ -393,9 +393,9 @@ class KeyRepository:
         """
         status_str = Status.VALID if result.ok else result.error_reason.value
 
-        assert (
-            status_str in Status
-        ), f"Attempted to write invalid status '{status_str}' to the database!"
+        assert status_str in Status, (
+            f"Attempted to write invalid status '{status_str}' to the database!"
+        )
 
         provider_config = self.accessor.get_provider(provider_name)
         actual_model_name = model_name

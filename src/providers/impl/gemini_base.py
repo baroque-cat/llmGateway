@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 
-from src.core.enums import ErrorReason
+from src.core.constants import ErrorReason
 from src.core.models import CheckResult, RequestDetails
 from src.providers.base import AIBaseProvider
 

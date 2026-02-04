@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from src.config.schemas import HealthPolicyConfig
-from src.core.enums import ErrorReason
+from src.core.constants import ErrorReason
 from src.core.models import CheckResult
 from src.services.probes.key_probe import KeyProbe
 

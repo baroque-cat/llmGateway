@@ -9,7 +9,7 @@ from typing import Any
 import httpx
 
 from src.config.schemas import ProviderConfig
-from src.core.enums import ErrorReason
+from src.core.constants import ErrorReason
 from src.core.interfaces import IProvider
 
 # --- Import the required data models ---
@@ -41,7 +41,9 @@ class AIBaseProvider(IProvider):
         self.name = provider_name
         self.config = config
 
-    def _prepare_proxy_headers(self, token: str, incoming_headers: dict[str, str]) -> dict[str, str]:
+    def _prepare_proxy_headers(
+        self, token: str, incoming_headers: dict[str, str]
+    ) -> dict[str, str]:
         """
         Prepares headers for the outbound proxy request from a dictionary.
 

@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.config.schemas import HealthPolicyConfig, ProviderConfig
-from src.core.enums import ErrorReason
+from src.core.constants import ErrorReason
 from src.core.models import CheckResult
 from src.services.probes.key_probe import KeyProbe
 

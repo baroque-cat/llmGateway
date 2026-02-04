@@ -9,7 +9,7 @@ from src.config.schemas import (
     GatewayPolicyConfig,
     ProviderConfig,
 )
-from src.core.enums import ErrorReason
+from src.core.constants import ErrorReason
 from src.core.models import CheckResult
 from src.providers.base import AIBaseProvider
 

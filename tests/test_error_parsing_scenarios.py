@@ -20,7 +20,7 @@ from src.config.schemas import (
     GatewayPolicyConfig,
     ProviderConfig,
 )
-from src.core.enums import ErrorReason
+from src.core.constants import ErrorReason
 from src.core.models import CheckResult
 from src.providers.impl.gemini import GeminiProvider
 from src.providers.impl.openai_like import OpenAILikeProvider

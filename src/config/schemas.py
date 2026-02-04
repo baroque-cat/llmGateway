@@ -233,11 +233,11 @@ class GatewayPolicyConfig:
     """Groups all policies applied by the API Gateway during live request processing."""
 
     # Controls whether streaming is enabled for this provider instance.
-    # See src.core.enums.StreamingMode for allowed values.
+    # See src.core.constants.StreamingMode for allowed values.
     streaming_mode: Literal["auto", "disabled"] = "auto"
 
     # Controls the debug logging mode for this provider instance.
-    # See src.core.enums.DebugMode for allowed values.
+    # See src.core.constants.DebugMode for allowed values.
     debug_mode: Literal["disabled", "headers_only", "full_body"] = "disabled"
 
     # Configuration for parsing error responses to refine error classification

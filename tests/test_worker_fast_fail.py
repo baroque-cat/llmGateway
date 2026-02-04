@@ -12,7 +12,7 @@ import httpx
 import pytest
 
 from src.config.schemas import HealthPolicyConfig, ProviderConfig
-from src.core.enums import ErrorReason
+from src.core.constants import ErrorReason
 from src.providers.impl.openai_like import OpenAILikeProvider
 
 

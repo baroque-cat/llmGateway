@@ -98,7 +98,7 @@ poetry run pytest --cov=src --cov-report=term-missing
 
 ### Error Handling
 - **Typed Exceptions**: Use custom exceptions or specific standard exceptions. Avoid bare `except Exception:`.
-- **Enums**: Use `src.core.enums.ErrorReason` for standardized error reporting in `CheckResult`.
+- **Enums**: Use `src.core.constants.ErrorReason` for standardized error reporting in `CheckResult`.
 - **Fail Gracefully**: The system is designed for high availability. One failure should not crash the worker.
 
 ## 3. Project Structure
@@ -157,7 +157,7 @@ providers:
 - **status_code**: HTTP status code to match (e.g., 400, 429)
 - **error_path**: Dot-separated JSON path to extract error details (e.g., "error.type", "error.code")
 - **match_pattern**: Regex pattern to match against the extracted value
-- **map_to**: ErrorReason enum value (see `src.core.enums.ErrorReason`)
+- **map_to**: ErrorReason enum value (see `src.core.constants.ErrorReason`)
 - **priority**: Higher priority rules win when multiple rules match (default: 0)
 - **description**: Optional human-readable description
 

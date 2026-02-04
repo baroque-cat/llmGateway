@@ -10,7 +10,7 @@ configurations are rejected with appropriate error messages.
 
 from src.config.schemas import ErrorParsingConfig, ErrorParsingRule
 from src.config.validator import ConfigValidator
-from src.core.enums import ErrorReason
+from src.core.constants import ErrorReason
 
 
 class TestErrorParsingValidation:

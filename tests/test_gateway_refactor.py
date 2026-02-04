@@ -6,7 +6,7 @@ from fastapi import Request
 from starlette.responses import StreamingResponse
 
 from src.config.schemas import ProviderConfig, RetryOnErrorConfig
-from src.core.enums import ErrorReason
+from src.core.constants import ErrorReason
 from src.core.models import CheckResult
 
 
