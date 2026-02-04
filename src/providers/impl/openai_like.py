@@ -112,7 +112,7 @@ class OpenAILikeProvider(AIBaseProvider):
         """
         Constructs the necessary authentication headers for OpenAI-like API requests.
         """
-        if not token or not isinstance(token, str):
+        if not token:
             return None
         return {
             "Authorization": f"Bearer {token}",

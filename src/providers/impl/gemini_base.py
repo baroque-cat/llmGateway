@@ -34,7 +34,7 @@ class GeminiBaseProvider(AIBaseProvider):
         Constructs headers for Gemini API, which uses the 'x-goog-api-key' header.
         This is common across all Google GenAI services.
         """
-        if not token or not isinstance(token, str):
+        if not token:
             return None
         return {
             "x-goog-api-key": token,

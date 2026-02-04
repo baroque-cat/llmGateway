@@ -200,12 +200,8 @@ class ConfigValidator:
         fast_mapping = policy.fast_status_mapping
         valid_error_reasons = set(ErrorReason._value2member_map_.keys())
         for status_code, error_reason_str in fast_mapping.items():
-            # Validate status code is an integer in the HTTP range
-            if (
-                not isinstance(status_code, int)
-                or status_code < 100
-                or status_code >= 600
-            ):
+            # Validate status code is in the HTTP range (already guaranteed to be int by type system)
+            if status_code < 100 or status_code >= 600:
                 self._add_error(
                     f"Provider '{name}': In 'fast_status_mapping', key '{status_code}' "
                     f"is not a valid HTTP status code (100-599)."
@@ -282,12 +278,8 @@ class ConfigValidator:
         fast_mapping = policy.fast_status_mapping
         valid_error_reasons = set(ErrorReason._value2member_map_.keys())
         for status_code, error_reason_str in fast_mapping.items():
-            # Validate status code is an integer in the HTTP range
-            if (
-                not isinstance(status_code, int)
-                or status_code < 100
-                or status_code >= 600
-            ):
+            # Validate status code is in the HTTP range (already guaranteed to be int by type system)
+            if status_code < 100 or status_code >= 600:
                 self._add_error(
                     f"Provider '{name}': In 'worker_health_policy.fast_status_mapping', key '{status_code}' "
                     f"is not a valid HTTP status code (100-599)."
@@ -323,15 +315,15 @@ class ConfigValidator:
                     f"must be a 4xx or 5xx HTTP status code, got {rule.status_code}."
                 )
 
-            # Validate error_path is not empty
-            if not rule.error_path or not isinstance(rule.error_path, str):
+            # Validate error_path is not empty (already guaranteed to be str by type system)
+            if not rule.error_path:
                 self._add_error(
                     f"Provider '{name}': error_parsing.rules[{i}].error_path "
                     f"must be a non-empty string, got '{rule.error_path}'."
                 )
 
-            # Validate match_pattern is not empty
-            if not rule.match_pattern or not isinstance(rule.match_pattern, str):
+            # Validate match_pattern is not empty (already guaranteed to be str by type system)
+            if not rule.match_pattern:
                 self._add_error(
                     f"Provider '{name}': error_parsing.rules[{i}].match_pattern "
                     f"must be a non-empty string, got '{rule.match_pattern}'."

@@ -1,7 +1,6 @@
 # src/services/probes/__init__.py
 
 import logging
-from typing import Dict, List, Type
 
 # REFACTORED: Import ConfigAccessor instead of the raw Config schema.
 # This makes the factory's dependencies explicit and aligned with the new architecture.

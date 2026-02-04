@@ -1,7 +1,6 @@
 # src/services/synchronizers/__init__.py
 
 import logging
-from typing import Dict, List, Type
 
 # REFACTORED: Import the dependencies that are now required by the factory.
 from src.core.accessor import ConfigAccessor

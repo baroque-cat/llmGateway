@@ -1,7 +1,6 @@
 # src/providers/__init__.py
 
 import logging
-from typing import Dict, Type
 
 from src.config.schemas import ProviderConfig
 from src.core.interfaces import IProvider
