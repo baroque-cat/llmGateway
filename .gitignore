@@ -1,6 +1,3 @@
-#keys
-.env
-
 #virt
 .envrc
 venv/
@@ -9,6 +6,7 @@ env
 .env/
 venv.bak/
 env.bak/
+ENV/
 
 #tmp
 .tmp/*
@@ -27,7 +25,34 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+# pyenv
+.python-version
 
 #opencode
 .opencode
 add-context*
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+djsfx.py
+local.json
+
+# Local files that shouldn't be committed
+.env
+qa_report.md

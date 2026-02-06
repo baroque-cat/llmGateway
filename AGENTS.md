@@ -40,7 +40,10 @@ poetry run python main.py gateway
 All changes must pass testing and type checking:
 
 ### Testing
-Tests are located in the `tests/` directory. Always run tests to verify changes:
+Tests are located in the `tests/` directory. Always run tests to verify changes. For automated test execution and analysis, use the **@Mr.Tester** subagent, which is the recommended approach for running tests and generating structured QA reports.
+
+The **@Mr.Tester** subagent will execute the test suite and provide detailed reports on test results, failures, and coverage. The main agent will then analyze these reports and determine the necessary actions, as **@Mr.Tester** does not have permissions to edit files directly.
+
 ```bash
 # Run all tests
 poetry run pytest
