@@ -3,8 +3,9 @@
 import asyncio
 import logging
 from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import FastAPI, Header, Request, Response
 from fastapi.responses import JSONResponse, Response, StreamingResponse
@@ -19,6 +20,31 @@ from src.db import database
 from src.db.database import DatabaseManager
 from src.providers import get_provider
 from src.services.gateway_cache import GatewayCache
+
+# --- Dependency Injection Helpers ---
+# These functions provide a typed and safe way to access app state,
+# replacing the direct `request.app.state` pattern which is unsafe for static analysis.
+
+
+def _get_db_manager(request: Request) -> DatabaseManager:
+    """Retrieves the DatabaseManager from the application state."""
+    return request.app.state.db_manager
+
+
+def _get_gateway_cache(request: Request) -> GatewayCache:
+    """Retrieves the GatewayCache from the application state."""
+    return request.app.state.gateway_cache
+
+
+def _get_http_client_factory(request: Request) -> HttpClientFactory:
+    """Retrieves the HttpClientFactory from the application state."""
+    return request.app.state.http_client_factory
+
+
+def _get_config_accessor(request: Request) -> ConfigAccessor:
+    """Retrieves the ConfigAccessor from the application state."""
+    return request.app.state.accessor
+
 
 # --- Module-level setup ---
 logger = logging.getLogger(__name__)
@@ -58,9 +84,21 @@ MAX_DEBUG_BODY_SIZE = 10 * 1024
 # --- Helper Functions ---
 
 
+def _safe_decode_body(body: bytes) -> str:
+    """
+    Safely decodes a bytes object to a string for logging.
+    Attempts UTF-8 decoding first, falls back to repr() for binary data.
+    """
+    try:
+        return body.decode("utf-8")
+    except UnicodeDecodeError:
+        # If it's not valid UTF-8, use repr to show a safe representation
+        return repr(body)
+
+
 def _get_token_from_headers(
-    authorization: str | None = Header(None),
-    x_goog_api_key: str | None = Header(None),
+    authorization: Annotated[str | None, Header()] = None,
+    x_goog_api_key: Annotated[str | None, Header()] = None,
 ) -> str | None:
     """
     Extracts the API token from request headers with a defined priority.
@@ -155,7 +193,8 @@ async def _log_debug_info(
         request_body_preview = request_body[:MAX_DEBUG_BODY_SIZE]
         if len(request_body) > MAX_DEBUG_BODY_SIZE:
             request_body_preview += b"... (truncated)"
-        logger.info(f"Request body: {request_body_preview}")
+        decoded_request_body = _safe_decode_body(request_body_preview)
+        logger.info(f"Request body: {decoded_request_body}")
 
     # Log response info
     logger.info(f"Response from {instance_name}: {response_status}")
@@ -166,7 +205,8 @@ async def _log_debug_info(
         response_body_preview = response_body[:MAX_DEBUG_BODY_SIZE]
         if len(response_body) > MAX_DEBUG_BODY_SIZE:
             response_body_preview += b"... (truncated)"
-        logger.info(f"Response body: {response_body_preview}")
+        decoded_response_body = _safe_decode_body(response_body_preview)
+        logger.info(f"Response body: {decoded_response_body}")
 
 
 # --- Universal Streaming Response Helpers ---
@@ -219,9 +259,9 @@ async def _handle_full_stream_request(
     Handles requests where both request and response can be streamed (full-duplex).
     Does NOT read the request body into memory.
     """
-    cache: GatewayCache = request.app.state.gateway_cache
-    http_factory: HttpClientFactory = request.app.state.http_client_factory
-    db_manager: DatabaseManager = request.app.state.db_manager
+    cache = _get_gateway_cache(request)
+    http_factory = _get_http_client_factory(request)
+    db_manager = _get_db_manager(request)
 
     key_info = cache.get_key_from_pool(instance_name, model_name)
     if not key_info:
@@ -299,10 +339,10 @@ async def _handle_buffered_request(
     """
     Handles requests where the request body must be buffered but the response can be streamed.
     """
-    cache: GatewayCache = request.app.state.gateway_cache
-    http_factory: HttpClientFactory = request.app.state.http_client_factory
-    db_manager: DatabaseManager = request.app.state.db_manager
-    accessor: ConfigAccessor = request.app.state.accessor
+    cache = _get_gateway_cache(request)
+    http_factory = _get_http_client_factory(request)
+    db_manager = _get_db_manager(request)
+    accessor = _get_config_accessor(request)
 
     provider_config = accessor.get_provider_or_raise(instance_name)
 
@@ -449,10 +489,10 @@ async def _handle_buffered_retryable_request(
     Handles requests where retry is enabled. Requires buffering the request body.
     Streams the response on the first successful attempt.
     """
-    cache: GatewayCache = request.app.state.gateway_cache
-    http_factory: HttpClientFactory = request.app.state.http_client_factory
-    db_manager: DatabaseManager = request.app.state.db_manager
-    accessor: ConfigAccessor = request.app.state.accessor
+    cache = _get_gateway_cache(request)
+    http_factory = _get_http_client_factory(request)
+    db_manager = _get_db_manager(request)
+    accessor = _get_config_accessor(request)
 
     provider_config = accessor.get_provider_or_raise(instance_name)
     retry_policy = provider_config.gateway_policy.retry
@@ -700,13 +740,10 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
     """
     Creates and configures the FastAPI application instance.
     """
-    app = FastAPI(title="llmGateway - API Gateway Service")
-
-    @app.on_event("startup")
-    async def startup_event() -> None:
-        """
-        Application startup logic: initialize DB, HTTP clients, caches, and background tasks.
-        """
+    
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        # --- Startup Logic ---
         logger.info("Gateway service starting up...")
         try:
             # Store the accessor in the app state for other components to use.
@@ -716,10 +753,10 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
             logger.info("[Gateway Startup] Analyzing provider streaming modes...")
 
             # Initialize data structures for the dispatcher logic.
-            app.state.full_stream_instances = set()
-            app.state.gemini_stream_instances = set()
-            app.state.single_model_map = {}
-            app.state.debug_mode_map = {}  # NEW: Track debug mode per provider
+            full_stream_instances: set[str] = set()
+            gemini_stream_instances: set[str] = set()
+            single_model_map: dict[str, str] = {}
+            debug_mode_map: dict[str, str] = {}  # NEW: Track debug mode per provider
 
             # Iterate through all enabled providers to analyze and log their mode.
             for name, config in accessor.get_enabled_providers().items():
@@ -730,7 +767,7 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
                 effective_debug_mode = config.gateway_policy.debug_mode
 
                 # Store the effective debug mode for use during request handling.
-                app.state.debug_mode_map[name] = effective_debug_mode
+                debug_mode_map[name] = effective_debug_mode
 
                 # Determine the effective streaming mode for this provider.
                 effective_streaming_mode = config.gateway_policy.streaming_mode
@@ -755,15 +792,15 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
                         mode = "FULL STREAM"
                         reason = "Single model configured, no parsing needed"
                         # Update state for the dispatcher.
-                        app.state.full_stream_instances.add(name)
-                        app.state.single_model_map[name] = list(config.models.keys())[0]
+                        full_stream_instances.add(name)
+                        single_model_map[name] = list(config.models.keys())[0]
 
                     # Rule 3: Special case for Gemini's URL-based model selection.
                     elif config.provider_type == "gemini":
                         mode = "FULL STREAM"
                         reason = "Provider type 'gemini' allows model parsing from URL"
                         # Update state for the dispatcher.
-                        app.state.gemini_stream_instances.add(name)
+                        gemini_stream_instances.add(name)
 
                     # Rule 4 (Default): Multi-model instances require body parsing.
                     else:
@@ -791,17 +828,22 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
             )
             app.state.cache_refresh_task = task
 
+            # Assign the pre-calculated dispatcher state
+            app.state.full_stream_instances = full_stream_instances
+            app.state.gemini_stream_instances = gemini_stream_instances
+            app.state.single_model_map = single_model_map
+            app.state.debug_mode_map = debug_mode_map
+
         except Exception as e:
             logger.critical(
                 "A critical error occurred during application startup.", exc_info=e
             )
             raise
 
-    @app.on_event("shutdown")
-    async def shutdown_event() -> None:
-        """
-        Application shutdown logic: gracefully close all resources.
-        """
+        # The 'yield' separates startup from shutdown logic
+        yield
+
+        # --- Shutdown Logic ---
         logger.info("Gateway service shutting down...")
         if task := getattr(app.state, "cache_refresh_task", None):
             task.cancel()
@@ -810,7 +852,7 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
         await database.close_db_pool()
         logger.info("All resources have been released gracefully.")
 
-    # --- The Core Catch-All Endpoint (Dispatcher) ---
+    app = FastAPI(title="llmGateway - API Gateway Service", lifespan=lifespan)
     @app.api_route("/{full_path:path}", methods=["GET", "POST", "PUT", "DELETE"])
     async def catch_all_endpoint(request: Request) -> Response:
         """
@@ -834,7 +876,7 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
             )
 
         try:
-            accessor: ConfigAccessor = request.app.state.accessor
+            accessor = _get_config_accessor(request)
             provider_config = accessor.get_provider_or_raise(instance_name)
             provider = get_provider(instance_name, provider_config)
         except (KeyError, ValueError) as e:
