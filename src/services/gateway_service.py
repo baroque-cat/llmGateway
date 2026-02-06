@@ -740,7 +740,7 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
     """
     Creates and configures the FastAPI application instance.
     """
-    
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         # --- Startup Logic ---
@@ -853,6 +853,7 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
         logger.info("All resources have been released gracefully.")
 
     app = FastAPI(title="llmGateway - API Gateway Service", lifespan=lifespan)
+
     @app.api_route("/{full_path:path}", methods=["GET", "POST", "PUT", "DELETE"])
     async def catch_all_endpoint(request: Request) -> Response:
         """
