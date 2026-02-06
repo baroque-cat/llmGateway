@@ -9,6 +9,7 @@ from typing import Annotated, Any
 
 from fastapi import FastAPI, Header, Request, Response
 from fastapi.responses import JSONResponse, Response, StreamingResponse
+import httpx
 
 # Import core application components
 from src.core.accessor import ConfigAccessor
@@ -213,7 +214,7 @@ async def _log_debug_info(
 
 
 async def _generate_streaming_body(
-    upstream_response: Response,
+    upstream_response: httpx.Response,
 ) -> AsyncGenerator[bytes]:
     """
     An async generator that streams the response body from the upstream service.
@@ -228,7 +229,7 @@ async def _generate_streaming_body(
 
 
 def _create_proxied_streaming_response(
-    upstream_response: Response,
+    upstream_response: httpx.Response,
 ) -> StreamingResponse:
     """
     Creates a properly configured StreamingResponse for proxying.

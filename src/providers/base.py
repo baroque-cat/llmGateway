@@ -5,6 +5,8 @@ import logging
 import re
 from abc import abstractmethod
 from typing import Any
+from collections.abc import AsyncGenerator
+from typing import Union
 
 import httpx
 
@@ -379,7 +381,7 @@ class AIBaseProvider(IProvider):
         headers: dict[str, str],
         path: str,
         query_params: str,
-        content: bytes,
+        content: Union[bytes, AsyncGenerator[bytes, None]],
     ) -> tuple[httpx.Response, CheckResult]:
         """
         (Abstract) Proxies an incoming client request to the target API provider. (Async)
