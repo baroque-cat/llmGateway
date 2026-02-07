@@ -2,6 +2,10 @@
 
 import logging
 from typing import Any
+from collections.abc import AsyncGenerator
+from typing import Union
+from typing import cast
+from collections.abc import AsyncIterable
 
 import httpx
 
@@ -49,7 +53,7 @@ class GeminiProvider(GeminiBaseProvider):
         headers: dict[str, str],
         path: str,
         query_params: str,
-        content: bytes,
+        content: Union[bytes, AsyncGenerator[bytes, None]],
     ) -> tuple[httpx.Response, CheckResult]:
         """
         Proxies the incoming request to the Gemini API.
@@ -75,13 +79,22 @@ class GeminiProvider(GeminiBaseProvider):
         )
 
         # 3. Build the request object.
-        upstream_request = client.build_request(
-            method=method,
-            url=upstream_url,
-            headers=proxy_headers,
-            content=content,
-            timeout=timeout,
-        )
+        if isinstance(content, AsyncIterable):
+            upstream_request = client.build_request(
+                method=method,
+                url=upstream_url,
+                headers=proxy_headers,
+                data=cast(AsyncIterable[bytes], content),
+                timeout=timeout,
+            )
+        else:
+            upstream_request = client.build_request(
+                method=method,
+                url=upstream_url,
+                headers=proxy_headers,
+                content=content,
+                timeout=timeout,
+            )
 
         # 4. Delegate to the centralized, reliable sender method.
         return await self._send_proxy_request(client, upstream_request)
