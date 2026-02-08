@@ -1,6 +1,10 @@
 # Test Directory Structure
 
-This directory contains all automated tests for the llmGateway project, organized by test type and mirroring the source code structure.
+This directory contains all automated tests for the llmGateway project, organized by test type and mirroring the source code structure. This directory is primarily managed by the **@Mr.Tester** subagent.
+
+## Working with @Mr.Tester
+
+For all testing activities including creating, modifying, and analyzing test results, always invoke the **@Mr.Tester** subagent. This ensures proper test execution, reporting, and maintains consistency across the test suite.
 
 ## Directory Organization
 
@@ -36,6 +40,13 @@ tests/
 - Slowest test category but provides highest confidence in system correctness
 
 ## Running Tests
+
+### Proper Test Execution Protocol
+
+For all testing activities, follow this protocol:
+1. **Always use @Mr.Tester** for test execution, creation, and modification
+2. **Never run tests manually** without involving @Mr.Tester
+3. **Request structured reports** from @Mr.Tester for all test results
 
 All tests can be run using pytest:
 

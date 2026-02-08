@@ -3,6 +3,7 @@
 venv/
 .venv/
 env
+.env
 .env/
 venv.bak/
 env.bak/
@@ -54,5 +55,4 @@ djsfx.py
 local.json
 
 # Local files that shouldn't be committed
-.env
 qa_report.md
