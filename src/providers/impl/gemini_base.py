@@ -6,8 +6,6 @@ from abc import abstractmethod
 from typing import Any
 from collections.abc import AsyncGenerator
 from typing import Union
-from typing import cast
-from collections.abc import AsyncIterable
 
 import httpx
 

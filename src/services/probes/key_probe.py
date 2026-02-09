@@ -13,6 +13,7 @@ from src.core.constants import ALL_MODELS_MARKER
 from src.core.constants import ErrorReason
 from src.core.models import CheckResult
 from src.core.probes import IResourceProbe
+from src.db.database import KeyToCheck
 from src.providers import get_provider
 
 logger = logging.getLogger(__name__)
@@ -25,7 +26,7 @@ class KeyProbe(IResourceProbe):
     based on the key's failure history.
     """
 
-    async def _get_resources_to_check(self) -> list[dict[str, Any]]:
+    async def _get_resources_to_check(self) -> list[KeyToCheck]:
         """
         Fetches key-model pairs due for a health check from the database.
         This method relies on the repository to return the `failing_since` timestamp

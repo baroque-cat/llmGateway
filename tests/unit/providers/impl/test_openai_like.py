@@ -391,3 +391,135 @@ class TestOpenAILikeErrorParsing:
         # Note: Actual check method testing would require more comprehensive
         # mocking of the entire HTTP request flow, which is beyond the scope
         # of error parsing integration tests.
+
+
+class TestOpenAILikeProxyRequest:
+    """Test suite for OpenAI-like provider proxy_request with streaming data."""
+
+    def create_mock_provider(self):
+        """Helper to create a mock OpenAILikeProvider with minimal configuration."""
+        from unittest.mock import MagicMock
+        from src.config.schemas import (
+            ProviderConfig,
+            GatewayPolicyConfig,
+            ErrorParsingConfig,
+        )
+
+        mock_config = MagicMock(spec=ProviderConfig)
+        mock_config.gateway_policy = MagicMock(spec=GatewayPolicyConfig)
+        mock_config.gateway_policy.error_parsing = ErrorParsingConfig(
+            enabled=False, rules=[]
+        )
+        mock_config.provider_type = "openai"
+        mock_config.keys_path = "/test/keys"
+        mock_config.api_base_url = "https://api.openai.com/v1"
+        mock_config.default_model = "gpt-4"
+        mock_config.models = {}
+        mock_config.access_control = MagicMock()
+        mock_config.access_control.gateway_access_token = "test_token"
+        mock_config.health_policy = MagicMock()
+        mock_config.proxy_config = MagicMock()
+        mock_config.proxy_config.mode = "none"
+        mock_config.timeouts = MagicMock()
+        mock_config.timeouts.total = 30.0
+        mock_config.timeouts.connect = 10.0
+        mock_config.timeouts.read = 30.0
+        mock_config.timeouts.write = 30.0
+
+        from src.providers.impl.openai_like import OpenAILikeProvider
+
+        provider = OpenAILikeProvider("test_provider", mock_config)
+        return provider
+
+    @pytest.mark.asyncio
+    async def test_proxy_request_with_bytes_content(self):
+        """Test proxy_request with bytes content (non-streaming)."""
+        provider = self.create_mock_provider()
+        mock_client = MagicMock(spec=httpx.AsyncClient)
+        mock_request = MagicMock(spec=httpx.Request)
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.is_success = True
+
+        # Mock build_request to capture arguments
+        build_request_calls = []
+        original_build_request = mock_client.build_request
+
+        def mock_build_request(**kwargs):
+            build_request_calls.append(kwargs)
+            return mock_request
+
+        mock_client.build_request = mock_build_request
+        mock_client.send = AsyncMock(return_value=mock_response)
+
+        token = "test_token"
+        method = "POST"
+        headers = {"Content-Type": "application/json"}
+        path = "chat/completions"
+        query_params = ""
+        content = b'{"model": "gpt-4", "messages": []}'
+
+        # Call proxy_request
+        response, check_result = await provider.proxy_request(
+            mock_client, token, method, headers, path, query_params, content
+        )
+
+        # Verify build_request was called with correct parameters
+        assert len(build_request_calls) == 1
+        call_kwargs = build_request_calls[0]
+        assert call_kwargs["method"] == method
+        assert call_kwargs["url"] == "https://api.openai.com/v1/chat/completions"
+        assert "authorization" in call_kwargs["headers"]
+        assert call_kwargs["headers"]["authorization"] == f"Bearer {token}"
+        assert call_kwargs["content"] == content  # bytes content passed as content
+        assert "data" not in call_kwargs
+
+    @pytest.mark.asyncio
+    async def test_proxy_request_with_async_iterable_content(self):
+        """Test proxy_request with AsyncIterable content (streaming)."""
+        provider = self.create_mock_provider()
+        mock_client = MagicMock(spec=httpx.AsyncClient)
+        mock_request = MagicMock(spec=httpx.Request)
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.is_success = True
+
+        # Mock build_request to capture arguments
+        build_request_calls = []
+        original_build_request = mock_client.build_request
+
+        def mock_build_request(**kwargs):
+            build_request_calls.append(kwargs)
+            return mock_request
+
+        mock_client.build_request = mock_build_request
+        mock_client.send = AsyncMock(return_value=mock_response)
+
+        token = "test_token"
+        method = "POST"
+        headers = {"Content-Type": "application/json"}
+        path = "chat/completions"
+        query_params = ""
+
+        # Create a simple async iterable
+        async def async_iterable():
+            yield b'{"model": "gpt-4", "messages": []}'
+            yield b'{"stream": true}'
+
+        content = async_iterable()
+
+        # Call proxy_request
+        response, check_result = await provider.proxy_request(
+            mock_client, token, method, headers, path, query_params, content
+        )
+
+        # Verify build_request was called with correct parameters
+        assert len(build_request_calls) == 1
+        call_kwargs = build_request_calls[0]
+        assert call_kwargs["method"] == method
+        assert call_kwargs["url"] == "https://api.openai.com/v1/chat/completions"
+        assert "authorization" in call_kwargs["headers"]
+        assert call_kwargs["headers"]["authorization"] == f"Bearer {token}"
+        # AsyncIterable should be passed as content parameter
+        assert call_kwargs["content"] == content
+        assert "data" not in call_kwargs

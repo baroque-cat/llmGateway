@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Dict, List, Literal
 
 # Import core enums for type hints in schemas.
 # This improves IDE support and documentation clarity,
@@ -28,7 +28,7 @@ class ModelInfo:
     # The minimal, valid JSON payload required to perform a health check on this model.
     # Using default_factory=dict to avoid mutable default issues. This is crucial
     # and directly addresses a point from the "Potential Errors" analysis.
-    test_payload: dict[str, Any] = field(default_factory=dict)
+    test_payload: Dict[str, Any] = field(default_factory=dict)  # type: ignore
 
 
 @dataclass
@@ -147,7 +147,7 @@ class HealthPolicyConfig:
     # Mapping of HTTP status codes to ErrorReason strings for fast, body-less error handling.
     # When a status code matches an entry here, the worker will IMMEDIATELY fail the check
     # with the mapped reason without reading the response body.
-    fast_status_mapping: dict[int, str] = field(default_factory=dict)
+    fast_status_mapping: Dict[int, str] = field(default_factory=dict)  # type: ignore
 
 
 @dataclass
@@ -225,7 +225,7 @@ class ErrorParsingConfig:
     enabled: bool = False
 
     # List of error parsing rules to apply
-    rules: list[ErrorParsingRule] = field(default_factory=list)
+    rules: List[ErrorParsingRule] = field(default_factory=list)  # type: ignore
 
 
 @dataclass
@@ -253,7 +253,7 @@ class GatewayPolicyConfig:
     # When a status code matches an entry here, the gateway will IMMEDIATELY fail the request
     # with the mapped reason without reading the response body.
     # WARNING: This prevents forwarding specific upstream error messages to the client.
-    fast_status_mapping: dict[int, str] = field(default_factory=dict)
+    fast_status_mapping: Dict[int, str] = field(default_factory=dict)  # type: ignore
 
 
 @dataclass
@@ -279,7 +279,7 @@ class ProviderConfig:
     # A dictionary mapping model names to their detailed configurations.
     # This structure is flexible and supports multiple model types under one provider.
     # It correctly uses default_factory to prevent mutable default issues.
-    models: dict[str, ModelInfo] = field(default_factory=dict)
+    models: Dict[str, ModelInfo] = field(default_factory=dict)  # type: ignore
 
     # --- Nested Configuration Objects ---
     # These fields are intentionally not Optional. By using default_factory, we ensure
@@ -365,4 +365,4 @@ class Config:
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     worker: WorkerConfig = field(default_factory=WorkerConfig)
     # A dictionary mapping the unique instance name to its full configuration.
-    providers: dict[str, ProviderConfig] = field(default_factory=dict)
+    providers: Dict[str, ProviderConfig] = field(default_factory=dict)  # type: ignore

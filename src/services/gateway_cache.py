@@ -89,7 +89,9 @@ class GatewayCache:
                 )
 
                 # 2. Build a new key pool in a temporary variable.
-                new_key_pool: DefaultDict[str, Deque[Tuple[int, str]]] = collections.defaultdict(collections.deque)
+                new_key_pool: DefaultDict[str, Deque[Tuple[int, str]]] = (
+                    collections.defaultdict(collections.deque)
+                )
                 for record in valid_keys_data:
                     key_id = record["key_id"]
                     provider_name = record["provider_name"]
@@ -151,7 +153,6 @@ class GatewayCache:
         """
         # Check if provider has shared_key_status enabled
         provider_config = self.accessor.get_provider(provider_name)
-        actual_model_name = model_name
 
         if provider_config and provider_config.shared_key_status:
             # For shared keys, look in the virtual model pool

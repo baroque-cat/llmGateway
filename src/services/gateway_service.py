@@ -856,7 +856,7 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
     app = FastAPI(title="llmGateway - API Gateway Service", lifespan=lifespan)
 
     @app.api_route("/{full_path:path}", methods=["GET", "POST", "PUT", "DELETE"])
-    async def catch_all_endpoint(request: Request) -> Response:
+    async def catch_all_endpoint(request: Request) -> Response:  # type: ignore
         """
         This endpoint acts as a lean dispatcher. It authenticates the request
         and routes it to the correct specialized handler based on pre-calculated logic.

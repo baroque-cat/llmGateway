@@ -4,7 +4,7 @@ import asyncio
 import logging
 from abc import ABC, abstractmethod
 from collections import defaultdict
-from typing import Any
+from typing import Any, Dict, List
 
 # REFACTORED: Import ConfigAccessor instead of Config.
 from src.core.accessor import ConfigAccessor
@@ -68,7 +68,7 @@ class IResourceProbe(ABC):
 
             logger.info(f"Found {len(resources_to_check)} resource(s) to check.")
 
-            grouped_resources = defaultdict(list)
+            grouped_resources: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
             for resource in resources_to_check:
                 p_name = resource.get("provider_name")
                 if isinstance(p_name, str):
@@ -136,7 +136,7 @@ class IResourceProbe(ABC):
             for i in range(0, len(resources), batch_size):
                 batch = resources[i : i + batch_size]
                 logger.debug(
-                    f"Processing batch {i//batch_size + 1} for '{provider_name}' with {len(batch)} resources."
+                    f"Processing batch {i // batch_size + 1} for '{provider_name}' with {len(batch)} resources."
                 )
 
                 # Concurrently check all resources within the current batch
@@ -168,7 +168,7 @@ class IResourceProbe(ABC):
             )
 
     @abstractmethod
-    async def _get_resources_to_check(self) -> list[dict[str, Any]]:
+    async def _get_resources_to_check(self) -> list[Any]:
         """
         Fetches the list of resources due for a health check. (Async)
         Must be implemented by subclasses.

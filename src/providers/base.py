@@ -4,13 +4,12 @@ import json
 import logging
 import re
 from abc import abstractmethod
-from typing import Any
+from typing import Any, List, Union
 from collections.abc import AsyncGenerator
-from typing import Union
 
 import httpx
 
-from src.config.schemas import ProviderConfig
+from src.config.schemas import ErrorParsingRule, ProviderConfig
 from src.core.constants import ErrorReason
 from src.core.interfaces import IProvider
 
@@ -108,7 +107,9 @@ class AIBaseProvider(IProvider):
             return default_reason
 
         # Get rules for this status code
-        rules = [r for r in error_config.rules if r.status_code == response.status_code]
+        rules: List[ErrorParsingRule] = [
+            r for r in error_config.rules if r.status_code == response.status_code
+        ]
         if not rules:
             return default_reason
 
@@ -130,7 +131,7 @@ class AIBaseProvider(IProvider):
                 return default_reason
 
         # Apply rules in priority order (higher priority first)
-        matched_rules = []
+        matched_rules: List[ErrorParsingRule] = []
         for rule in sorted(rules, key=lambda x: x.priority, reverse=True):
             try:
                 value = self._extract_json_value(parsed_data, rule.error_path)

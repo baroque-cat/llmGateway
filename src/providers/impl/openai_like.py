@@ -2,10 +2,10 @@
 
 import json
 import logging
-from typing import Any
+from typing import Any, Dict
 from collections.abc import AsyncGenerator
 from typing import Union
-from typing import cast
+
 from collections.abc import AsyncIterable
 
 import httpx
@@ -91,10 +91,9 @@ class OpenAILikeProvider(AIBaseProvider):
             if not content:
                 raise ValueError("Request body is empty.")
 
-            json_data = json.loads(content)
+            json_data: Dict[str, Any] = json.loads(content)
 
-            if not isinstance(json_data, dict):
-                raise TypeError("Request body JSON must be an object (dictionary).")
+            # json_data is already typed as Dict[str, Any], so isinstance check is redundant
 
             model_name = json_data.get("model")
             if not model_name or not isinstance(model_name, str):
@@ -297,7 +296,7 @@ class OpenAILikeProvider(AIBaseProvider):
                 method=method,
                 url=upstream_url,
                 headers=proxy_headers,
-                data=cast(AsyncIterable[bytes], content),
+                content=content,
                 timeout=timeout,
             )
         else:

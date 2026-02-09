@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import os
-from typing import Any
+from typing import Any, Dict
 
 import asyncpg
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -22,8 +22,8 @@ from src.services.statistics_logger import StatisticsLogger
 from src.services.synchronizers import get_all_syncers
 
 # REFACTORED: Import helper functions directly for the Read Phase.
-from src.services.synchronizers.key_sync import _read_keys_from_directory
-from src.services.synchronizers.proxy_sync import _read_proxies_from_directory
+from src.services.synchronizers.key_sync import read_keys_from_directory
+from src.services.synchronizers.proxy_sync import read_proxies_from_directory
 
 # The path is now defined in one place and passed to the loader.
 CONFIG_PATH = "config/providers.yaml"
@@ -90,12 +90,15 @@ async def run_sync_cycle(
         logger.info(
             "Sync Phase 1 (Read): Collecting desired state from files and config..."
         )
-        desired_state: dict[str, dict[str, Any]] = {"keys": {}, "proxies": {}}
+        desired_state: Dict[str, Dict[str, Any]] = {
+            "keys": {},
+            "proxies": {},
+        }
 
         enabled_providers = accessor.get_enabled_providers()
         for provider_name, provider_config in enabled_providers.items():
             # For KeySyncer (always runs for enabled providers)
-            keys_from_file = _read_keys_from_directory(provider_config.keys_path)
+            keys_from_file = read_keys_from_directory(provider_config.keys_path)
             models_from_config = list(provider_config.models.keys())
             key_state: ProviderKeyState = {
                 "keys_from_files": keys_from_file,
@@ -106,8 +109,12 @@ async def run_sync_cycle(
             # For ProxySyncer (runs only if mode is 'stealth')
             # REFACTORED: Use accessor to get proxy config safely
             proxy_config = accessor.get_proxy_config(provider_name)
-            if proxy_config and proxy_config.mode == "stealth" and proxy_config.pool_list_path:
-                proxies_from_file = _read_proxies_from_directory(
+            if (
+                proxy_config
+                and proxy_config.mode == "stealth"
+                and proxy_config.pool_list_path
+            ):
+                proxies_from_file = read_proxies_from_directory(
                     proxy_config.pool_list_path
                 )
                 proxy_state: ProviderProxyState = {
@@ -203,10 +210,10 @@ async def run_worker() -> None:
 
         for i, probe in enumerate(all_probes):
             job_id = f"{probe.__class__.__name__}_cycle_{i}"
-            scheduler.add_job(probe.run_cycle, "interval", minutes=1, id=job_id)
+            scheduler.add_job(probe.run_cycle, "interval", minutes=1, id=job_id)  # type: ignore
 
         # REFACTORED: Instead of scheduling each syncer, schedule the central cycle function.
-        scheduler.add_job(
+        scheduler.add_job(  # type: ignore
             run_sync_cycle,
             "interval",
             minutes=5,
@@ -219,9 +226,9 @@ async def run_worker() -> None:
         )
 
         summary_interval = accessor.get_logging_config().summary_interval_min
-        scheduler.add_job(stats_logger.run_cycle, "interval", minutes=summary_interval)
+        scheduler.add_job(stats_logger.run_cycle, "interval", minutes=summary_interval)  # type: ignore
 
-        scheduler.add_job(
+        scheduler.add_job(  # type: ignore
             maintenance.run_periodic_vacuum,
             "cron",
             day_of_week="sun",
@@ -231,7 +238,7 @@ async def run_worker() -> None:
         )
 
         logger.info("Scheduler configured. List of jobs:")
-        scheduler.print_jobs()
+        scheduler.print_jobs()  # type: ignore
 
         # Step 9: Start Scheduler and Run Indefinitely
         scheduler.start()

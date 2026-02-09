@@ -4,7 +4,7 @@ import logging
 from typing import Any
 from collections.abc import AsyncGenerator
 from typing import Union
-from typing import cast
+
 from collections.abc import AsyncIterable
 
 import httpx
@@ -84,7 +84,7 @@ class GeminiProvider(GeminiBaseProvider):
                 method=method,
                 url=upstream_url,
                 headers=proxy_headers,
-                data=cast(AsyncIterable[bytes], content),
+                content=content,
                 timeout=timeout,
             )
         else:

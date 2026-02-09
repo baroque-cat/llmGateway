@@ -6,10 +6,11 @@ import logging.handlers
 import os
 from collections import defaultdict
 from datetime import UTC, datetime
+from typing import Dict, List
 
 # REFACTORED: Import ConfigAccessor to replace the direct dependency on Config.
 from src.core.accessor import ConfigAccessor
-from src.db.database import DatabaseManager
+from src.db.database import DatabaseManager, StatusSummaryItem
 
 # Get a logger for this module. The main application entry point will configure its output.
 module_logger = logging.getLogger(__name__)
@@ -95,7 +96,7 @@ class StatisticsLogger:
                 return
 
             # 2. Group the data by provider for separate file logging.
-            grouped_data = defaultdict(list)
+            grouped_data: Dict[str, List[StatusSummaryItem]] = defaultdict(list)
             for record in summary_data:
                 grouped_data[record["provider"]].append(record)
 

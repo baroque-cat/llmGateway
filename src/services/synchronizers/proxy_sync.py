@@ -13,7 +13,7 @@ from src.db.database import DatabaseManager
 logger = logging.getLogger(__name__)
 
 
-def _read_proxies_from_directory(path: str) -> set[str]:
+def read_proxies_from_directory(path: str) -> set[str]:
     """
     Reads all files in a specified directory, extracts proxy URLs, and returns them as a unique set.
     This helper function is now intended to be called by the background worker during the "Read Phase".
