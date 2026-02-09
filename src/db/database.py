@@ -3,7 +3,7 @@
 import logging
 import random
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Optional, TypedDict
 
 import asyncpg
 from asyncpg.pool import Pool
@@ -12,6 +12,34 @@ from src.core.accessor import ConfigAccessor
 from src.core.constants import ALL_MODELS_MARKER
 from src.core.constants import Status
 from src.core.models import CheckResult
+
+
+class KeyToCheck(TypedDict):
+    key_id: int
+    key_value: str
+    provider_name: str
+    model_name: str
+    failing_since: Optional[datetime]
+
+
+class AvailableKey(TypedDict):
+    key_id: int
+    key_value: str
+
+
+class StatusSummaryItem(TypedDict):
+    provider: str
+    model: str
+    status: str
+    count: int
+
+
+class ValidKeyForCaching(TypedDict):
+    key_id: int
+    provider_name: str
+    model_name: str
+    key_value: str
+
 
 # --- Module-level setup ---
 logger = logging.getLogger(__name__)
@@ -302,8 +330,8 @@ class KeyRepository:
                     # This new approach dynamically builds a WHERE clause with simple parameters, which is universally compatible.
                     # This is safe from SQL injection because we only generate the structure and use parameterized inputs.
 
-                    conditions = []
-                    flat_params = []
+                    conditions: list[str] = []
+                    flat_params: list[Any] = []
                     param_idx = 1
                     for key_id, model_name in models_to_remove:
                         # For each pair to remove, create a condition like: (key_id = $1 AND model_name = $2)
@@ -327,7 +355,7 @@ class KeyRepository:
 
     async def get_keys_to_check(
         self, enabled_provider_names: list[str]
-    ) -> list[dict[str, Any]]:
+    ) -> list[KeyToCheck]:
         """
         Fetches all key-model pairs that are due for a health check.
         It crucially retrieves the `failing_since` timestamp for the probe's logic.
@@ -356,8 +384,8 @@ class KeyRepository:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(query, enabled_provider_names)
 
-        results = []
-        checked_keys_for_shared_providers = set()
+        results: list[KeyToCheck] = []
+        checked_keys_for_shared_providers: set[int] = set()
 
         # This logic handles providers where all keys share a single status (e.g., account-level rate limit).
         # It ensures we only check one model per key for these providers to save resources.
@@ -373,10 +401,24 @@ class KeyRepository:
                 # For shared keys, we should only have entries with ALL_MODELS_MARKER
                 # But we need to resolve to a real model for the actual API call
                 if row["model_name"] == ALL_MODELS_MARKER:
-                    results.append(dict(row))
+                    key_to_check: KeyToCheck = {
+                        "key_id": row["key_id"],
+                        "key_value": row["key_value"],
+                        "provider_name": row["provider_name"],
+                        "model_name": row["model_name"],
+                        "failing_since": row["failing_since"],
+                    }
+                    results.append(key_to_check)
                     checked_keys_for_shared_providers.add(key_id)
             else:
-                results.append(dict(row))
+                key_to_check: KeyToCheck = {
+                    "key_id": row["key_id"],
+                    "key_value": row["key_value"],
+                    "provider_name": row["provider_name"],
+                    "model_name": row["model_name"],
+                    "failing_since": row["failing_since"],
+                }
+                results.append(key_to_check)
         return results
 
     async def update_status(
@@ -442,7 +484,7 @@ class KeyRepository:
 
     async def get_available_key(
         self, provider_name: str, model_name: str
-    ) -> dict[str, Any] | None:
+    ) -> Optional[AvailableKey]:
         """
         Retrieves a random available key for a given provider and model using
         the efficient COUNT + OFFSET method.
@@ -489,9 +531,9 @@ class KeyRepository:
                 get_key_query, provider_name, actual_model_name, random_offset
             )
 
-        return dict(row) if row else None
+        return {"key_id": row["key_id"], "key_value": row["key_value"]} if row else None
 
-    async def get_status_summary(self) -> list[dict[str, Any]]:
+    async def get_status_summary(self) -> list[StatusSummaryItem]:
         """
         Retrieves an aggregated summary of key statuses, grouped by provider, model, and status.
         """
@@ -509,9 +551,17 @@ class KeyRepository:
             """
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(query)
-        return [dict(row) for row in rows]
+        return [
+            {
+                "provider": row["provider"],
+                "model": row["model"],
+                "status": row["status"],
+                "count": row["count"],
+            }
+            for row in rows
+        ]
 
-    async def get_all_valid_keys_for_caching(self) -> list[dict[str, Any]]:
+    async def get_all_valid_keys_for_caching(self) -> list[ValidKeyForCaching]:
         """
         Fetches all valid keys across all providers and models in a single query.
         This method is designed to be called periodically to populate the gateway's in-memory cache.
@@ -533,7 +583,15 @@ class KeyRepository:
         # Return the raw rows from the database.
         # The GatewayCache is now smart enough to handle the __ALL_MODELS__ marker
         # for providers with shared_key_status=True.
-        return [dict(row) for row in rows]
+        return [
+            {
+                "key_id": row["key_id"],
+                "provider_name": row["provider_name"],
+                "model_name": row["model_name"],
+                "key_value": row["key_value"],
+            }
+            for row in rows
+        ]
 
 
 class ProxyRepository:

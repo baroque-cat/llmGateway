@@ -4,16 +4,30 @@ import logging
 import os
 import re
 from dataclasses import fields, is_dataclass
-from typing import Any, TypeVar, get_args, get_origin, get_type_hints
+from typing import (
+    Any,
+    Dict,
+    List,
+    Union,
+    TypeVar,
+    cast,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
 
 from deepmerge import always_merger
 from dotenv import load_dotenv
 from ruamel.yaml import YAML
 
 from src.config.defaults import get_default_config
-
-# Import schemas and default templates
 from src.config.schemas import Config
+
+# Define a recursive type alias for configuration dictionaries
+ConfigDict = Dict[
+    str, Union[str, int, float, bool, None, "ConfigDict", List["ConfigValue"]]
+]
+ConfigValue = Union[str, int, float, bool, None, ConfigDict, List["ConfigValue"]]
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +72,7 @@ class ConfigLoader:
             logger.info("Loaded environment variables from .env file.")
 
         with open(self.config_path, encoding="utf-8") as f:
-            user_config_raw = self.yaml.load(f) or {}
+            user_config_raw = cast(Dict[str, Any], self.yaml.load(f) or {})  # type: ignore
 
         # Step 2: Resolve environment variables (Plan Step 3.2)
         user_config_resolved = self._resolve_env_vars(user_config_raw)
@@ -87,10 +101,10 @@ class ConfigLoader:
         addresses a potential error scenario from the analysis.
         """
         if isinstance(config_value, dict):
-            return {k: self._resolve_env_vars(v) for k, v in config_value.items()}
+            return {k: self._resolve_env_vars(v) for k, v in config_value.items()}  # type: ignore
 
         if isinstance(config_value, list):
-            return [self._resolve_env_vars(item) for item in config_value]
+            return [self._resolve_env_vars(item) for item in config_value]  # type: ignore
 
         if isinstance(config_value, str):
             match = ENV_VAR_PATTERN.match(config_value)
@@ -144,7 +158,7 @@ class ConfigLoader:
         final_config["providers"] = final_providers
         return final_config
 
-    def _dict_to_dataclass(self, dclass: type[T], data: dict[str, Any]) -> T:
+    def _dict_to_dataclass(self, dclass: type, data: dict[str, Any]) -> Any:
         """
         Recursively converts a dictionary to a dataclass instance.
         This is the "Improvement" identified in the planning phase, removing the need for
@@ -166,14 +180,14 @@ class ConfigLoader:
                 if origin_type is dict:
                     # Handle nested dictionaries of dataclasses, e.g., Dict[str, ModelInfo]
                     item_type = get_args(field_type)[1]
-                    if is_dataclass(item_type):
+                    if is_dataclass(item_type) and isinstance(item_type, type):
                         field_data[f.name] = {
                             k: self._dict_to_dataclass(item_type, v)
                             for k, v in field_value.items()
                         }
                     else:
                         field_data[f.name] = field_value
-                elif is_dataclass(field_type):
+                elif is_dataclass(field_type) and isinstance(field_type, type):
                     # Handle nested single dataclasses, e.g., HealthPolicyConfig
                     field_data[f.name] = self._dict_to_dataclass(
                         field_type, field_value
