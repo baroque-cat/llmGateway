@@ -435,9 +435,9 @@ class KeyRepository:
         """
         status_str = Status.VALID if result.ok else result.error_reason.value
 
-        assert status_str in Status, (
-            f"Attempted to write invalid status '{status_str}' to the database!"
-        )
+        assert (
+            status_str in Status
+        ), f"Attempted to write invalid status '{status_str}' to the database!"
 
         provider_config = self.accessor.get_provider(provider_name)
         actual_model_name = model_name

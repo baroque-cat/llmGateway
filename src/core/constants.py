@@ -10,7 +10,6 @@ error reasons, and other categorical data.
 
 from enum import Enum, unique
 
-
 # Constants for shared key optimization
 ALL_MODELS_MARKER = "__ALL_MODELS__"
 
