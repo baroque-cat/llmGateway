@@ -110,7 +110,9 @@ class HttpClientFactory:
                 static_url = proxy_config.static_url or "unknown"
                 connection_desc = f"provider '{provider_name}' (proxy: {static_url})"
             elif proxy_config:
-                connection_desc = f"provider '{provider_name}' (proxy mode: {proxy_config.mode})"
+                connection_desc = (
+                    f"provider '{provider_name}' (proxy mode: {proxy_config.mode})"
+                )
             else:
                 connection_desc = f"provider '{provider_name}' (proxy config not found)"
 
