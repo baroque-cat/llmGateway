@@ -55,8 +55,8 @@ def test_debug_mode_constants():
 @pytest.mark.asyncio
 async def test_log_debug_info_bytes_formatting():
     """
-    Pinning test: verify that the current implementation logs bytes as b'...'.
-    This test should pass before refactoring, confirming the bug exists.
+    Test: verify that the fixed implementation logs bytes as decoded strings.
+    This test should pass after refactoring, confirming the bug is fixed.
     """
     with patch("src.services.gateway_service.logger") as mock_logger:
         await _log_debug_info(
@@ -81,19 +81,10 @@ async def test_log_debug_info_bytes_formatting():
         # Find the response body log call (sixth call)
         response_body_log = calls[5][0][0]
 
-        # Assert that the logs contain b'...' representation (current bug)
-        # The bytes are formatted as b'test request body' and b'test response body'
-        assert "b'test request body'" in request_body_log, (
-            f"Expected bytes representation b'...' in request body log, got: {request_body_log}"
-        )
-        assert "b'test response body'" in response_body_log, (
-            f"Expected bytes representation b'...' in response body log, got: {response_body_log}"
-        )
+        # Assert that the logs contain decoded string representation (fixed behavior)
+        assert "test request body" in request_body_log
+        assert "test response body" in response_body_log
 
-        # Additional check: ensure the logs are not accidentally double-encoded
-        # (e.g., no extra b prefix beyond the Python representation)
-        # This is a sanity check that the bug is indeed about bytes formatting.
-        # The current implementation uses f-string with bytes directly, which adds b'...'
-        # We'll verify that the log line starts with 'Request body: b'...'
-        assert request_body_log.startswith("Request body: b'")
-        assert response_body_log.startswith("Response body: b'")
+        # Additional sanity checks: logs should NOT contain b'...' prefix
+        assert not request_body_log.startswith("Request body: b'")
+        assert not response_body_log.startswith("Response body: b'")
