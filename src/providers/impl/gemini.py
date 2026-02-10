@@ -1,11 +1,8 @@
 # src/providers/impl/gemini.py
 
 import logging
+from collections.abc import AsyncGenerator, AsyncIterable
 from typing import Any
-from collections.abc import AsyncGenerator
-from typing import Union
-
-from collections.abc import AsyncIterable
 
 import httpx
 
@@ -53,7 +50,7 @@ class GeminiProvider(GeminiBaseProvider):
         headers: dict[str, str],
         path: str,
         query_params: str,
-        content: Union[bytes, AsyncGenerator[bytes, None]],
+        content: bytes | AsyncGenerator[bytes],
     ) -> tuple[httpx.Response, CheckResult]:
         """
         Proxies the incoming request to the Gemini API.

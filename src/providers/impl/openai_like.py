@@ -2,11 +2,8 @@
 
 import json
 import logging
-from typing import Any, Dict
-from collections.abc import AsyncGenerator
-from typing import Union
-
-from collections.abc import AsyncIterable
+from collections.abc import AsyncGenerator, AsyncIterable
+from typing import Any
 
 import httpx
 
@@ -91,7 +88,7 @@ class OpenAILikeProvider(AIBaseProvider):
             if not content:
                 raise ValueError("Request body is empty.")
 
-            json_data: Dict[str, Any] = json.loads(content)
+            json_data: dict[str, Any] = json.loads(content)
 
             # json_data is already typed as Dict[str, Any], so isinstance check is redundant
 
@@ -265,7 +262,7 @@ class OpenAILikeProvider(AIBaseProvider):
         headers: dict[str, str],
         path: str,
         query_params: str,
-        content: Union[bytes, AsyncGenerator[bytes, None]],
+        content: bytes | AsyncGenerator[bytes],
     ) -> tuple[httpx.Response, CheckResult]:
         """
         Proxies the incoming request to an OpenAI-like API.

@@ -4,7 +4,7 @@ import asyncio
 import logging
 from abc import ABC, abstractmethod
 from collections import defaultdict
-from typing import Any, Dict, List
+from typing import Any
 
 # REFACTORED: Import ConfigAccessor instead of Config.
 from src.core.accessor import ConfigAccessor
@@ -68,7 +68,7 @@ class IResourceProbe(ABC):
 
             logger.info(f"Found {len(resources_to_check)} resource(s) to check.")
 
-            grouped_resources: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+            grouped_resources: dict[str, list[dict[str, Any]]] = defaultdict(list)
             for resource in resources_to_check:
                 p_name = resource.get("provider_name")
                 if isinstance(p_name, str):
@@ -83,7 +83,7 @@ class IResourceProbe(ABC):
 
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            for result, task in zip(results, tasks):
+            for result, task in zip(results, tasks, strict=False):
                 if isinstance(result, Exception):
                     # This is a bit of a workaround to get context back from the task.
                     provider_name = task.get_name()

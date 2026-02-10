@@ -153,12 +153,14 @@ class ConfigValidator:
             )
 
         cb_conf = conf.gateway_policy.circuit_breaker
-        if cb_conf.enabled:
-            if cb_conf.mode not in CircuitBreakerMode._value2member_map_:
-                valid_cb_modes = list(CircuitBreakerMode._value2member_map_.keys())
-                self._add_error(
-                    f"Provider '{name}': Invalid circuit breaker mode '{cb_conf.mode}'. Must be one of {valid_cb_modes}."
-                )
+        if (
+            cb_conf.enabled
+            and cb_conf.mode not in CircuitBreakerMode._value2member_map_
+        ):
+            valid_cb_modes = list(CircuitBreakerMode._value2member_map_.keys())
+            self._add_error(
+                f"Provider '{name}': Invalid circuit breaker mode '{cb_conf.mode}'. Must be one of {valid_cb_modes}."
+            )
 
         # --- NEW: Gateway Policy Validation ---
         # This call validates all strict-mode settings in the gateway policy.

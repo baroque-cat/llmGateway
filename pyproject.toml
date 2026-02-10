@@ -3,7 +3,7 @@ name = "llmgateway"
 version = "0.1.0"
 description = ""
 authors = [
-    {name = "user",email = "user@user.com"}
+    {name = "Baroque Cat",email = "baroque-cat@proton.me"}
 ]
 readme = "README.md"
 requires-python = "<4.0,>=3.13.5"
@@ -45,14 +45,6 @@ dev = [
 ]
 
 [tool.ruff]
-# Enable pycodestyle (`E`), Pyflakes (`F`), and other rules
-select = ["E", "F", "W", "I", "B", "C4", "SIM", "TID", "UP", "YTT"]
-ignore = [
-    "E501", # line too long (handled by black)
-]
-# Allow autofix for all enabled rules
-fixable = ["ALL"]
-unfixable = []
 # Exclude a variety of commonly ignored directories
 exclude = [
     ".git",
@@ -67,6 +59,16 @@ exclude = [
 line-length = 88
 # Set the target Python version
 target-version = "py313"
+
+[tool.ruff.lint]
+# Enable pycodestyle (`E`), Pyflakes (`F`), and other rules
+select = ["E", "F", "W", "I", "B", "C4", "SIM", "TID", "UP", "YTT"]
+ignore = [
+    "E501", # line too long (handled by black)
+]
+# Allow autofix for all enabled rules
+fixable = ["ALL"]
+unfixable = []
 
 [tool.ruff.format]
 # Like Black, use double quotes for strings.

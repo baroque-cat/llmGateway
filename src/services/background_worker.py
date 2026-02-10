@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import os
-from typing import Any, Dict
+from typing import Any
 
 import asyncpg
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -90,7 +90,7 @@ async def run_sync_cycle(
         logger.info(
             "Sync Phase 1 (Read): Collecting desired state from files and config..."
         )
-        desired_state: Dict[str, Dict[str, Any]] = {
+        desired_state: dict[str, dict[str, Any]] = {
             "keys": {},
             "proxies": {},
         }
@@ -136,14 +136,7 @@ async def run_sync_cycle(
         for syncer in all_syncers:
             syncer_name = syncer.__class__.__name__
             try:
-                if isinstance(
-                    syncer, from_services_synchronizers_key_sync_import_KeySyncer
-                ):
-                    await syncer.apply_state(provider_id_map, desired_state["keys"])
-                elif isinstance(
-                    syncer, from_services_synchronizers_proxy_sync_import_ProxySyncer
-                ):
-                    await syncer.apply_state(provider_id_map, desired_state["proxies"])
+                await syncer.apply_state(provider_id_map, desired_state)
             except Exception as e:
                 logger.error(
                     f"Error during apply phase for {syncer_name}: {e}", exc_info=True
@@ -286,13 +279,3 @@ async def run_worker() -> None:
 
         await database.close_db_pool()
         shutdown_logger.info("Worker has been shut down gracefully.")
-
-
-# A workaround for isinstance check within the function due to Python's import system.
-# This makes the code inside run_sync_cycle a bit cleaner.
-from src.services.synchronizers.key_sync import (
-    KeySyncer as from_services_synchronizers_key_sync_import_KeySyncer,
-)
-from src.services.synchronizers.proxy_sync import (
-    ProxySyncer as from_services_synchronizers_proxy_sync_import_ProxySyncer,
-)

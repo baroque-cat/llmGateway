@@ -10,7 +10,6 @@ ensuring a modular and extensible architecture.
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
-from typing import Union
 from typing import Any, TypedDict
 
 import httpx
@@ -125,7 +124,7 @@ class IProvider(ABC):
         headers: dict[str, str],
         path: str,
         query_params: str,
-        content: Union[bytes, AsyncGenerator[bytes, None]],
+        content: bytes | AsyncGenerator[bytes],
     ) -> tuple[httpx.Response, CheckResult]:
         """
         Proxies an incoming client request to the target API provider. (Async)

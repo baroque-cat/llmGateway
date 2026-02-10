@@ -6,7 +6,6 @@ import logging.handlers
 import os
 from collections import defaultdict
 from datetime import UTC, datetime
-from typing import Dict, List
 
 # REFACTORED: Import ConfigAccessor to replace the direct dependency on Config.
 from src.core.accessor import ConfigAccessor
@@ -58,9 +57,9 @@ class StatisticsLogger:
             if logger_name in self._loggers:
                 continue
 
-            l = logging.getLogger(logger_name)
-            l.setLevel(logging.INFO)
-            l.propagate = False
+            summary_logger = logging.getLogger(logger_name)
+            summary_logger.setLevel(logging.INFO)
+            summary_logger.propagate = False
 
             handler = logging.handlers.RotatingFileHandler(
                 filename=os.path.join(log_dir, f"{provider_name}.jsonl"),
@@ -72,11 +71,11 @@ class StatisticsLogger:
             formatter = logging.Formatter("%(message)s")
             handler.setFormatter(formatter)
 
-            if l.hasHandlers():
-                l.handlers.clear()
-            l.addHandler(handler)
+            if summary_logger.hasHandlers():
+                summary_logger.handlers.clear()
+            summary_logger.addHandler(handler)
 
-            self._loggers[logger_name] = l
+            self._loggers[logger_name] = summary_logger
             module_logger.debug(
                 f"Configured statistics logger for provider '{provider_name}'."
             )
@@ -96,7 +95,7 @@ class StatisticsLogger:
                 return
 
             # 2. Group the data by provider for separate file logging.
-            grouped_data: Dict[str, List[StatusSummaryItem]] = defaultdict(list)
+            grouped_data: dict[str, list[StatusSummaryItem]] = defaultdict(list)
             for record in summary_data:
                 grouped_data[record["provider"]].append(record)
 

@@ -10,11 +10,12 @@ sys.path.insert(0, "./src")
 
 # --- Imports for both Gateway and Worker Services ---
 import uvicorn
-from src.services.gateway_service import create_app
-from src.core.accessor import ConfigAccessor
-from src.config.logging_config import setup_logging
-from src.services.background_worker import run_worker
+
 from src.config import load_config
+from src.config.logging_config import setup_logging
+from src.core.accessor import ConfigAccessor
+from src.services.background_worker import run_worker
+from src.services.gateway_service import create_app
 
 # --- REFACTORED: Service starter functions ---
 

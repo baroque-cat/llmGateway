@@ -3,14 +3,13 @@
 import logging
 import random
 from datetime import UTC, datetime
-from typing import Any, Optional, TypedDict
+from typing import Any, TypedDict
 
 import asyncpg
 from asyncpg.pool import Pool
 
 from src.core.accessor import ConfigAccessor
-from src.core.constants import ALL_MODELS_MARKER
-from src.core.constants import Status
+from src.core.constants import ALL_MODELS_MARKER, Status
 from src.core.models import CheckResult
 
 
@@ -19,7 +18,7 @@ class KeyToCheck(TypedDict):
     key_value: str
     provider_name: str
     model_name: str
-    failing_since: Optional[datetime]
+    failing_since: datetime | None
 
 
 class AvailableKey(TypedDict):
@@ -169,34 +168,33 @@ class ProviderRepository:
 
     async def sync(self, provider_names_from_config: list[str]) -> None:
         """Ensures the providers table is in sync with the configuration."""
-        async with self._pool.acquire() as conn:
-            async with conn.transaction():
-                rows = await conn.fetch("SELECT name FROM providers")
-                providers_in_db = {row["name"] for row in rows}
+        async with self._pool.acquire() as conn, conn.transaction():
+            rows = await conn.fetch("SELECT name FROM providers")
+            providers_in_db = {row["name"] for row in rows}
 
-                new_providers = set(provider_names_from_config) - providers_in_db
-                obsolete_providers = providers_in_db - set(provider_names_from_config)
+            new_providers = set(provider_names_from_config) - providers_in_db
+            obsolete_providers = providers_in_db - set(provider_names_from_config)
 
-                if new_providers:
-                    to_insert = [(name,) for name in new_providers]
-                    await conn.copy_records_to_table(
-                        "providers", records=to_insert, columns=["name"]
-                    )
-                    logger.info(
-                        f"SYNC: Added {len(new_providers)} new providers to the database: {new_providers}"
-                    )
+            if new_providers:
+                to_insert = [(name,) for name in new_providers]
+                await conn.copy_records_to_table(
+                    "providers", records=to_insert, columns=["name"]
+                )
+                logger.info(
+                    f"SYNC: Added {len(new_providers)} new providers to the database: {new_providers}"
+                )
 
-                if obsolete_providers:
-                    # Delete obsolete providers. CASCADE will automatically remove
-                    # all associated api_keys and key_model_status records.
-                    placeholders = ", ".join(
-                        f"${i + 1}" for i in range(len(obsolete_providers))
-                    )
-                    query = f"DELETE FROM providers WHERE name IN ({placeholders})"
-                    await conn.execute(query, *list(obsolete_providers))
-                    logger.info(
-                        f"SYNC: Removed {len(obsolete_providers)} obsolete providers from the database: {obsolete_providers}"
-                    )
+            if obsolete_providers:
+                # Delete obsolete providers. CASCADE will automatically remove
+                # all associated api_keys and key_model_status records.
+                placeholders = ", ".join(
+                    f"${i + 1}" for i in range(len(obsolete_providers))
+                )
+                query = f"DELETE FROM providers WHERE name IN ({placeholders})"
+                await conn.execute(query, *list(obsolete_providers))
+                logger.info(
+                    f"SYNC: Removed {len(obsolete_providers)} obsolete providers from the database: {obsolete_providers}"
+                )
 
     async def get_id_map(self) -> dict[str, int]:
         """Fetches a mapping of all provider names to their database IDs."""
@@ -231,127 +229,124 @@ class KeyRepository:
         provider_config = self.accessor.get_provider(provider_name)
         is_shared_key = provider_config and provider_config.shared_key_status
 
-        async with self._pool.acquire() as conn:
-            async with conn.transaction():
-                # Step 1: Sync the `api_keys` table.
-                rows = await conn.fetch(
-                    "SELECT id, key_value FROM api_keys WHERE provider_id = $1",
-                    provider_id,
+        async with self._pool.acquire() as conn, conn.transaction():
+            # Step 1: Sync the `api_keys` table.
+            rows = await conn.fetch(
+                "SELECT id, key_value FROM api_keys WHERE provider_id = $1",
+                provider_id,
+            )
+            db_keys = {row["key_value"]: row["id"] for row in rows}
+            db_key_values = set(db_keys.keys())
+
+            # Add new keys
+            new_key_values = keys_from_file - db_key_values
+            if new_key_values:
+                records_to_add = [(provider_id, key) for key in new_key_values]
+                await conn.copy_records_to_table(
+                    "api_keys",
+                    records=records_to_add,
+                    columns=["provider_id", "key_value"],
                 )
-                db_keys = {row["key_value"]: row["id"] for row in rows}
-                db_key_values = set(db_keys.keys())
-
-                # Add new keys
-                new_key_values = keys_from_file - db_key_values
-                if new_key_values:
-                    records_to_add = [(provider_id, key) for key in new_key_values]
-                    await conn.copy_records_to_table(
-                        "api_keys",
-                        records=records_to_add,
-                        columns=["provider_id", "key_value"],
-                    )
-                    logger.info(
-                        f"SYNC '{provider_name}': Added {len(new_key_values)} new keys."
-                    )
-
-                # Remove old keys
-                keys_to_remove = db_key_values - keys_from_file
-                if keys_to_remove:
-                    ids_to_remove = [db_keys[val] for val in keys_to_remove]
-                    await conn.execute(
-                        "DELETE FROM api_keys WHERE id = ANY($1::int[])", ids_to_remove
-                    )
-                    logger.info(
-                        f"SYNC '{provider_name}': Removed {len(keys_to_remove)} obsolete keys."
-                    )
-
-                # Step 2: Sync the `key_model_status` table.
-                rows = await conn.fetch(
-                    "SELECT id FROM api_keys WHERE provider_id = $1", provider_id
+                logger.info(
+                    f"SYNC '{provider_name}': Added {len(new_key_values)} new keys."
                 )
-                current_key_ids_in_db = {row["id"] for row in rows}
 
-                if not current_key_ids_in_db:
-                    logger.info(
-                        f"SYNC '{provider_name}': No keys exist for this provider, skipping model status sync."
-                    )
-                    return
-
-                # Calculate the desired state of (key_id, model_name) pairs.
-                if is_shared_key:
-                    # For shared keys, use ALL_MODELS_MARKER instead of individual models
-                    desired_model_state = {
-                        (key_id, ALL_MODELS_MARKER) for key_id in current_key_ids_in_db
-                    }
-                else:
-                    desired_model_state = {
-                        (key_id, model)
-                        for key_id in current_key_ids_in_db
-                        for model in provider_models
-                    }
-
-                # Get the current state from the DB.
-                rows = await conn.fetch(
-                    "SELECT key_id, model_name FROM key_model_status WHERE key_id = ANY($1::int[])",
-                    list(current_key_ids_in_db),
+            # Remove old keys
+            keys_to_remove = db_key_values - keys_from_file
+            if keys_to_remove:
+                ids_to_remove = [db_keys[val] for val in keys_to_remove]
+                await conn.execute(
+                    "DELETE FROM api_keys WHERE id = ANY($1::int[])", ids_to_remove
                 )
-                current_model_state = {
-                    (row["key_id"], row["model_name"]) for row in rows
+                logger.info(
+                    f"SYNC '{provider_name}': Removed {len(keys_to_remove)} obsolete keys."
+                )
+
+            # Step 2: Sync the `key_model_status` table.
+            rows = await conn.fetch(
+                "SELECT id FROM api_keys WHERE provider_id = $1", provider_id
+            )
+            current_key_ids_in_db = {row["id"] for row in rows}
+
+            if not current_key_ids_in_db:
+                logger.info(
+                    f"SYNC '{provider_name}': No keys exist for this provider, skipping model status sync."
+                )
+                return
+
+            # Calculate the desired state of (key_id, model_name) pairs.
+            if is_shared_key:
+                # For shared keys, use ALL_MODELS_MARKER instead of individual models
+                desired_model_state = {
+                    (key_id, ALL_MODELS_MARKER) for key_id in current_key_ids_in_db
+                }
+            else:
+                desired_model_state = {
+                    (key_id, model)
+                    for key_id in current_key_ids_in_db
+                    for model in provider_models
                 }
 
-                # Add new model associations.
-                models_to_add = list(desired_model_state - current_model_state)
-                if models_to_add:
-                    initial_check_time = datetime.now(UTC)
-                    records = [
-                        (key_id, model, "untested", None, initial_check_time)
-                        for key_id, model in models_to_add
-                    ]
-                    await conn.copy_records_to_table(
-                        "key_model_status",
-                        records=records,
-                        columns=[
-                            "key_id",
-                            "model_name",
-                            "status",
-                            "failing_since",
-                            "next_check_time",
-                        ],
+            # Get the current state from the DB.
+            rows = await conn.fetch(
+                "SELECT key_id, model_name FROM key_model_status WHERE key_id = ANY($1::int[])",
+                list(current_key_ids_in_db),
+            )
+            current_model_state = {(row["key_id"], row["model_name"]) for row in rows}
+
+            # Add new model associations.
+            models_to_add = list(desired_model_state - current_model_state)
+            if models_to_add:
+                initial_check_time = datetime.now(UTC)
+                records = [
+                    (key_id, model, "untested", None, initial_check_time)
+                    for key_id, model in models_to_add
+                ]
+                await conn.copy_records_to_table(
+                    "key_model_status",
+                    records=records,
+                    columns=[
+                        "key_id",
+                        "model_name",
+                        "status",
+                        "failing_since",
+                        "next_check_time",
+                    ],
+                )
+                logger.info(
+                    f"SYNC '{provider_name}': Added {len(models_to_add)} new key-model associations."
+                )
+
+            # Remove obsolete model associations.
+            models_to_remove = list(current_model_state - desired_model_state)
+            if models_to_remove:
+                # --- MODIFIED BLOCK START ---
+                # The previous method using UNNEST($1::record[]) is not supported by asyncpg's default codecs.
+                # This new approach dynamically builds a WHERE clause with simple parameters, which is universally compatible.
+                # This is safe from SQL injection because we only generate the structure and use parameterized inputs.
+
+                conditions: list[str] = []
+                flat_params: list[Any] = []
+                param_idx = 1
+                for key_id, model_name in models_to_remove:
+                    # For each pair to remove, create a condition like: (key_id = $1 AND model_name = $2)
+                    conditions.append(
+                        f"(key_id = ${param_idx} AND model_name = ${param_idx + 1})"
                     )
-                    logger.info(
-                        f"SYNC '{provider_name}': Added {len(models_to_add)} new key-model associations."
-                    )
+                    # Add the actual values to a flat list for parameter substitution.
+                    flat_params.extend([key_id, model_name])
+                    param_idx += 2
 
-                # Remove obsolete model associations.
-                models_to_remove = list(current_model_state - desired_model_state)
-                if models_to_remove:
-                    # --- MODIFIED BLOCK START ---
-                    # The previous method using UNNEST($1::record[]) is not supported by asyncpg's default codecs.
-                    # This new approach dynamically builds a WHERE clause with simple parameters, which is universally compatible.
-                    # This is safe from SQL injection because we only generate the structure and use parameterized inputs.
+                # Join all conditions with OR to form the final WHERE clause.
+                where_clause = " OR ".join(conditions)
+                query = f"DELETE FROM key_model_status WHERE {where_clause}"
 
-                    conditions: list[str] = []
-                    flat_params: list[Any] = []
-                    param_idx = 1
-                    for key_id, model_name in models_to_remove:
-                        # For each pair to remove, create a condition like: (key_id = $1 AND model_name = $2)
-                        conditions.append(
-                            f"(key_id = ${param_idx} AND model_name = ${param_idx + 1})"
-                        )
-                        # Add the actual values to a flat list for parameter substitution.
-                        flat_params.extend([key_id, model_name])
-                        param_idx += 2
-
-                    # Join all conditions with OR to form the final WHERE clause.
-                    where_clause = " OR ".join(conditions)
-                    query = f"DELETE FROM key_model_status WHERE {where_clause}"
-
-                    # Execute the dynamically built, fully parameterized query.
-                    await conn.execute(query, *flat_params)
-                    # --- MODIFIED BLOCK END ---
-                    logger.info(
-                        f"SYNC '{provider_name}': Removed {len(models_to_remove)} obsolete key-model associations."
-                    )
+                # Execute the dynamically built, fully parameterized query.
+                await conn.execute(query, *flat_params)
+                # --- MODIFIED BLOCK END ---
+                logger.info(
+                    f"SYNC '{provider_name}': Removed {len(models_to_remove)} obsolete key-model associations."
+                )
 
     async def get_keys_to_check(
         self, enabled_provider_names: list[str]
@@ -442,16 +437,15 @@ class KeyRepository:
         provider_config = self.accessor.get_provider(provider_name)
         actual_model_name = model_name
 
-        async with self._pool.acquire() as conn:
-            async with conn.transaction():
-                base_query = """
+        async with self._pool.acquire() as conn, conn.transaction():
+            base_query = """
                 UPDATE key_model_status
-                SET 
-                    status = $1, 
-                    last_checked = NOW() AT TIME ZONE 'utc', 
+                SET
+                    status = $1,
+                    last_checked = NOW() AT TIME ZONE 'utc',
                     next_check_time = $2,
-                    status_code = $3, 
-                    response_time = $4, 
+                    status_code = $3,
+                    response_time = $4,
                     error_message = $5,
                     failing_since = CASE
                         WHEN $6 THEN NULL
@@ -460,31 +454,31 @@ class KeyRepository:
                 WHERE {where_clause}
                 """
 
-                params = [
-                    status_str,
-                    next_check_time,
-                    result.status_code,
-                    result.response_time,
-                    result.message[:1000],
-                    result.ok,
-                ]
+            params = [
+                status_str,
+                next_check_time,
+                result.status_code,
+                result.response_time,
+                result.message[:1000],
+                result.ok,
+            ]
 
-                if provider_config and provider_config.shared_key_status:
-                    where_clause = "key_id = $7 AND model_name = $8"
-                    params.extend([key_id, ALL_MODELS_MARKER])
-                    await conn.execute(
-                        base_query.format(where_clause=where_clause), *params
-                    )
-                else:
-                    where_clause = "key_id = $7 AND model_name = $8"
-                    params.extend([key_id, actual_model_name])
-                    await conn.execute(
-                        base_query.format(where_clause=where_clause), *params
-                    )
+            if provider_config and provider_config.shared_key_status:
+                where_clause = "key_id = $7 AND model_name = $8"
+                params.extend([key_id, ALL_MODELS_MARKER])
+                await conn.execute(
+                    base_query.format(where_clause=where_clause), *params
+                )
+            else:
+                where_clause = "key_id = $7 AND model_name = $8"
+                params.extend([key_id, actual_model_name])
+                await conn.execute(
+                    base_query.format(where_clause=where_clause), *params
+                )
 
     async def get_available_key(
         self, provider_name: str, model_name: str
-    ) -> Optional[AvailableKey]:
+    ) -> AvailableKey | None:
         """
         Retrieves a random available key for a given provider and model using
         the efficient COUNT + OFFSET method.

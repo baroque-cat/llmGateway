@@ -4,8 +4,8 @@ import json
 import logging
 import re
 from abc import abstractmethod
-from typing import Any, List, Union
 from collections.abc import AsyncGenerator
+from typing import Any
 
 import httpx
 
@@ -107,7 +107,7 @@ class AIBaseProvider(IProvider):
             return default_reason
 
         # Get rules for this status code
-        rules: List[ErrorParsingRule] = [
+        rules: list[ErrorParsingRule] = [
             r for r in error_config.rules if r.status_code == response.status_code
         ]
         if not rules:
@@ -131,7 +131,7 @@ class AIBaseProvider(IProvider):
                 return default_reason
 
         # Apply rules in priority order (higher priority first)
-        matched_rules: List[ErrorParsingRule] = []
+        matched_rules: list[ErrorParsingRule] = []
         for rule in sorted(rules, key=lambda x: x.priority, reverse=True):
             try:
                 value = self._extract_json_value(parsed_data, rule.error_path)
@@ -382,7 +382,7 @@ class AIBaseProvider(IProvider):
         headers: dict[str, str],
         path: str,
         query_params: str,
-        content: Union[bytes, AsyncGenerator[bytes, None]],
+        content: bytes | AsyncGenerator[bytes],
     ) -> tuple[httpx.Response, CheckResult]:
         """
         (Abstract) Proxies an incoming client request to the target API provider. (Async)

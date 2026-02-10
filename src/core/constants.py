@@ -8,7 +8,7 @@ These provide type safety and clear value definitions for system states,
 error reasons, and other categorical data.
 """
 
-from enum import Enum, unique
+from enum import Enum, StrEnum, unique
 
 # Constants for shared key optimization
 ALL_MODELS_MARKER = "__ALL_MODELS__"
@@ -90,7 +90,7 @@ class ErrorReason(Enum):
 
 
 @unique
-class Status(str, Enum):
+class Status(StrEnum):
     """
     Represents all possible states for a resource's status in the database.
 

@@ -1,14 +1,13 @@
 # src/config/loader.py
 
+from __future__ import annotations
+
 import logging
 import os
 import re
 from dataclasses import fields, is_dataclass
 from typing import (
     Any,
-    Dict,
-    List,
-    Union,
     TypeVar,
     cast,
     get_args,
@@ -24,10 +23,8 @@ from src.config.defaults import get_default_config
 from src.config.schemas import Config
 
 # Define a recursive type alias for configuration dictionaries
-ConfigDict = Dict[
-    str, Union[str, int, float, bool, None, "ConfigDict", List["ConfigValue"]]
-]
-ConfigValue = Union[str, int, float, bool, None, ConfigDict, List["ConfigValue"]]
+type ConfigValue = str | int | float | bool | None | "ConfigDict" | list["ConfigValue"]
+type ConfigDict = dict[str, ConfigValue]
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +69,7 @@ class ConfigLoader:
             logger.info("Loaded environment variables from .env file.")
 
         with open(self.config_path, encoding="utf-8") as f:
-            user_config_raw = cast(Dict[str, Any], self.yaml.load(f) or {})  # type: ignore
+            user_config_raw = cast(dict[str, Any], self.yaml.load(f) or {})  # type: ignore
 
         # Step 2: Resolve environment variables (Plan Step 3.2)
         user_config_resolved = self._resolve_env_vars(user_config_raw)
@@ -158,11 +155,9 @@ class ConfigLoader:
         final_config["providers"] = final_providers
         return final_config
 
-    def _dict_to_dataclass(self, dclass: type, data: dict[str, Any]) -> Any:
+    def _dict_to_dataclass(self, dclass: type[T], data: dict[str, Any]) -> T:
         """
         Recursively converts a dictionary to a dataclass instance.
-        This is the "Improvement" identified in the planning phase, removing the need for
-        manual parsing of each nested object.
         """
         if not is_dataclass(dclass):
             raise TypeError(f"Expected a dataclass type, but got {dclass}")
@@ -174,21 +169,40 @@ class ConfigLoader:
             if f.name in data:
                 field_value = data[f.name]
                 field_type = type_hints[f.name]
-
                 origin_type = get_origin(field_type)
 
                 if origin_type is dict:
-                    # Handle nested dictionaries of dataclasses, e.g., Dict[str, ModelInfo]
-                    item_type = get_args(field_type)[1]
-                    if is_dataclass(item_type) and isinstance(item_type, type):
-                        field_data[f.name] = {
-                            k: self._dict_to_dataclass(item_type, v)
-                            for k, v in field_value.items()
-                        }
+                    # Handle nested dictionaries of dataclasses
+                    args = get_args(field_type)
+                    if len(args) == 2:
+                        item_type = args[1]
+                        if is_dataclass(item_type) and isinstance(item_type, type):
+                            field_data[f.name] = {
+                                k: self._dict_to_dataclass(item_type, v)
+                                for k, v in field_value.items()
+                            }
+                        else:
+                            field_data[f.name] = field_value
                     else:
                         field_data[f.name] = field_value
+
+                elif origin_type is list:
+                    # Handle lists of dataclasses
+                    args = get_args(field_type)
+                    if args:
+                        item_type = args[0]
+                        if is_dataclass(item_type) and isinstance(item_type, type):
+                            field_data[f.name] = [
+                                self._dict_to_dataclass(item_type, item)
+                                for item in field_value
+                            ]
+                        else:
+                            field_data[f.name] = field_value
+                    else:
+                        field_data[f.name] = field_value
+
                 elif is_dataclass(field_type) and isinstance(field_type, type):
-                    # Handle nested single dataclasses, e.g., HealthPolicyConfig
+                    # Handle nested single dataclasses
                     field_data[f.name] = self._dict_to_dataclass(
                         field_type, field_value
                     )

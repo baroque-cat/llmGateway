@@ -1,5 +1,9 @@
 {
-  "include": ["src", "tests", "main.py"],
+  "include": [
+    "src",
+    "tests",
+    "main.py"
+  ],
   "exclude": [
     "**/node_modules",
     "**/__pycache__",
@@ -11,6 +15,7 @@
     "*.egg-info"
   ],
   "pythonVersion": "3.13",
+  "pythonPlatform": "Linux",
   "typeCheckingMode": "strict",
   "reportMissingTypeStubs": false,
   "reportUnknownMemberType": true,
@@ -21,5 +26,11 @@
   "reportMissingTypeArgument": true,
   "reportInvalidTypeVarUse": true,
   "reportCallInDefaultInitializer": true,
-  "reportUnnecessaryTypeIgnoreComment": true
+  "reportUnnecessaryTypeIgnoreComment": true,
+  "executionEnvironments": [
+    {
+      "root": ".",
+      "extraPaths": ["."]
+    }
+  ]
 }

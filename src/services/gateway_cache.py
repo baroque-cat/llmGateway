@@ -3,7 +3,6 @@
 import asyncio
 import collections
 import logging
-from typing import Deque, Tuple, DefaultDict
 
 from src.core.accessor import ConfigAccessor
 from src.core.constants import ALL_MODELS_MARKER
@@ -89,9 +88,9 @@ class GatewayCache:
                 )
 
                 # 2. Build a new key pool in a temporary variable.
-                new_key_pool: DefaultDict[str, Deque[Tuple[int, str]]] = (
-                    collections.defaultdict(collections.deque)
-                )
+                new_key_pool: collections.defaultdict[
+                    str, collections.deque[tuple[int, str]]
+                ] = collections.defaultdict(collections.deque)
                 for record in valid_keys_data:
                     key_id = record["key_id"]
                     provider_name = record["provider_name"]

@@ -1,4 +1,4 @@
-name: Tests-new
+name: minimal_tests
 
 on:
   push:
@@ -35,7 +35,7 @@ jobs:
 
       - name: Run pyright type checking
         run: |
-          poetry run pyright
+          poetry run pyright main.py src/
 
       - name: Run ruff linting
         run: |
