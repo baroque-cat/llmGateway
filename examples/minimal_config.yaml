@@ -13,6 +13,14 @@ database:
   password: "${DB_PASSWORD}"
   dbname: "llmgateway"
 
+# --- METRICS SETTINGS ---
+metrics:
+  # Enable or disable the /metrics endpoint for Prometheus
+  enabled: false
+  # Bearer token required to access the /metrics endpoint
+  # Set to empty string to disable metrics endpoint even if enabled=true
+  access_token: "${METRICS_ACCESS_TOKEN}"
+
 # --- PROVIDER SETTINGS ---
 providers:
   # Minimal configuration for a Gemini provider

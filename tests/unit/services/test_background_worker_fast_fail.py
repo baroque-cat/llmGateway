@@ -29,7 +29,7 @@ async def test_worker_fast_fail_configuration_validation():
     Test that the fast_status_mapping field is properly validated in HealthPolicyConfig.
     """
     # Valid configuration should pass validation
-    config = ProviderConfig(
+    config = ProviderConfig(  # noqa: F841
         provider_type="test",
         worker_health_policy=HealthPolicyConfig(fast_status_mapping={418: "no_quota"}),
     )

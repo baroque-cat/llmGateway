@@ -72,7 +72,7 @@ def test_forward_references_with_pipe_operator():
     """
     try:
         # This should raise TypeError because "T1" is a string, not a type
-        T2 = int | "T1"
+        T2 = int | "T1"  # noqa: F841
         # If it doesn't raise, that's unexpected (maybe Python version differs)
         # We'll still pass the test but note the behavior
         print("Warning: pipe operator accepted string forward reference")
@@ -89,7 +89,7 @@ def test_recursive_type_alias_import():
     without syntax errors and can be used for basic type checking.
     """
     try:
-        from src.config.loader import ConfigValue, ConfigDict
+        from src.config.loader import ConfigDict, ConfigValue
 
         # Verify they are not None
         assert ConfigValue is not None

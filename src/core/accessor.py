@@ -9,6 +9,7 @@ from src.config.schemas import (
     DatabaseConfig,
     HealthPolicyConfig,
     LoggingConfig,
+    MetricsConfig,
     ModelInfo,
     ProviderConfig,
     ProxyConfig,
@@ -61,6 +62,10 @@ class ConfigAccessor:
     def get_logging_config(self) -> LoggingConfig:
         """Returns the complete logging configuration object."""
         return self._config.logging
+
+    def get_metrics_config(self) -> "MetricsConfig":
+        """Returns the complete metrics configuration object."""
+        return self._config.metrics
 
     # --- Step 3: Provider-level Accessors ---
     # These methods manage access to the dictionary of provider instances.

@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
 import httpx
-from fastapi import FastAPI, Header, Request, Response
+from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
 # Import core application components
@@ -21,6 +21,7 @@ from src.db import database
 from src.db.database import DatabaseManager
 from src.providers import get_provider
 from src.services.gateway_cache import GatewayCache
+from src.services.metrics_exporter import MetricsService
 
 # --- Dependency Injection Helpers ---
 # These functions provide a typed and safe way to access app state,
@@ -57,7 +58,9 @@ app_state: dict[str, Any] = {
     "db_manager": None,
     "http_client_factory": None,
     "gateway_cache": None,
+    "metrics_service": None,  # Add metrics service to app state
     "cache_refresh_task": None,
+    "metrics_update_task": None,  # Add metrics update task to app state
 }
 
 # These are headers that control the connection between two nodes (e.g., client and this proxy).
@@ -97,18 +100,19 @@ def _safe_decode_body(body: bytes) -> str:
         return repr(body)
 
 
-def _get_token_from_headers(
-    authorization: Annotated[str | None, Header()] = None,
-    x_goog_api_key: Annotated[str | None, Header()] = None,
-) -> str | None:
+async def _generate_streaming_body(
+    upstream_response: httpx.Response,
+) -> AsyncGenerator[bytes]:
     """
-    Extracts the API token from request headers with a defined priority.
-    1. Checks for 'Authorization: Bearer <token>'.
-    2. Falls back to 'x-goog-api-key: <token>'.
+    An async generator that streams the response body from the upstream service.
+    This helper function follows the DRY principle.
     """
-    if authorization and authorization.lower().startswith("bearer "):
-        return authorization.split(" ", 1)[1]
-    return x_goog_api_key
+    try:
+        async for chunk in upstream_response.aiter_bytes():
+            yield chunk
+    finally:
+        # Ensure the upstream connection is closed when the stream finishes or is interrupted.
+        await upstream_response.aclose()
 
 
 async def _cache_refresh_loop(cache: GatewayCache, interval_sec: int) -> None:
@@ -210,24 +214,6 @@ async def _log_debug_info(
         logger.info(f"Response body: {decoded_response_body}")
 
 
-# --- Universal Streaming Response Helpers ---
-
-
-async def _generate_streaming_body(
-    upstream_response: httpx.Response,
-) -> AsyncGenerator[bytes]:
-    """
-    An async generator that streams the response body from the upstream service.
-    This helper function follows the DRY principle.
-    """
-    try:
-        async for chunk in upstream_response.aiter_bytes():
-            yield chunk
-    finally:
-        # Ensure the upstream connection is closed when the stream finishes or is interrupted.
-        await upstream_response.aclose()
-
-
 def _create_proxied_streaming_response(
     upstream_response: httpx.Response,
 ) -> StreamingResponse:
@@ -250,7 +236,76 @@ def _create_proxied_streaming_response(
     )
 
 
-# --- Specialized Request Handlers (Refactored) ---
+async def _metrics_cache_update_loop(
+    metrics_service: MetricsService, interval_sec: int
+) -> None:
+    """
+    An infinite loop that periodically updates the metrics cache.
+    """
+    logger.info(
+        f"Starting metrics cache update loop with an interval of {interval_sec} seconds."
+    )
+    # Perform initial update immediately
+    try:
+        await metrics_service.update_metrics_cache()
+        logger.info("Initial metrics cache update completed.")
+    except Exception:
+        logger.error("Error during initial metrics cache update.", exc_info=True)
+
+    while True:
+        try:
+            await asyncio.sleep(interval_sec)
+            await metrics_service.update_metrics_cache()
+        except asyncio.CancelledError:
+            logger.info("Metrics cache update loop is shutting down.")
+            break
+        except Exception:
+            logger.error(
+                "An error occurred in the metrics cache update loop.", exc_info=True
+            )
+
+
+def _get_token_from_headers(
+    authorization: Annotated[str | None, Header()] = None,
+    x_goog_api_key: Annotated[str | None, Header()] = None,
+) -> str | None:
+    """
+    Extracts the API token from request headers with a defined priority.
+    1. Checks for 'Authorization: Bearer <token>'.
+    2. Falls back to 'x-goog-api-key: <token>'.
+    """
+    if authorization and authorization.lower().startswith("bearer "):
+        return authorization.split(" ", 1)[1]
+    return x_goog_api_key
+
+
+def _validate_metrics_token(
+    authorization: str | None,
+    request: Request,
+) -> None:
+    """
+    Validates the Bearer token for accessing the /metrics endpoint.
+
+    Args:
+        authorization: The Authorization header value
+        request: FastAPI request object to get the accessor
+
+    Raises:
+        HTTPException: If the token is missing or invalid
+    """
+    accessor = _get_config_accessor(request)
+    metrics_config = accessor.get_metrics_config()
+    if not metrics_config.enabled:
+        raise HTTPException(status_code=404, detail="Metrics endpoint is disabled")
+
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(
+            status_code=401, detail="Missing or invalid Authorization header"
+        )
+
+    token = authorization.split(" ", 1)[1]
+    if token != metrics_config.access_token:
+        raise HTTPException(status_code=403, detail="Invalid metrics access token")
 
 
 async def _handle_full_stream_request(
@@ -829,6 +884,31 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
             )
             app.state.cache_refresh_task = task
 
+            # Initialize metrics service if enabled and access token is configured
+            metrics_config = accessor.get_metrics_config()
+            if metrics_config.enabled and metrics_config.access_token:
+                app.state.metrics_service = MetricsService(app.state.db_manager)
+                logger.info(
+                    "Metrics service initialized and registered with Prometheus client."
+                )
+
+                # Start periodic metrics cache update task
+                metrics_update_task = asyncio.create_task(
+                    _metrics_cache_update_loop(
+                        app.state.metrics_service, interval_sec=30
+                    )
+                )
+                app.state.metrics_update_task = metrics_update_task
+            else:
+                app.state.metrics_service = None
+                app.state.metrics_update_task = None
+                if metrics_config.enabled and not metrics_config.access_token:
+                    logger.warning(
+                        "Metrics enabled but no access token configured. Metrics endpoint disabled."
+                    )
+                else:
+                    logger.info("Metrics service is disabled.")
+
             # Assign the pre-calculated dispatcher state
             app.state.full_stream_instances = full_stream_instances
             app.state.gemini_stream_instances = gemini_stream_instances
@@ -848,12 +928,31 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
         logger.info("Gateway service shutting down...")
         if task := getattr(app.state, "cache_refresh_task", None):
             task.cancel()
+        if metrics_task := getattr(app.state, "metrics_update_task", None):
+            metrics_task.cancel()
         if http_factory := getattr(app.state, "http_client_factory", None):
             await http_factory.close_all()
         await database.close_db_pool()
         logger.info("All resources have been released gracefully.")
 
     app = FastAPI(title="llmGateway - API Gateway Service", lifespan=lifespan)
+
+    @app.get("/metrics")
+    async def metrics_endpoint(  # pyright: ignore[reportUnusedFunction]
+        request: Request, authorization: Annotated[str | None, Header()] = None
+    ) -> Response:
+        """
+        Expose metrics in Prometheus format.
+        """
+        metrics_service = request.app.state.metrics_service
+        if not metrics_service:
+            raise HTTPException(
+                status_code=404, detail="Metrics endpoint is not enabled"
+            )
+
+        _validate_metrics_token(authorization, request)
+        metrics_data, content_type = metrics_service.get_metrics()
+        return Response(content=metrics_data, media_type=content_type)
 
     @app.api_route("/{full_path:path}", methods=["GET", "POST", "PUT", "DELETE"])
     async def catch_all_endpoint(request: Request) -> Response:  # type: ignore

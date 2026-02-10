@@ -1,5 +1,4 @@
 import asyncio
-
 from collections.abc import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -171,13 +170,13 @@ async def test_gateway_routes_to_full_stream_handler_when_auto_with_eligible_pro
                     6
                 ]  # 0: client, 1: token, 2: method, 3: headers, 4: path, 5: query_params, 6: content
             # Assert that content is not bytes (should be an async generator)
-            assert not isinstance(content_arg, bytes), (
-                "Request body should be streamed, not buffered as bytes"
-            )
+            assert not isinstance(
+                content_arg, bytes
+            ), "Request body should be streamed, not buffered as bytes"
             # Assert it's an async generator (should be from request.stream())
-            assert isinstance(content_arg, AsyncGenerator), (
-                "Content should be an async generator"
-            )
+            assert isinstance(
+                content_arg, AsyncGenerator
+            ), "Content should be an async generator"
 
 
 @pytest.mark.asyncio
@@ -320,13 +319,13 @@ async def test_gateway_routes_to_full_stream_handler_for_gemini_provider():
                     6
                 ]  # 0: client, 1: token, 2: method, 3: headers, 4: path, 5: query_params, 6: content
             # Assert that content is not bytes (should be an async generator)
-            assert not isinstance(content_arg, bytes), (
-                "Request body should be streamed, not buffered as bytes"
-            )
+            assert not isinstance(
+                content_arg, bytes
+            ), "Request body should be streamed, not buffered as bytes"
             # Assert it's an async generator (should be from request.stream())
-            assert isinstance(content_arg, AsyncGenerator), (
-                "Content should be an async generator"
-            )
+            assert isinstance(
+                content_arg, AsyncGenerator
+            ), "Content should be an async generator"
             # Verify parse_request_details was called with correct path
 
             mock_provider.parse_request_details.assert_called_once()

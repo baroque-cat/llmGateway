@@ -73,11 +73,11 @@ async def test_gateway_dispatcher_routing_debug_mode():
     with (
         patch(
             "src.services.gateway_service.database.init_db_pool", new_callable=AsyncMock
-        ) as mock_init_db,
+        ) as mock_init_db,  # noqa: F841
         patch(
             "src.services.gateway_service.database.close_db_pool",
             new_callable=AsyncMock,
-        ) as mock_close_db,
+        ) as mock_close_db,  # noqa: F841
         patch("src.services.gateway_service.DatabaseManager") as MockDatabaseManager,
         patch(
             "src.services.gateway_service.HttpClientFactory"
@@ -130,7 +130,7 @@ async def test_gateway_dispatcher_routing_debug_mode():
 
             # Use TestClient to simulate request
             with TestClient(app) as client:
-                response = client.post(
+                response = client.post(  # noqa: F841
                     "/v1/chat/completions",
                     headers={"Authorization": "Bearer valid_token"},
                     json={"model": "gpt-4", "messages": []},
@@ -211,11 +211,11 @@ async def test_gateway_dispatcher_routing(
     with (
         patch(
             "src.services.gateway_service.database.init_db_pool", new_callable=AsyncMock
-        ) as mock_init_db,
+        ) as mock_init_db,  # noqa: F841
         patch(
             "src.services.gateway_service.database.close_db_pool",
             new_callable=AsyncMock,
-        ) as mock_close_db,
+        ) as mock_close_db,  # noqa: F841
         patch("src.services.gateway_service.DatabaseManager") as MockDatabaseManager,
         patch(
             "src.services.gateway_service.HttpClientFactory"
@@ -268,7 +268,7 @@ async def test_gateway_dispatcher_routing(
 
             # Use TestClient to simulate request
             with TestClient(app) as client:
-                response = client.post(
+                response = client.post(  # noqa: F841
                     "/v1/chat/completions",
                     headers={"Authorization": "Bearer valid_token"},
                     json={"model": "gpt-4", "messages": []},

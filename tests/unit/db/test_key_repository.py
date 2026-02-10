@@ -4,7 +4,7 @@
 Unit tests for KeyRepository.get_keys_to_check() method.
 """
 
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest

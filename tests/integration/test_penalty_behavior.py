@@ -158,7 +158,7 @@ async def test_error_behavior_matrix(
 
     # Analysis
     db_updated = mock_app_state.db_manager.keys.update_status.called
-    key_removed = mock_app_state.gateway_cache.remove_key_from_pool.called
+    key_removed = mock_app_state.gateway_cache.remove_key_from_pool.called  # noqa: F841
 
     # Heuristic for retry: if proxy_request called > 1 time
     retry_count = mock_provider.proxy_request.call_count - 1

@@ -3,7 +3,6 @@ Unit tests for verifying the type correctness of gateway_service helper function
 with httpx.Response (not Starlette.Response).
 """
 
-import asyncio
 from unittest.mock import AsyncMock
 
 import httpx

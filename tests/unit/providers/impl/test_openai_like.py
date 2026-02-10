@@ -399,10 +399,11 @@ class TestOpenAILikeProxyRequest:
     def create_mock_provider(self):
         """Helper to create a mock OpenAILikeProvider with minimal configuration."""
         from unittest.mock import MagicMock
+
         from src.config.schemas import (
-            ProviderConfig,
-            GatewayPolicyConfig,
             ErrorParsingConfig,
+            GatewayPolicyConfig,
+            ProviderConfig,
         )
 
         mock_config = MagicMock(spec=ProviderConfig)
@@ -443,7 +444,7 @@ class TestOpenAILikeProxyRequest:
 
         # Mock build_request to capture arguments
         build_request_calls = []
-        original_build_request = mock_client.build_request
+        original_build_request = mock_client.build_request  # noqa: F841
 
         def mock_build_request(**kwargs):
             build_request_calls.append(kwargs)
@@ -486,7 +487,7 @@ class TestOpenAILikeProxyRequest:
 
         # Mock build_request to capture arguments
         build_request_calls = []
-        original_build_request = mock_client.build_request
+        original_build_request = mock_client.build_request  # noqa: F841
 
         def mock_build_request(**kwargs):
             build_request_calls.append(kwargs)

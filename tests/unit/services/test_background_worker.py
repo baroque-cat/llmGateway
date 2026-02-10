@@ -97,28 +97,30 @@ async def test_verification_recovery(key_probe):
         ]
     )
 
-    with patch(
-        "src.services.probes.key_probe.get_provider", return_value=provider_instance
+    with (
+        patch(
+            "src.services.probes.key_probe.get_provider", return_value=provider_instance
+        ),
+        patch("asyncio.sleep", side_effect=mock_sleep) as slept,
     ):
-        with patch("asyncio.sleep", side_effect=mock_sleep) as slept:
-            resource = {
-                "key_id": 1,
-                "key_value": "sk-test",
-                "model_name": "gpt-4",
-                "provider_name": "openai",
-                "failing_since": None,
-            }
+        resource = {
+            "key_id": 1,
+            "key_value": "sk-test",
+            "model_name": "gpt-4",
+            "provider_name": "openai",
+            "failing_since": None,
+        }
 
-            result = await key_probe._check_resource(resource)
+        result = await key_probe._check_resource(resource)
 
-            # Should be successful eventually
-            assert result.ok is True
+        # Should be successful eventually
+        assert result.ok is True
 
-            # check called 2 times: 1 initial + 1 retry
-            assert provider_instance.check.call_count == 2
+        # check called 2 times: 1 initial + 1 retry
+        assert provider_instance.check.call_count == 2
 
-            # Verify sleep was called (verification delay)
-            assert slept.call_count == 1
+        # Verify sleep was called (verification delay)
+        assert slept.call_count == 1
 
 
 @pytest.mark.asyncio
@@ -136,29 +138,31 @@ async def test_verification_death_confirmation(key_probe):
     # Configure 3 attempts in policy
     key_probe.accessor.get_health_policy.return_value.verification_attempts = 3
 
-    with patch(
-        "src.services.probes.key_probe.get_provider", return_value=provider_instance
+    with (
+        patch(
+            "src.services.probes.key_probe.get_provider", return_value=provider_instance
+        ),
+        patch("asyncio.sleep", side_effect=mock_sleep) as slept,
     ):
-        with patch("asyncio.sleep", side_effect=mock_sleep) as slept:
-            resource = {
-                "key_id": 1,
-                "key_value": "sk-test",
-                "model_name": "gpt-4",
-                "provider_name": "openai",
-                "failing_since": None,
-            }
+        resource = {
+            "key_id": 1,
+            "key_value": "sk-test",
+            "model_name": "gpt-4",
+            "provider_name": "openai",
+            "failing_since": None,
+        }
 
-            result = await key_probe._check_resource(resource)
+        result = await key_probe._check_resource(resource)
 
-            # Should fail
-            assert result.ok is False
-            assert result.error_reason == ErrorReason.RATE_LIMITED
+        # Should fail
+        assert result.ok is False
+        assert result.error_reason == ErrorReason.RATE_LIMITED
 
-            # Call count: 1 initial + 3 retries = 4 total calls
-            assert provider_instance.check.call_count == 4
+        # Call count: 1 initial + 3 retries = 4 total calls
+        assert provider_instance.check.call_count == 4
 
-            # Verify sleep called 3 times
-            assert slept.call_count == 3
+        # Verify sleep called 3 times
+        assert slept.call_count == 3
 
 
 @pytest.mark.asyncio
@@ -176,26 +180,28 @@ async def test_verification_fatal_interruption(key_probe):
         ]
     )
 
-    with patch(
-        "src.services.probes.key_probe.get_provider", return_value=provider_instance
+    with (
+        patch(
+            "src.services.probes.key_probe.get_provider", return_value=provider_instance
+        ),
+        patch("asyncio.sleep", side_effect=mock_sleep) as slept,
     ):
-        with patch("asyncio.sleep", side_effect=mock_sleep) as slept:
-            resource = {
-                "key_id": 1,
-                "key_value": "sk-test",
-                "model_name": "gpt-4",
-                "provider_name": "openai",
-                "failing_since": None,
-            }
+        resource = {
+            "key_id": 1,
+            "key_value": "sk-test",
+            "model_name": "gpt-4",
+            "provider_name": "openai",
+            "failing_since": None,
+        }
 
-            result = await key_probe._check_resource(resource)
+        result = await key_probe._check_resource(resource)
 
-            # Should fail with fatal error
-            assert result.ok is False
-            assert result.error_reason == ErrorReason.INVALID_KEY
+        # Should fail with fatal error
+        assert result.ok is False
+        assert result.error_reason == ErrorReason.INVALID_KEY
 
-            # Call count: 1 initial + 1 retry = 2 calls
-            assert provider_instance.check.call_count == 2
+        # Call count: 1 initial + 1 retry = 2 calls
+        assert provider_instance.check.call_count == 2
 
-            # Verify sleep called only 1 time (before the first retry)
-            assert slept.call_count == 1
+        # Verify sleep called only 1 time (before the first retry)
+        assert slept.call_count == 1

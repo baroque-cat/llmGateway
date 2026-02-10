@@ -24,6 +24,14 @@ logging:
   summary_log_max_size_mb: 5
   summary_log_backup_count: 3
 
+# --- METRICS SETTINGS ---
+metrics:
+  # Enable or disable the /metrics endpoint for Prometheus
+  enabled: true
+  # Bearer token required to access the /metrics endpoint
+  # Set to empty string to disable metrics endpoint even if enabled=true
+  access_token: "${METRICS_ACCESS_TOKEN}"
+
 # --- PROVIDER SETTINGS ---
 providers:
   # Example 1: Google Gemini (Full Configuration)

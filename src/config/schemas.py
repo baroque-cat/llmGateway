@@ -95,6 +95,19 @@ class CircuitBreakerConfig:
     jitter_sec: int = 5
 
 
+@dataclass
+class MetricsConfig:
+    """
+    Configuration for the Prometheus metrics exporter.
+    """
+
+    # Enables or disables the /metrics endpoint
+    enabled: bool = True
+
+    # The Bearer token required to access the /metrics endpoint
+    access_token: str = ""
+
+
 # ==============================================================================
 # 2. MAIN CONFIGURATION SECTIONS
 # ==============================================================================
@@ -364,5 +377,6 @@ class Config:
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     worker: WorkerConfig = field(default_factory=WorkerConfig)
+    metrics: MetricsConfig = field(default_factory=MetricsConfig)
     # A dictionary mapping the unique instance name to its full configuration.
     providers: dict[str, ProviderConfig] = field(default_factory=dict)  # type: ignore
