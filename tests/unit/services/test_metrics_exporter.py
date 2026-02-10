@@ -140,6 +140,119 @@ class TestKeyStatusCollector:
         gauge = metrics[0]
         assert gauge.name == "llm_gateway_keys_total"
 
+    def test_collect_with_shared_model_transformation(self, mock_db_manager):
+        """Test collect() transforms __ALL_MODELS__ to 'shared' in model labels."""
+        from src.core.constants import ALL_MODELS_MARKER
+
+        collector = KeyStatusCollector(mock_db_manager)
+        metrics_data = [
+            {"provider": "openai", "model": "gpt-4", "status": "valid", "count": 5},
+            {
+                "provider": "openai",
+                "model": ALL_MODELS_MARKER,
+                "status": "valid",
+                "count": 3,
+            },
+            {
+                "provider": "anthropic",
+                "model": "claude-3",
+                "status": "invalid",
+                "count": 2,
+            },
+            {
+                "provider": "anthropic",
+                "model": ALL_MODELS_MARKER,
+                "status": "valid",
+                "count": 4,
+            },
+        ]
+        collector.update_cache(metrics_data)
+
+        metrics = list(collector.collect())
+        assert len(metrics) == 1
+        gauge = metrics[0]
+        samples = gauge.samples
+        assert len(samples) == len(metrics_data)
+
+        # Check transformation
+        expected_models = ["gpt-4", "shared", "claude-3", "shared"]
+        for i, sample in enumerate(samples):
+            assert sample.labels["model"] == expected_models[i]
+            # Ensure original count unchanged
+            assert sample.value == metrics_data[i]["count"]
+            # Ensure provider and status unchanged
+            assert sample.labels["provider"] == metrics_data[i]["provider"]
+            assert sample.labels["status"] == metrics_data[i]["status"]
+
+    def test_collect_with_only_shared_models(self, mock_db_manager):
+        """Test collect() when all models are __ALL_MODELS__."""
+        from src.core.constants import ALL_MODELS_MARKER
+
+        collector = KeyStatusCollector(mock_db_manager)
+        metrics_data = [
+            {
+                "provider": "openai",
+                "model": ALL_MODELS_MARKER,
+                "status": "valid",
+                "count": 10,
+            },
+            {
+                "provider": "openai",
+                "model": ALL_MODELS_MARKER,
+                "status": "invalid",
+                "count": 2,
+            },
+            {
+                "provider": "anthropic",
+                "model": ALL_MODELS_MARKER,
+                "status": "valid",
+                "count": 7,
+            },
+        ]
+        collector.update_cache(metrics_data)
+
+        metrics = list(collector.collect())
+        gauge = metrics[0]
+        samples = gauge.samples
+        assert len(samples) == len(metrics_data)
+
+        for sample in samples:
+            assert sample.labels["model"] == "shared"
+
+    def test_collect_with_no_shared_models(self, mock_db_manager):
+        """Test collect() when no __ALL_MODELS__ present (regular model names unchanged)."""
+        collector = KeyStatusCollector(mock_db_manager)
+        metrics_data = [
+            {"provider": "openai", "model": "gpt-4", "status": "valid", "count": 5},
+            {
+                "provider": "openai",
+                "model": "gpt-3.5-turbo",
+                "status": "invalid",
+                "count": 1,
+            },
+            {
+                "provider": "anthropic",
+                "model": "claude-3-opus",
+                "status": "valid",
+                "count": 3,
+            },
+            {
+                "provider": "google",
+                "model": "gemini-2.5-flash",
+                "status": "untested",
+                "count": 2,
+            },
+        ]
+        collector.update_cache(metrics_data)
+
+        metrics = list(collector.collect())
+        gauge = metrics[0]
+        samples = gauge.samples
+
+        for i, sample in enumerate(samples):
+            # Model names should remain unchanged
+            assert sample.labels["model"] == metrics_data[i]["model"]
+
 
 class TestMetricsService:
     """Test MetricsService class."""

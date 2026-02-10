@@ -64,8 +64,13 @@ class KeyStatusCollector:
 
             # Add each record to the gauge
             for record in self._cached_metrics:
+                # Handle shared key status - replace __ALL_MODELS__ with 'shared' for better UX
+                model_name = record["model"]
+                if model_name == "__ALL_MODELS__":
+                    model_name = "shared"
+
                 key_status_gauge.add_metric(
-                    [record["provider"], record["model"], record["status"]],
+                    [record["provider"], model_name, record["status"]],
                     record["count"],
                 )
 

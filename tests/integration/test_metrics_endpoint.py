@@ -251,3 +251,82 @@ class TestMetricsEndpoint:
         # Test that accessor returns correct config
         mock_accessor.get_metrics_config.return_value = config
         assert mock_accessor.get_metrics_config() == config
+
+    @pytest.mark.asyncio
+    async def test_metrics_with_shared_model_names(self, mock_db_manager):
+        """Test that shared model names (__ALL_MODELS__) are transformed to 'shared' in metrics."""
+        from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry
+
+        from src.core.constants import ALL_MODELS_MARKER
+        from src.services.metrics_exporter import (
+            REGISTRY as module_registry,
+        )
+        from src.services.metrics_exporter import (
+            MetricsService,
+        )
+
+        # Create a fresh registry to avoid conflicts with previous tests
+        new_registry = CollectorRegistry()
+        # Temporarily replace the module's REGISTRY
+        original_registry = module_registry
+        try:
+            # Replace the module-level REGISTRY with our fresh one
+            import src.services.metrics_exporter as metrics_exporter_module
+
+            metrics_exporter_module.REGISTRY = new_registry
+
+            # Create real metrics service with mocked DB - will register collector into new_registry
+            metrics_service = MetricsService(mock_db_manager)
+
+            # Mock database to return mixed data with shared and regular models
+            mock_data = [
+                {"provider": "openai", "model": "gpt-4", "status": "valid", "count": 5},
+                {
+                    "provider": "openai",
+                    "model": ALL_MODELS_MARKER,
+                    "status": "valid",
+                    "count": 3,
+                },
+                {
+                    "provider": "anthropic",
+                    "model": "claude-3",
+                    "status": "invalid",
+                    "count": 2,
+                },
+                {
+                    "provider": "anthropic",
+                    "model": ALL_MODELS_MARKER,
+                    "status": "valid",
+                    "count": 4,
+                },
+            ]
+            mock_db_manager.keys.get_status_summary = AsyncMock(return_value=mock_data)
+
+            # Update cache with mocked data
+            await metrics_service.update_metrics_cache()
+
+            # Verify database was called
+            mock_db_manager.keys.get_status_summary.assert_called_once()
+            # Verify cache was updated
+            assert metrics_service.collector._cached_metrics == mock_data
+
+            # Get metrics output using the module's REGISTRY (which is new_registry)
+            metrics_bytes, content_type = metrics_service.get_metrics()
+            metrics_text = metrics_bytes.decode("utf-8")
+
+            # Verify transformation
+            # Check that __ALL_MODELS__ does NOT appear in output
+            assert ALL_MODELS_MARKER not in metrics_text
+            # Check that "shared" appears as model label
+            assert 'model="shared"' in metrics_text
+            # Check regular model names remain
+            assert 'model="gpt-4"' in metrics_text
+            assert 'model="claude-3"' in metrics_text
+            # Check counts are preserved (Prometheus outputs floats)
+            assert " 5.0" in metrics_text or " 5" in metrics_text
+            assert " 3.0" in metrics_text or " 3" in metrics_text
+            # Ensure content type matches Prometheus client constant
+            assert content_type == CONTENT_TYPE_LATEST
+        finally:
+            # Restore original registry
+            metrics_exporter_module.REGISTRY = original_registry

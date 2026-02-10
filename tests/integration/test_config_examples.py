@@ -11,6 +11,7 @@ MOCK_ENV = {
     "GEMINI_PROD_TOKEN": "test_token_prod",
     "GEMINI_MINIMAL_TOKEN": "test_token_minimal",
     "DEEPSEEK_TOKEN": "test_token_deepseek",
+    "METRICS_ACCESS_TOKEN": "test_metrics_token",
 }
 
 
