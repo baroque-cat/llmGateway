@@ -347,17 +347,10 @@ class WorkerConfig:
 @dataclass
 class LoggingConfig:
     """
-    Global configuration for the statistics and summary logging system.
+    Global configuration for application logging.
     """
 
-    # Path to the directory for summary log files.
-    summary_log_path: str = "logs/summary/"
-    # Interval in minutes for writing a summary log.
-    summary_interval_min: int = 30
-    # Maximum size in MB for a single summary log file before rotation.
-    summary_log_max_size_mb: int = 5
-    # Number of backup summary log files to keep.
-    summary_log_backup_count: int = 3
+    pass
 
 
 # ==============================================================================

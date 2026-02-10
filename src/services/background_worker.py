@@ -18,10 +18,7 @@ from src.db import database
 from src.db.database import DatabaseManager
 from src.services import maintenance
 from src.services.probes import get_all_probes
-from src.services.statistics_logger import StatisticsLogger
 from src.services.synchronizers import get_all_syncers
-
-# REFACTORED: Import helper functions directly for the Read Phase.
 from src.services.synchronizers.key_sync import read_keys_from_directory
 from src.services.synchronizers.proxy_sync import read_proxies_from_directory
 
@@ -37,9 +34,7 @@ def _setup_directories(accessor: ConfigAccessor) -> None:
     logger = logging.getLogger(__name__)
     logger.info("Checking and setting up required directories...")
 
-    paths_to_check = {
-        accessor.get_logging_config().summary_log_path,
-    }
+    paths_to_check: set[str] = set()
 
     for provider_name, provider in accessor.get_all_providers().items():
         if provider.enabled:
@@ -196,7 +191,6 @@ async def run_worker() -> None:
 
         # Step 7: Instantiate Services with Dependencies.
         all_probes = get_all_probes(accessor, db_manager, client_factory)
-        stats_logger = StatisticsLogger(accessor, db_manager)
 
         # Step 8: Scheduler Setup.
         scheduler = AsyncIOScheduler(timezone="UTC")
@@ -217,9 +211,6 @@ async def run_worker() -> None:
                 all_syncers,
             ],  # Pass dependencies to the scheduled job.
         )
-
-        summary_interval = accessor.get_logging_config().summary_interval_min
-        scheduler.add_job(stats_logger.run_cycle, "interval", minutes=summary_interval)  # type: ignore
 
         scheduler.add_job(  # type: ignore
             maintenance.run_periodic_vacuum,

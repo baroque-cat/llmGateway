@@ -18,11 +18,8 @@ database:
   dbname: "llmgateway"
 
 # --- LOGGING SETTINGS ---
-logging:
-  summary_log_path: "logs/summary/"
-  summary_interval_min: 30
-  summary_log_max_size_mb: 5
-  summary_log_backup_count: 3
+# (Application logging only - statistics are now handled by Prometheus metrics)
+logging: {}
 
 # --- METRICS SETTINGS ---
 metrics:

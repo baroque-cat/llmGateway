@@ -26,12 +26,7 @@ def get_default_config() -> dict[str, Any]:
             "password": "${DB_PASSWORD}",
             "dbname": "llmgateway",
         },
-        "logging": {
-            "summary_log_path": "logs/summary/",
-            "summary_interval_min": 30,
-            "summary_log_max_size_mb": 5,
-            "summary_log_backup_count": 3,
-        },
+        "logging": {},
         # --- PROVIDER-SPECIFIC SETTINGS ---
         # This section serves as a generic template for any new provider instance.
         "providers": {

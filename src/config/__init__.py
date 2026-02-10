@@ -1,7 +1,6 @@
 # src/config/__init__.py
 
-"""
-Unified Configuration Management Package.
+"""Unified Configuration Management Package.
 
 This package provides a centralized system for loading, validating, and accessing
 application configuration. It implements a Singleton pattern to ensure that the

@@ -16,6 +16,7 @@ The system consists of two core, independent components:
 *   **🛡️ Proactive Monitoring:** Background worker continuously validates key status to maintain an accurate health pool.
 *   **📦 Multi-Provider Support:** Adapters for OpenAI-compatible APIs and Google Gemini.
 *   **🧠 Smart Caching:** Optimized handling of shared API keys to prevent rate limit exhaustion.
+*   **📊 Prometheus Metrics:** Built-in `/metrics` endpoint for professional monitoring and observability.
 
 ## Architecture
 
@@ -58,7 +59,7 @@ The project follows a clean, modular design with a clear separation of concerns.
 │       ├── gateway_cache.py    # Cache for keys and models (fixes shared-key bug)
 │       ├── gateway_service.py  # Main API Gateway service (Conductor)
 │       ├── maintenance.py      # Database maintenance services
-│       ├── statistics_logger.py # Statistics collection and logging
+│       ├── metrics_exporter.py # Prometheus metrics exporter
 │       ├── probes/             # Active resource probes
 │       │   └── key_probe.py    # Background key health checker
 │       └── synchronizers/      # Disk-to-DB synchronizers
