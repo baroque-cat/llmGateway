@@ -200,3 +200,42 @@ class TestStreamMonitor:
             check_result=None,
         )
         assert monitor._get_internal_status() == "UNKNOWN"
+
+    @pytest.mark.asyncio
+    async def test_stream_monitor_iterator_initialized_once(self, mock_httpx_response):
+        """Test that stream iterator is initialized once to avoid StreamConsumed error."""
+        # Create a mock for aiter_bytes that tracks calls
+        mock_aiter_bytes = Mock()
+        call_count = 0
+
+        async def chunk_iterator():
+            yield b"chunk1"
+            yield b"chunk2"
+            yield b"chunk3"
+
+        def side_effect():
+            nonlocal call_count
+            call_count += 1
+            return chunk_iterator()
+
+        mock_aiter_bytes.side_effect = side_effect
+        mock_httpx_response.aiter_bytes = mock_aiter_bytes
+
+        monitor = StreamMonitor(
+            upstream_response=mock_httpx_response,
+            client_ip="127.0.0.1",
+            request_method="POST",
+            request_path="/v1/chat/completions",
+            provider_name="openai",
+            model_name="gpt-4",
+            check_result=CheckResult.success(),
+        )
+        # Verify aiter_bytes called exactly once during initialization
+        assert call_count == 1
+        # Consume the stream
+        chunks = []
+        async for chunk in monitor:
+            chunks.append(chunk)
+        assert chunks == [b"chunk1", b"chunk2", b"chunk3"]
+        # Ensure aiter_bytes not called again (still once)
+        assert call_count == 1

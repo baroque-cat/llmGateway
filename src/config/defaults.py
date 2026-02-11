@@ -26,7 +26,9 @@ def get_default_config() -> dict[str, Any]:
             "password": "${DB_PASSWORD}",
             "dbname": "llmgateway",
         },
-        "logging": {},
+        "logging": {
+            "level": "INFO",
+        },
         # --- PROVIDER-SPECIFIC SETTINGS ---
         # This section serves as a generic template for any new provider instance.
         "providers": {

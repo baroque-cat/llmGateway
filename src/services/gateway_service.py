@@ -159,6 +159,8 @@ class StreamMonitor:
         self.model_name = model_name
         self.check_result = check_result
         self.start_time = None
+        # Initialize the stream iterator once to avoid StreamConsumed error
+        self.stream_iterator = upstream_response.aiter_bytes()
 
     def _get_internal_status(self) -> str:
         """Determines the internal status string for logging."""
@@ -184,7 +186,7 @@ class StreamMonitor:
         if self.start_time is None:
             self.start_time = asyncio.get_event_loop().time()
         try:
-            chunk = await self.upstream_response.aiter_bytes().__anext__()
+            chunk = await self.stream_iterator.__anext__()
             return chunk
         except StopAsyncIteration:
             await self._finalize_logging()

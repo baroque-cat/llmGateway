@@ -358,7 +358,8 @@ class LoggingConfig:
     Global configuration for application logging.
     """
 
-    pass
+    # The global log level for the application. Can be "DEBUG", "INFO", "WARNING", "ERROR".
+    level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
 
 # ==============================================================================

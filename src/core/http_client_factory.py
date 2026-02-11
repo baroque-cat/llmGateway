@@ -116,7 +116,7 @@ class HttpClientFactory:
             else:
                 connection_desc = f"provider '{provider_name}' (proxy config not found)"
 
-            self.logger.info(
+            self.logger.debug(
                 f"Cache miss for {connection_desc}. Creating new HTTP/2 client..."
             )
 
@@ -132,7 +132,7 @@ class HttpClientFactory:
                 )
 
                 self._clients[cache_key] = client
-                self.logger.info(
+                self.logger.debug(
                     f"Successfully created and cached new client for {connection_desc}."
                 )
                 return client

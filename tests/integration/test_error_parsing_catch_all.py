@@ -27,7 +27,6 @@ B. Catch-all rule matches (different 400 error) -> maps to server_error.
 C. Ensure no httpx.StreamClosed crash when retry.enabled = true (partial streaming mode).
 """
 
-import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -137,7 +136,7 @@ async def test_catch_all_rule_specific_match():
     """
     Scenario A: Specific rule matches (Access denied message) -> maps to invalid_key.
     """
-    from src.services.gateway_service import _handle_buffered_retryable_request
+    from src.services.gateway_service import _handle_buffered_retryable_request  # type: ignore
 
     req = make_mock_request()
     provider = MagicMock()
@@ -173,7 +172,7 @@ async def test_catch_all_rule_specific_match():
         )
     )
 
-    with patch("asyncio.sleep", side_effect=lambda x: asyncio.sleep(0)):
+    with patch("asyncio.sleep", side_effect=lambda x: None):  # type: ignore
         # Should not raise StreamClosed because body was read (error parsing enabled).
         response = await _handle_buffered_retryable_request(
             req, provider, instance_name
@@ -193,7 +192,7 @@ async def test_catch_all_rule_catch_all_match():
     """
     Scenario B: Specific rule does NOT match, catch-all rule matches -> maps to server_error.
     """
-    from src.services.gateway_service import _handle_buffered_retryable_request
+    from src.services.gateway_service import _handle_buffered_retryable_request  # type: ignore
 
     req = make_mock_request()
     provider = MagicMock()
@@ -225,7 +224,7 @@ async def test_catch_all_rule_catch_all_match():
         )
     )
 
-    with patch("asyncio.sleep", side_effect=lambda x: asyncio.sleep(0)):
+    with patch("asyncio.sleep", side_effect=lambda x: None):  # type: ignore
         response = await _handle_buffered_retryable_request(
             req, provider, instance_name
         )
@@ -241,7 +240,7 @@ async def test_no_stream_closed_with_catch_all_rule():
     Scenario C: Ensure no httpx.StreamClosed crash when retry enabled and error parsing configured.
     This is a regression test for the StreamClosed bug.
     """
-    from src.services.gateway_service import _handle_buffered_retryable_request
+    from src.services.gateway_service import _handle_buffered_retryable_request  # type: ignore
 
     req = make_mock_request()
     provider = MagicMock()
@@ -271,7 +270,7 @@ async def test_no_stream_closed_with_catch_all_rule():
         )
     )
 
-    with patch("asyncio.sleep", side_effect=lambda x: asyncio.sleep(0)):
+    with patch("asyncio.sleep", side_effect=lambda x: None):  # type: ignore
         # Should not raise httpx.StreamClosed because error parsing is enabled and there is a rule for 400.
         response = await _handle_buffered_retryable_request(
             req, provider, instance_name

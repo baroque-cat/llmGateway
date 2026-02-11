@@ -15,7 +15,6 @@ The gateway service then tries to read the body of this closed stream to forward
 This test verifies that the gateway handles this scenario gracefully (does not crash).
 """
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -127,7 +126,7 @@ async def test_stream_closed_bug(
     Reproduce the StreamClosed bug when provider returns 400 with body,
     retry enabled, error parsing config does not match.
     """
-    from src.services.gateway_service import _handle_buffered_retryable_request
+    from src.services.gateway_service import _handle_buffered_retryable_request  # type: ignore
 
     req = make_mock_request()
     provider = MagicMock()
@@ -176,7 +175,7 @@ async def test_stream_closed_bug(
 
     # Mock asyncio.sleep to avoid actual delays
     with (
-        patch("asyncio.sleep", side_effect=lambda x: asyncio.sleep(0)),
+        patch("asyncio.sleep", side_effect=lambda x: None),  # type: ignore
         pytest.raises(httpx.StreamClosed),
     ):
         # The bug currently causes httpx.StreamClosed to be raised.
@@ -192,7 +191,7 @@ async def test_no_bug_when_error_parsing_rule_matches():
     When error parsing rule matches the response body, the provider reads the body,
     so the stream is not closed. This scenario should work without StreamClosed.
     """
-    from src.services.gateway_service import _handle_buffered_retryable_request
+    from src.services.gateway_service import _handle_buffered_retryable_request  # type: ignore
 
     req = make_mock_request()
     provider = MagicMock()
@@ -237,7 +236,7 @@ async def test_no_bug_when_error_parsing_rule_matches():
         )
     )
 
-    with patch("asyncio.sleep", side_effect=lambda x: asyncio.sleep(0)):
+    with patch("asyncio.sleep", side_effect=lambda x: None):  # type: ignore
         # Should not raise StreamClosed because body was read.
         response = await _handle_buffered_retryable_request(
             req, provider, instance_name

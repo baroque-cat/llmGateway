@@ -29,8 +29,9 @@ def setup_logging(accessor: ConfigAccessor) -> None:
     Args:
         accessor: The ConfigAccessor instance providing access to configuration.
     """
-    # Use INFO as the default log level for the application.
-    log_level = logging.INFO
+    # Use the configured log level from the config, defaulting to INFO.
+    config_log_level = accessor.get_logging_config().level
+    log_level = getattr(logging, config_log_level.upper(), logging.INFO)
 
     # Define the format for log messages for consistency across the application.
     # The new format is cleaner and avoids redundant [INFO] tags.
@@ -59,6 +60,9 @@ def setup_logging(accessor: ConfigAccessor) -> None:
     # Apply the custom filter to the uvicorn access logger to hide /metrics calls.
     uvicorn_access_logger = logging.getLogger("uvicorn.access")
     uvicorn_access_logger.addFilter(MetricsEndpointFilter())
+    # Silence standard uvicorn access logs for non-metrics requests to prevent duplication
+    # with our own GATEWAY_ACCESS logs.
+    uvicorn_access_logger.setLevel(logging.WARNING)
 
     # Reduce the log level for third-party libraries that can be very verbose.
     # This keeps the application's logs clean and focused.

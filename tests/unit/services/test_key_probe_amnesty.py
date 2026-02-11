@@ -175,9 +175,9 @@ async def test_amnesty_applied_long_downtime(mock_dependencies, health_policy):
     expected_next_check = now + timedelta(days=health_policy.on_invalid_key_days)
     actual_next_check = call_kwargs["next_check_time"]
     diff = abs((actual_next_check - expected_next_check).total_seconds())
-    assert diff < 1.0, (
-        f"Expected on_invalid_key_days interval (amnesty applied), got {actual_next_check}"
-    )
+    assert (
+        diff < 1.0
+    ), f"Expected on_invalid_key_days interval (amnesty applied), got {actual_next_check}"
 
 
 @pytest.mark.asyncio

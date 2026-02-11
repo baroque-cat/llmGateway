@@ -19,7 +19,9 @@ database:
 
 # --- LOGGING SETTINGS ---
 # (Application logging only - statistics are now handled by Prometheus metrics)
-logging: {}
+logging:
+  # The global log level for the application. Can be "DEBUG", "INFO", "WARNING", "ERROR".
+  level: "INFO"
 
 # --- METRICS SETTINGS ---
 metrics:
