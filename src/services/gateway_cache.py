@@ -80,7 +80,7 @@ class GatewayCache:
         The operation is protected by a lock to ensure atomicity.
         """
         async with self._refresh_lock:
-            logger.info("Refreshing key pool cache from database...")
+            logger.debug("Refreshing key pool cache from database...")
             try:
                 # 1. Fetch all valid keys in a single, efficient query.
                 valid_keys_data = (
@@ -198,7 +198,7 @@ class GatewayCache:
             # --- NEW: Logic to decide removal strategy ---
             if provider_config and provider_config.shared_key_status:
                 # Remove the key only from the virtual model pool
-                logger.info(
+                logger.debug(
                     f"Removing shared key_id {key_id} from virtual pool '{provider_name}:shared' for provider '{provider_name}'."
                 )
                 pool_key = f"{provider_name}:{ALL_MODELS_MARKER}"
@@ -224,9 +224,11 @@ class GatewayCache:
         new_queue = collections.deque([info for info in key_queue if info[0] != key_id])
 
         if len(new_queue) < initial_size:
+            # Format the pool key for logging: replace __ALL_MODELS__ with 'shared'
+            formatted_pool_key = pool_key.replace(ALL_MODELS_MARKER, "shared")
             self._key_pool[pool_key] = new_queue
-            logger.info(
-                f"Removed failed key_id {key_id} from live cache pool '{pool_key}'. "
+            logger.debug(
+                f"Removed failed key_id {key_id} from live cache pool '{formatted_pool_key}'. "
                 f"Pool size changed from {initial_size} to {len(new_queue)}."
             )
         else:

@@ -293,7 +293,7 @@ async def _report_key_failure(
             result=result,
             next_check_time=placeholder_next_check,
         )
-        logger.info(
+        logger.debug(
             f"Fast feedback: Successfully reported failure for key_id {key_id} to the database."
         )
     except Exception as e:

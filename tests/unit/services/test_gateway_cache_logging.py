@@ -47,14 +47,17 @@ class TestGatewayCacheLogging:
             await cache.refresh_key_pool()
             # Collect all calls to logger methods
             print(f"All calls: {mock_logger.method_calls}")
-            # Debug log should be called
-            mock_logger.debug.assert_called_once()
-            call_args = mock_logger.debug.call_args[0][0]
-            assert "Key pool cache refreshed successfully" in call_args
-            # Info log should also be called at start
-            mock_logger.info.assert_called_once()
-            info_call = mock_logger.info.call_args[0][0]
-            assert "Refreshing key pool cache from database" in info_call
+            # Both start and success logs should be at DEBUG level
+            # Verify debug was called twice
+            assert mock_logger.debug.call_count == 2
+            # Get both calls
+            debug_calls = mock_logger.debug.call_args_list
+            # First call should be the start message
+            assert "Refreshing key pool cache from database" in debug_calls[0][0][0]
+            # Second call should be the success message
+            assert "Key pool cache refreshed successfully" in debug_calls[1][0][0]
+            # Info should NOT be called (all logs are DEBUG)
+            mock_logger.info.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_shared_key_removal_log(self, cache, mock_accessor):
@@ -67,11 +70,11 @@ class TestGatewayCacheLogging:
         cache._key_pool["openai:__ALL_MODELS__"] = [(1, "sk-xxx")]
         with patch("src.services.gateway_cache.logger") as mock_logger:
             await cache.remove_key_from_pool("openai", "gpt-4", 1)
-            # Should log info about removing shared key
-            mock_logger.info.assert_called()
-            # Find the call about shared key
+            # Should log DEBUG about removing shared key (no INFO logs)
+            mock_logger.info.assert_not_called()
+            # Find the call about shared key in debug logs
             shared_call = None
-            for call in mock_logger.info.call_args_list:
+            for call in mock_logger.debug.call_args_list:
                 if "shared key_id" in call[0][0]:
                     shared_call = call
                     break
@@ -88,10 +91,10 @@ class TestGatewayCacheLogging:
         cache._key_pool["openai:gpt-4"] = [(1, "sk-xxx")]
         with patch("src.services.gateway_cache.logger") as mock_logger:
             await cache.remove_key_from_pool("openai", "gpt-4", 1)
-            # Should log info about removing from specific pool
-            mock_logger.info.assert_called()
+            # Should log DEBUG about removing from specific pool (no INFO logs)
+            mock_logger.info.assert_not_called()
             granular_call = None
-            for call in mock_logger.info.call_args_list:
+            for call in mock_logger.debug.call_args_list:
                 if "Removed failed key_id" in call[0][0]:
                     granular_call = call
                     break

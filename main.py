@@ -47,7 +47,9 @@ def _start_gateway_service(args: argparse.Namespace):
         )
 
         # This is a blocking call that starts the Uvicorn server.
-        uvicorn.run(app, host=args.host, port=args.port, workers=args.workers)
+        uvicorn.run(
+            app, host=args.host, port=args.port, workers=args.workers, access_log=False
+        )
 
     except FileNotFoundError as e:
         print(f"\n[ERROR] {e}", file=sys.stderr)

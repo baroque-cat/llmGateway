@@ -92,7 +92,7 @@ class KeyProbe(IResourceProbe):
 
             # 1. Fast Fail: if the error is fatal, return immediately (no verification)
             if not result.ok and result.error_reason.is_fatal():
-                logger.info(
+                logger.debug(
                     f"Key ID {key_id} failed with fatal error {result.error_reason}. Skipping verification."
                 )
                 return result
@@ -104,7 +104,7 @@ class KeyProbe(IResourceProbe):
 
             # 3. Retryable error: start verification loop
             if result.error_reason.is_retryable():
-                logger.info(
+                logger.debug(
                     f"Key ID {key_id} failed with retryable error {result.error_reason}. "
                     f"Starting verification loop (attempts={health_policy.verification_attempts}, "
                     f"delay={health_policy.verification_delay_sec}s)."
@@ -121,19 +121,19 @@ class KeyProbe(IResourceProbe):
                         model=actual_model_name,
                     )
                     if retry_result.ok:
-                        logger.info(
+                        logger.debug(
                             f"Key ID {key_id} recovered after {attempt + 1} verification attempt(s)."
                         )
                         return retry_result
                     if retry_result.error_reason.is_fatal():
-                        logger.info(
+                        logger.debug(
                             f"Key ID {key_id} failed with fatal error {retry_result.error_reason} during verification."
                         )
                         return retry_result
                     # else still retryable, continue loop
 
                 # All attempts exhausted, key still failing
-                logger.info(
+                logger.debug(
                     f"Key ID {key_id} still failing after {health_policy.verification_attempts} verification attempts. "
                     f"Returning last error: {retry_result.error_reason}"
                 )
@@ -212,7 +212,7 @@ class KeyProbe(IResourceProbe):
         # If the gap is larger than the amnesty threshold, we assume the system was down.
         # In this case, we reset the 'failing_since' counter to treat this as a fresh failure.
         if gap > amnesty_threshold:
-            logger.info(
+            logger.debug(
                 f"Amnesty applied for Key ID {key_id}. Check was overdue by {gap}. Resetting failure history."
             )
             failing_since = None
@@ -279,7 +279,7 @@ class KeyProbe(IResourceProbe):
 
             # 3. Third priority: check if the key is in quarantine.
             if time_failing > timedelta(days=policy.quarantine_after_days):
-                logger.info(
+                logger.debug(
                     f"Key has been failing for {time_failing.days} days. It is now in quarantine. "
                     f"Re-checking in {policy.quarantine_recheck_interval_days} days."
                 )

@@ -77,12 +77,12 @@ async def run_sync_cycle(
     This function centralizes the synchronization logic, making it more robust and readable.
     """
     logger = logging.getLogger(__name__)
-    logger.info("Starting new TWO-PHASE synchronization cycle...")
+    logger.debug("Starting new TWO-PHASE synchronization cycle...")
 
     try:
         # --- PHASE 1: READ ---
         # Collect the complete "desired state" from configuration and files without touching the database.
-        logger.info(
+        logger.debug(
             "Sync Phase 1 (Read): Collecting desired state from files and config..."
         )
         desired_state: dict[str, dict[str, Any]] = {
@@ -117,13 +117,15 @@ async def run_sync_cycle(
                 }
                 desired_state["proxies"][provider_name] = proxy_state
 
-        logger.info(
+        logger.debug(
             f"Sync Phase 1 (Read) complete. Collected state for {len(enabled_providers)} providers."
         )
 
         # --- PHASE 2: APPLY ---
         # Apply the collected desired state to the database using the synchronizers.
-        logger.info("Sync Phase 2 (Apply): Applying collected state to the database...")
+        logger.debug(
+            "Sync Phase 2 (Apply): Applying collected state to the database..."
+        )
 
         provider_id_map = await db_manager.providers.get_id_map()
 
@@ -137,7 +139,7 @@ async def run_sync_cycle(
                     f"Error during apply phase for {syncer_name}: {e}", exc_info=True
                 )
 
-        logger.info("Sync Phase 2 (Apply) complete. Database state is consistent.")
+        logger.debug("Sync Phase 2 (Apply) complete. Database state is consistent.")
 
     except Exception as e:
         logger.critical(
@@ -145,7 +147,7 @@ async def run_sync_cycle(
             exc_info=True,
         )
 
-    logger.info("Synchronization cycle finished.")
+    logger.debug("Synchronization cycle finished.")
 
 
 async def run_worker() -> None:
