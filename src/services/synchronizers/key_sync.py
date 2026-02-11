@@ -3,6 +3,7 @@
 import logging
 import os
 import re
+import tempfile
 
 from src.core.accessor import ConfigAccessor
 
@@ -11,6 +12,63 @@ from src.core.interfaces import IResourceSyncer, ProviderKeyState
 from src.db.database import DatabaseManager
 
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_key_file(filepath: str) -> None:
+    """
+    Atomically rewrites a key file to remove duplicate lines.
+    Uses a temporary file and os.replace for atomicity to prevent data loss on crash.
+    """
+    try:
+        with open(filepath, encoding="utf-8") as f:
+            lines = f.readlines()
+
+        # Track seen keys and preserve order of first occurrence
+        seen_keys: set[str] = set()
+        unique_lines: list[str] = []
+        for line in lines:
+            # Split line into potential multiple keys (like the reader does)
+            potential_keys = re.split(r"[\s,]+", line.strip())
+            for key in potential_keys:
+                if key and key not in seen_keys:
+                    seen_keys.add(key)
+                    unique_lines.append(key + "\n")
+
+        # Rewrite if:
+        # 1. There are duplicate keys, OR
+        # 2. Any line contained multiple keys (needs normalization to one key per line)
+        original_key_count = 0
+        for line in lines:
+            stripped_line = line.strip()
+            if stripped_line:
+                # Count how many keys were on this line originally
+                keys_on_line = [k for k in re.split(r"[\s,]+", stripped_line) if k]
+                original_key_count += len(keys_on_line)
+
+        needs_rewrite = len(
+            unique_lines
+        ) < original_key_count or any(  # Duplicates found
+            len(re.split(r"[\s,]+", line.strip())) > 1 for line in lines if line.strip()
+        )  # Multi-key lines exist
+
+        if needs_rewrite:
+            with tempfile.NamedTemporaryFile(
+                "w", dir=os.path.dirname(filepath), delete=False, encoding="utf-8"
+            ) as tf:
+                tf.writelines(unique_lines)
+                temp_name = tf.name
+
+            # Atomic replace
+            os.replace(temp_name, filepath)
+            logger.info(f"Sanitized key file '{filepath}', removed duplicates.")
+
+    except PermissionError:
+        # Common in containerized environments with read-only mounts
+        logger.warning(
+            f"Permission denied while sanitizing '{filepath}'. Skipping cleanup."
+        )
+    except Exception as e:
+        logger.error(f"Failed to sanitize key file '{filepath}': {e}", exc_info=True)
 
 
 def read_keys_from_directory(path: str) -> set[str]:
@@ -30,6 +88,9 @@ def read_keys_from_directory(path: str) -> set[str]:
         for filename in os.listdir(path):
             filepath = os.path.join(path, filename)
             if os.path.isfile(filepath):
+                # Sanitize the file first to remove any duplicates
+                _sanitize_key_file(filepath)
+
                 try:
                     with open(filepath, encoding="utf-8") as f:
                         content = f.read()
