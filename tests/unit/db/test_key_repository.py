@@ -65,6 +65,7 @@ async def test_get_keys_to_check_normal_provider():
             "provider_name": "provider1",
             "model_name": "model1",
             "failing_since": None,
+            "next_check_time": datetime(2025, 1, 1, tzinfo=UTC),
         },
         {
             "key_id": 2,
@@ -72,6 +73,7 @@ async def test_get_keys_to_check_normal_provider():
             "provider_name": "provider1",
             "model_name": "model2",
             "failing_since": datetime(2025, 1, 1, tzinfo=UTC),
+            "next_check_time": datetime(2025, 1, 2, tzinfo=UTC),
         },
     ]
     mock_conn = MagicMock()
@@ -114,6 +116,7 @@ async def test_get_keys_to_check_shared_key_status():
             "provider_name": "shared_provider",
             "model_name": "__ALL_MODELS__",
             "failing_since": None,
+            "next_check_time": datetime(2025, 1, 1, tzinfo=UTC),
         },
         {
             "key_id": 1,
@@ -121,6 +124,7 @@ async def test_get_keys_to_check_shared_key_status():
             "provider_name": "shared_provider",
             "model_name": "__ALL_MODELS__",
             "failing_since": None,
+            "next_check_time": datetime(2025, 1, 1, tzinfo=UTC),
         },  # duplicate due to join? should be deduplicated
         {
             "key_id": 2,
@@ -128,6 +132,7 @@ async def test_get_keys_to_check_shared_key_status():
             "provider_name": "shared_provider",
             "model_name": "__ALL_MODELS__",
             "failing_since": None,
+            "next_check_time": datetime(2025, 1, 2, tzinfo=UTC),
         },
     ]
     mock_conn = MagicMock()
@@ -174,6 +179,7 @@ async def test_get_keys_to_check_mixed_providers():
             "provider_name": "shared_provider",
             "model_name": "__ALL_MODELS__",
             "failing_since": None,
+            "next_check_time": datetime(2025, 1, 1, tzinfo=UTC),
         },
         # Normal provider
         {
@@ -182,6 +188,7 @@ async def test_get_keys_to_check_mixed_providers():
             "provider_name": "normal_provider",
             "model_name": "model1",
             "failing_since": None,
+            "next_check_time": datetime(2025, 1, 2, tzinfo=UTC),
         },
         {
             "key_id": 3,
@@ -189,6 +196,7 @@ async def test_get_keys_to_check_mixed_providers():
             "provider_name": "normal_provider",
             "model_name": "model2",
             "failing_since": None,
+            "next_check_time": datetime(2025, 1, 3, tzinfo=UTC),
         },
     ]
     mock_conn = MagicMock()

@@ -169,6 +169,7 @@ class KeyProbe(IResourceProbe):
         model_name = resource["model_name"]
         provider_name = resource["provider_name"]
         failing_since = resource.get("failing_since")  # This can be None
+        next_check_time_scheduled = resource["next_check_time"]
 
         try:
             # We only need to check existence here, the policy is retrieved via accessor below.
@@ -201,6 +202,20 @@ class KeyProbe(IResourceProbe):
             )
             # This should not happen if the provider exists, but as a safety measure
             health_policy = HealthPolicyConfig()
+
+        # --- DOWNTIME AMNESTY LOGIC ---
+        # Calculate how late this check is compared to its scheduled time.
+        now = datetime.now(UTC)
+        gap = now - next_check_time_scheduled
+        amnesty_threshold = timedelta(days=health_policy.amnesty_threshold_days)
+
+        # If the gap is larger than the amnesty threshold, we assume the system was down.
+        # In this case, we reset the 'failing_since' counter to treat this as a fresh failure.
+        if gap > amnesty_threshold:
+            logger.info(
+                f"Amnesty applied for Key ID {key_id}. Check was overdue by {gap}. Resetting failure history."
+            )
+            failing_since = None
 
         next_check_time = self._calculate_next_check_time(
             policy=health_policy, result=result, failing_since=failing_since
