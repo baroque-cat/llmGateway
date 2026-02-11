@@ -239,7 +239,7 @@ class KeyRepository:
             db_keys = {row["key_value"]: row["id"] for row in rows}
             db_key_values = set(db_keys.keys())
 
-            # Add new keys
+            # Add new keys (Add-Only logic)
             new_key_values = keys_from_file - db_key_values
             if new_key_values:
                 records_to_add = [(provider_id, key) for key in new_key_values]
@@ -251,17 +251,8 @@ class KeyRepository:
                 logger.info(
                     f"SYNC '{provider_name}': Added {len(new_key_values)} new keys."
                 )
-
-            # Remove old keys
-            keys_to_remove = db_key_values - keys_from_file
-            if keys_to_remove:
-                ids_to_remove = [db_keys[val] for val in keys_to_remove]
-                await conn.execute(
-                    "DELETE FROM api_keys WHERE id = ANY($1::int[])", ids_to_remove
-                )
-                logger.info(
-                    f"SYNC '{provider_name}': Removed {len(keys_to_remove)} obsolete keys."
-                )
+            # Note: Keys are no longer removed from the DB based on file absence.
+            # They are only removed when the entire provider is deleted from config.
 
             # Step 2: Sync the `key_model_status` table.
             rows = await conn.fetch(
