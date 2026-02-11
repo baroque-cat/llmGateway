@@ -437,3 +437,60 @@ class TestErrorParsingScenarios:
             assert (
                 result.error_reason == expected_reason
             ), f"Status {status_code} should map to {expected_reason}, got {result.error_reason}"
+
+    @pytest.mark.asyncio
+    async def test_catch_all_error_parsing_rule(self):
+        """
+        Test error parsing with specific rule and catch-all rule.
+        """
+        provider = self.create_mock_openai_provider(
+            error_config=ErrorParsingConfig(
+                enabled=True,
+                rules=[
+                    ErrorParsingRule(
+                        status_code=400,
+                        error_path="error.message",
+                        match_pattern="Access denied.*",
+                        map_to="invalid_key",
+                        priority=10,
+                        description="Access denied errors",
+                    ),
+                    ErrorParsingRule(
+                        status_code=400,
+                        error_path="error.message",
+                        match_pattern=".*",
+                        map_to="server_error",
+                        priority=0,
+                        description="Catch-all for any 400 error",
+                    ),
+                ],
+            )
+        )
+
+        # Scenario 1: Specific rule matches
+        mock_response = AsyncMock(spec=httpx.Response)
+        mock_response.status_code = 400
+        mock_response.elapsed = MagicMock()
+        mock_response.elapsed.total_seconds.return_value = 0.5
+        error_body = json.dumps(
+            {
+                "error": {
+                    "message": "Access denied, please make sure your account is in good standing"
+                }
+            }
+        ).encode("utf-8")
+        mock_response.aread = AsyncMock(return_value=error_body)
+
+        result = await provider._parse_proxy_error(mock_response, error_body)
+        assert result.error_reason == ErrorReason.INVALID_KEY
+        assert result.status_code == 400
+
+        # Scenario 2: Catch-all rule matches (different message)
+        error_body2 = json.dumps({"error": {"message": "Some other 400 error"}}).encode(
+            "utf-8"
+        )
+        mock_response.aread = AsyncMock(return_value=error_body2)
+
+        result2 = await provider._parse_proxy_error(mock_response, error_body2)
+        assert result2.error_reason == ErrorReason.SERVER_ERROR
+        assert result2.status_code == 400
