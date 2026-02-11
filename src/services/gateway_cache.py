@@ -104,7 +104,7 @@ class GatewayCache:
                 self._key_pool = new_key_pool
 
                 total_keys = sum(len(q) for q in self._key_pool.values())
-                logger.info(
+                logger.debug(
                     f"Key pool cache refreshed successfully. Loaded {total_keys} keys across {len(self._key_pool)} pools."
                 )
 
@@ -199,7 +199,7 @@ class GatewayCache:
             if provider_config and provider_config.shared_key_status:
                 # Remove the key only from the virtual model pool
                 logger.info(
-                    f"Removing shared key_id {key_id} from virtual pool '{provider_name}:{ALL_MODELS_MARKER}' for provider '{provider_name}'."
+                    f"Removing shared key_id {key_id} from virtual pool '{provider_name}:shared' for provider '{provider_name}'."
                 )
                 pool_key = f"{provider_name}:{ALL_MODELS_MARKER}"
                 self._remove_from_single_pool(pool_key, key_id)

@@ -223,23 +223,21 @@ class KeyProbe(IResourceProbe):
 
         status_str = "valid" if result.ok else result.error_reason.value
 
-        if model_name == ALL_MODELS_MARKER:
-            log_model_name = f"{provider_name} (shared key)"
-        else:
-            log_model_name = model_name
+        # Format the model name for logging
+        formatted_model = "shared" if model_name == ALL_MODELS_MARKER else model_name
 
-        logger.info(
-            f"Updating status for key ID {key_id} ({log_model_name}): "
-            f"Status -> [{status_str}], "
-            f"Next check -> {next_check_time.strftime('%Y-%m-%d %H:%M:%S')}"
-        )
-
+        # Update the database first
         await self.db_manager.keys.update_status(
             key_id=key_id,
             model_name=model_name,  # Use original model_name (could be ALL_MODELS_MARKER)
             provider_name=provider_name,
             result=result,
             next_check_time=next_check_time,
+        )
+
+        # Log after a successful DB update to ensure consistency
+        logger.info(
+            f"WORKER_CHECK | Key {key_id} | {provider_name}:{formatted_model} | -> {status_str.upper()} (Next: {next_check_time.strftime('%Y-%m-%d %H:%M:%S')})"
         )
 
     def _calculate_next_check_time(

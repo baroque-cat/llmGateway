@@ -9,7 +9,7 @@ from src.services.gateway_service import _log_debug_info
 async def test_log_debug_info_headers_only():
     """Test that _log_debug_info logs headers only in headers_only mode."""
     with patch("src.services.gateway_service.logger") as mock_logger:
-        await _log_debug_info(
+        _log_debug_info(
             debug_mode="headers_only",
             instance_name="test_provider",
             request_method="POST",
@@ -47,7 +47,7 @@ async def test_log_debug_info_headers_only():
 async def test_log_debug_info_full_body():
     """Test that _log_debug_info logs full bodies in full_body mode."""
     with patch("src.services.gateway_service.logger") as mock_logger:
-        await _log_debug_info(
+        _log_debug_info(
             debug_mode="full_body",
             instance_name="test_provider",
             request_method="POST",
@@ -86,7 +86,7 @@ async def test_log_debug_info_body_truncation():
     """Test that _log_debug_info truncates large bodies."""
     with patch("src.services.gateway_service.logger") as mock_logger:
         large_body = b"x" * 20000  # 20KB, should be truncated to 10KB
-        await _log_debug_info(
+        _log_debug_info(
             debug_mode="full_body",
             instance_name="test_provider",
             request_method="POST",

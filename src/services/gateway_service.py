@@ -1,8 +1,9 @@
 # src/services/gateway_service.py
 
 import asyncio
+import json
 import logging
-from collections.abc import AsyncGenerator
+import re
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
@@ -88,49 +89,185 @@ MAX_DEBUG_BODY_SIZE = 10 * 1024
 # --- Helper Functions ---
 
 
-def _safe_decode_body(body: bytes) -> str:
+def _sanitize_headers(headers: dict[str, str]) -> dict[str, str]:
     """
-    Safely decodes a bytes object to a string for logging.
-    Attempts UTF-8 decoding first, falls back to repr() for binary data.
+    Sanitizes sensitive headers to prevent secret leakage in logs.
+    Replaces the values of known sensitive headers with '***'.
+    """
+    sensitive_headers = {"authorization", "x-goog-api-key", "x-api-key"}
+    sanitized: dict[str, str] = {}
+    for key, value in headers.items():
+        if key.lower() in sensitive_headers:
+            # For Authorization, keep the scheme (e.g., 'Bearer') but mask the token
+            if key.lower() == "authorization" and value.startswith("Bearer "):
+                sanitized[key] = "Bearer ***"
+            else:
+                sanitized[key] = "***"
+        else:
+            sanitized[key] = value
+    return sanitized
+
+
+def _sanitize_body(body: bytes) -> str:
+    """
+    Sanitizes the request/response body for logging in debug mode.
+    Attempts to parse as JSON and redact known sensitive fields.
+    Falls back to safe decoding if parsing fails.
     """
     try:
-        return body.decode("utf-8")
-    except UnicodeDecodeError:
-        # If it's not valid UTF-8, use repr to show a safe representation
+        # First, try to decode as UTF-8
+        decoded_str = body.decode("utf-8")
+        # Check if it looks like JSON
+        if decoded_str.strip().startswith(("{", "[")):
+            # Simple regex-based redaction for common sensitive keys
+            # This is a best-effort approach and may not catch all cases.
+            redacted_str = re.sub(
+                r'("api[_-]?key"|"token"|"secret"|"password")\s*:\s*"[^"]*"',
+                r'\1: "***"',
+                decoded_str,
+                flags=re.IGNORECASE,
+            )
+            return redacted_str
+        else:
+            return decoded_str
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        # If it's not valid UTF-8 or not JSON, use repr to show a safe representation
         return repr(body)
 
 
-async def _generate_streaming_body(
-    upstream_response: httpx.Response,
-) -> AsyncGenerator[bytes]:
+class StreamMonitor:
     """
-    An async generator that streams the response body from the upstream service.
-    This helper function follows the DRY principle.
+    An async generator wrapper to monitor and log streaming responses.
+    It measures the total duration of the stream and logs a final transaction summary.
     """
-    try:
-        async for chunk in upstream_response.aiter_bytes():
-            yield chunk
-    finally:
-        # Ensure the upstream connection is closed when the stream finishes or is interrupted.
-        await upstream_response.aclose()
 
+    def __init__(
+        self,
+        upstream_response: httpx.Response,
+        client_ip: str,
+        request_method: str,
+        request_path: str,
+        provider_name: str,
+        model_name: str,
+        check_result: CheckResult | None = None,
+    ):
+        self.upstream_response = upstream_response
+        self.client_ip = client_ip
+        self.request_method = request_method
+        self.request_path = request_path
+        self.provider_name = provider_name
+        self.model_name = model_name
+        self.check_result = check_result
+        self.start_time = None
 
-async def _cache_refresh_loop(cache: GatewayCache, interval_sec: int) -> None:
-    """
-    An infinite loop that periodically refreshes the key pool cache.
-    """
-    logger.info(
-        f"Starting cache refresh loop with an interval of {interval_sec} seconds."
-    )
-    while True:
+    def _get_internal_status(self) -> str:
+        """Determines the internal status string for logging."""
+        if self.check_result and not self.check_result.ok:
+            return self.check_result.error_reason.value.upper()
+        elif self.upstream_response.status_code == 200:
+            return "VALID"
+        else:
+            return "UNKNOWN"
+
+    def _format_model_name(self) -> str:
+        """Formats the model name for logging, replacing ALL_MODELS_MARKER with 'shared'."""
+        from src.core.constants import ALL_MODELS_MARKER
+
+        if self.model_name == ALL_MODELS_MARKER:
+            return "shared"
+        return self.model_name
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self.start_time is None:
+            self.start_time = asyncio.get_event_loop().time()
         try:
-            await asyncio.sleep(interval_sec)
-            await cache.refresh_key_pool()
-        except asyncio.CancelledError:
-            logger.info("Cache refresh loop is shutting down.")
-            break
-        except Exception:
-            logger.error("An error occurred in the cache refresh loop.", exc_info=True)
+            chunk = await self.upstream_response.aiter_bytes().__anext__()
+            return chunk
+        except StopAsyncIteration:
+            await self._finalize_logging()
+            raise
+        except Exception as e:
+            # Log the error but re-raise it so FastAPI can handle it properly.
+            logger.error(f"Error during streaming: {e}")
+            await self._finalize_logging()
+            raise
+
+    async def _finalize_logging(self):
+        """Logs the final transaction summary after the stream is complete or failed."""
+        if self.start_time is None:
+            return  # The stream never started
+
+        duration = asyncio.get_event_loop().time() - self.start_time
+        formatted_model = self._format_model_name()
+        internal_status = self._get_internal_status()
+        http_status = f"{self.upstream_response.status_code} {self.upstream_response.reason_phrase}"
+
+        logger.info(
+            f"GATEWAY_ACCESS | {self.client_ip} -> {self.request_method} {self.request_path} | "
+            f"{self.provider_name}:{formatted_model} | {http_status} -> {internal_status} ({duration:.2f}s)"
+        )
+        # Ensure the upstream connection is closed.
+        await self.upstream_response.aclose()
+
+
+# --- Helper Functions ---
+
+
+def _log_debug_info(
+    debug_mode: str,
+    instance_name: str,
+    request_method: str,
+    request_path: str,
+    request_headers: dict[str, str],
+    request_body: bytes,
+    response_status: int,
+    response_headers: dict[str, str],
+    response_body: bytes,
+) -> None:
+    """
+    Logs debug information based on the debug mode setting.
+
+    Args:
+        debug_mode: The effective debug mode ("headers_only" or "full_body").
+        instance_name: The name of the provider instance.
+        request_method: HTTP method of the request.
+        request_path: Path of the request.
+        request_headers: Headers from the client request.
+        request_body: Body content from the client request.
+        response_status: HTTP status code from the upstream response.
+        response_headers: Headers from the upstream response.
+        response_body: Body content from the upstream response.
+    """
+    # Sanitize headers before logging
+    sanitized_request_headers = _sanitize_headers(request_headers)
+    sanitized_response_headers = _sanitize_headers(response_headers)
+
+    # Log basic request info
+    logger.info(f"Request to {instance_name}: {request_method} {request_path}")
+    logger.info(f"Request headers: {sanitized_request_headers}")
+
+    # Log request body if in full_body mode
+    if debug_mode == "full_body":
+        request_body_preview = request_body[:MAX_DEBUG_BODY_SIZE]
+        if len(request_body) > MAX_DEBUG_BODY_SIZE:
+            request_body_preview += b"... (truncated)"
+        decoded_request_body = _sanitize_body(request_body_preview)
+        logger.info(f"Request body: {decoded_request_body}")
+
+    # Log response info
+    logger.info(f"Response from {instance_name}: {response_status}")
+    logger.info(f"Response headers: {sanitized_response_headers}")
+
+    # Log response body if in full_body mode
+    if debug_mode == "full_body":
+        response_body_preview = response_body[:MAX_DEBUG_BODY_SIZE]
+        if len(response_body) > MAX_DEBUG_BODY_SIZE:
+            response_body_preview += b"... (truncated)"
+        decoded_response_body = _sanitize_body(response_body_preview)
+        logger.info(f"Response body: {decoded_response_body}")
 
 
 async def _report_key_failure(
@@ -164,76 +301,22 @@ async def _report_key_failure(
         )
 
 
-async def _log_debug_info(
-    debug_mode: str,
-    instance_name: str,
-    request_method: str,
-    request_path: str,
-    request_headers: dict[str, str],
-    request_body: bytes,
-    response_status: int,
-    response_headers: dict[str, str],
-    response_body: bytes,
-) -> None:
+async def _cache_refresh_loop(cache: GatewayCache, interval_sec: int) -> None:
     """
-    Logs debug information based on the debug mode setting.
-
-    Args:
-        debug_mode: The effective debug mode ("headers_only" or "full_body").
-        instance_name: The name of the provider instance.
-        request_method: HTTP method of the request.
-        request_path: Path of the request.
-        request_headers: Headers from the client request.
-        request_body: Body content from the client request.
-        response_status: HTTP status code from the upstream response.
-        response_headers: Headers from the upstream response.
-        response_body: Body content from the upstream response.
+    An infinite loop that periodically refreshes the key pool cache.
     """
-    # Log basic request info
-    logger.info(f"Request to {instance_name}: {request_method} {request_path}")
-    logger.info(f"Request headers: {dict(request_headers)}")
-
-    # Log request body if in full_body mode
-    if debug_mode == "full_body":
-        request_body_preview = request_body[:MAX_DEBUG_BODY_SIZE]
-        if len(request_body) > MAX_DEBUG_BODY_SIZE:
-            request_body_preview += b"... (truncated)"
-        decoded_request_body = _safe_decode_body(request_body_preview)
-        logger.info(f"Request body: {decoded_request_body}")
-
-    # Log response info
-    logger.info(f"Response from {instance_name}: {response_status}")
-    logger.info(f"Response headers: {dict(response_headers)}")
-
-    # Log response body if in full_body mode
-    if debug_mode == "full_body":
-        response_body_preview = response_body[:MAX_DEBUG_BODY_SIZE]
-        if len(response_body) > MAX_DEBUG_BODY_SIZE:
-            response_body_preview += b"... (truncated)"
-        decoded_response_body = _safe_decode_body(response_body_preview)
-        logger.info(f"Response body: {decoded_response_body}")
-
-
-def _create_proxied_streaming_response(
-    upstream_response: httpx.Response,
-) -> StreamingResponse:
-    """
-    Creates a properly configured StreamingResponse for proxying.
-    It filters out hop-by-hop headers to prevent protocol conflicts.
-    """
-    # Filter out hop-by-hop headers from the upstream response.
-    filtered_headers = {
-        key: value
-        for key, value in upstream_response.headers.items()
-        if key.lower() not in HOP_BY_HOP_HEADERS
-    }
-
-    return StreamingResponse(
-        content=_generate_streaming_body(upstream_response),
-        status_code=upstream_response.status_code,
-        media_type=upstream_response.headers.get("content-type"),
-        headers=filtered_headers,
+    logger.info(
+        f"Starting cache refresh loop with an interval of {interval_sec} seconds."
     )
+    while True:
+        try:
+            await asyncio.sleep(interval_sec)
+            await cache.refresh_key_pool()
+        except asyncio.CancelledError:
+            logger.info("Cache refresh loop is shutting down.")
+            break
+        except Exception:
+            logger.error("An error occurred in the cache refresh loop.", exc_info=True)
 
 
 async def _metrics_cache_update_loop(
@@ -342,8 +425,30 @@ async def _handle_full_stream_request(
     )
 
     if check_result.ok:
-        # Case 1: Success. Stream the response back to the client.
-        return _create_proxied_streaming_response(upstream_response)
+        # Case 1: Success. Stream the response back to the client using StreamMonitor.
+        # Extract client IP for logging
+        client_ip = request.client.host if request.client else "unknown"
+        stream_monitor = StreamMonitor(
+            upstream_response=upstream_response,
+            client_ip=client_ip,
+            request_method=request.method,
+            request_path=str(request.url),
+            provider_name=instance_name,
+            model_name=model_name,
+            check_result=check_result,
+        )
+        # Filter out hop-by-hop headers from the upstream response.
+        filtered_headers = {
+            key: value
+            for key, value in upstream_response.headers.items()
+            if key.lower() not in HOP_BY_HOP_HEADERS
+        }
+        return StreamingResponse(
+            content=stream_monitor,
+            status_code=upstream_response.status_code,
+            media_type=upstream_response.headers.get("content-type"),
+            headers=filtered_headers,
+        )
 
     elif check_result.error_reason.is_client_error():
         # Case 2: Client-side error (e.g., 400 Bad Request). The key is not at fault.
@@ -450,7 +555,7 @@ async def _handle_buffered_request(
             await upstream_response.aclose()
 
             # Log debug information
-            await _log_debug_info(
+            _log_debug_info(
                 debug_mode=effective_debug_mode,
                 instance_name=instance_name,
                 request_method=request.method,
@@ -477,7 +582,27 @@ async def _handle_buffered_request(
             )
         else:
             # Normal streaming response when debug is disabled
-            return _create_proxied_streaming_response(upstream_response)
+            client_ip = request.client.host if request.client else "unknown"
+            stream_monitor = StreamMonitor(
+                upstream_response=upstream_response,
+                client_ip=client_ip,
+                request_method=request.method,
+                request_path=str(request.url),
+                provider_name=instance_name,
+                model_name=details.model_name,
+                check_result=check_result,
+            )
+            filtered_headers = {
+                key: value
+                for key, value in upstream_response.headers.items()
+                if key.lower() not in HOP_BY_HOP_HEADERS
+            }
+            return StreamingResponse(
+                content=stream_monitor,
+                status_code=upstream_response.status_code,
+                media_type=upstream_response.headers.get("content-type"),
+                headers=filtered_headers,
+            )
 
     elif check_result.error_reason.is_client_error():
         # Case 2: Client-side error (e.g., 400 Bad Request). The key is not at fault.
@@ -493,7 +618,7 @@ async def _handle_buffered_request(
             instance_name, "disabled"
         )
         if effective_debug_mode != "disabled":
-            await _log_debug_info(
+            _log_debug_info(
                 debug_mode=effective_debug_mode,
                 instance_name=instance_name,
                 request_method=request.method,
@@ -610,7 +735,7 @@ async def _handle_buffered_retryable_request(
                 await upstream_response.aclose()
 
                 # Log debug information
-                await _log_debug_info(
+                _log_debug_info(
                     debug_mode=effective_debug_mode,
                     instance_name=instance_name,
                     request_method=request.method,
@@ -637,7 +762,27 @@ async def _handle_buffered_retryable_request(
                 )
             else:
                 # Normal streaming response when debug is disabled
-                return _create_proxied_streaming_response(upstream_response)
+                client_ip = request.client.host if request.client else "unknown"
+                stream_monitor = StreamMonitor(
+                    upstream_response=upstream_response,
+                    client_ip=client_ip,
+                    request_method=request.method,
+                    request_path=str(request.url),
+                    provider_name=instance_name,
+                    model_name=details.model_name,
+                    check_result=check_result,
+                )
+                filtered_headers = {
+                    key: value
+                    for key, value in upstream_response.headers.items()
+                    if key.lower() not in HOP_BY_HOP_HEADERS
+                }
+                return StreamingResponse(
+                    content=stream_monitor,
+                    status_code=upstream_response.status_code,
+                    media_type=upstream_response.headers.get("content-type"),
+                    headers=filtered_headers,
+                )
 
         reason = check_result.error_reason
         logger.warning(
@@ -657,7 +802,7 @@ async def _handle_buffered_retryable_request(
                 instance_name, "disabled"
             )
             if effective_debug_mode != "disabled":
-                await _log_debug_info(
+                _log_debug_info(
                     debug_mode=effective_debug_mode,
                     instance_name=instance_name,
                     request_method=request.method,

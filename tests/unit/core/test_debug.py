@@ -10,7 +10,7 @@ async def test_debug_logging_function():
     """Test that the debug logging function works as expected."""
     with patch("src.services.gateway_service.logger") as mock_logger:
         # Test headers_only mode
-        await _log_debug_info(
+        _log_debug_info(
             debug_mode="headers_only",
             instance_name="test_provider",
             request_method="POST",
@@ -29,7 +29,7 @@ async def test_debug_logging_function():
         mock_logger.info.reset_mock()
 
         # Test full_body mode
-        await _log_debug_info(
+        _log_debug_info(
             debug_mode="full_body",
             instance_name="test_provider",
             request_method="POST",
@@ -59,7 +59,7 @@ async def test_log_debug_info_bytes_formatting():
     This test should pass after refactoring, confirming the bug is fixed.
     """
     with patch("src.services.gateway_service.logger") as mock_logger:
-        await _log_debug_info(
+        _log_debug_info(
             debug_mode="full_body",
             instance_name="test_provider",
             request_method="POST",

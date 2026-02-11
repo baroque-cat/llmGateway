@@ -8,6 +8,17 @@ import sys
 from src.core.accessor import ConfigAccessor
 
 
+class MetricsEndpointFilter(logging.Filter):
+    """
+    A custom filter to suppress log entries for the /metrics endpoint.
+    This prevents Prometheus scrapes from cluttering the main application logs.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        # Return False to drop the record if it contains "/metrics"
+        return "/metrics" not in record.getMessage()
+
+
 def setup_logging(accessor: ConfigAccessor) -> None:
     """
     Configures the root logger for the entire application based on the global config.
@@ -22,8 +33,8 @@ def setup_logging(accessor: ConfigAccessor) -> None:
     log_level = logging.INFO
 
     # Define the format for log messages for consistency across the application.
-    # Format includes timestamp, logger name, log level, and the message itself.
-    log_format = "%(name)s - [%(levelname)s] - %(message)s"
+    # The new format is cleaner and avoids redundant [INFO] tags.
+    log_format = "%(name)s: %(message)s"
 
     # Get the root logger. All other loggers created with logging.getLogger(__name__)
     # will inherit this configuration.
@@ -45,10 +56,16 @@ def setup_logging(accessor: ConfigAccessor) -> None:
     # Add the configured handler to the root logger.
     root_logger.addHandler(handler)
 
+    # Apply the custom filter to the uvicorn access logger to hide /metrics calls.
+    uvicorn_access_logger = logging.getLogger("uvicorn.access")
+    uvicorn_access_logger.addFilter(MetricsEndpointFilter())
+
     # Reduce the log level for third-party libraries that can be very verbose.
     # This keeps the application's logs clean and focused.
     logging.getLogger("apscheduler.executors.default").setLevel(logging.WARNING)
     logging.getLogger("urllib3.connectionpool").setLevel(logging.INFO)
+    # Silence httpx logs as we will provide our own unified transaction logs.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
     # A log message to confirm that logging has been successfully configured.
     logging.getLogger(__name__).info(
