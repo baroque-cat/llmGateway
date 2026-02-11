@@ -19,6 +19,7 @@ class KeyToCheck(TypedDict):
     provider_name: str
     model_name: str
     failing_since: datetime | None
+    next_check_time: datetime
 
 
 class AvailableKey(TypedDict):
@@ -369,7 +370,8 @@ class KeyRepository:
             k.key_value,
             p.name AS provider_name,
             s.model_name AS model_name,
-            s.failing_since
+            s.failing_since,
+            s.next_check_time
         FROM api_keys AS k
         JOIN key_model_status AS s ON k.id = s.key_id
         JOIN providers AS p ON k.provider_id = p.id
@@ -402,6 +404,7 @@ class KeyRepository:
                         "provider_name": row["provider_name"],
                         "model_name": row["model_name"],
                         "failing_since": row["failing_since"],
+                        "next_check_time": row["next_check_time"],
                     }
                     results.append(key_to_check)
                     checked_keys_for_shared_providers.add(key_id)
@@ -412,6 +415,7 @@ class KeyRepository:
                     "provider_name": row["provider_name"],
                     "model_name": row["model_name"],
                     "failing_since": row["failing_since"],
+                    "next_check_time": row["next_check_time"],
                 }
                 results.append(key_to_check)
         return results

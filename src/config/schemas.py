@@ -144,6 +144,11 @@ class HealthPolicyConfig:
     # After how many days of continuous failure to stop checking the key altogether.
     stop_checking_after_days: int = 90
 
+    # --- Downtime Amnesty Policy ---
+    # If a check is performed later than its scheduled time by more than this threshold,
+    # the system assumes it was due to a downtime and resets the 'failing_since' counter.
+    amnesty_threshold_days: float = 2.0
+
     # --- Batching Configuration (for controlling check request throughput) ---
     # How many keys to check in a single batch for this provider.
     batch_size: int = 30

@@ -71,6 +71,8 @@ def get_default_config() -> dict[str, Any]:
                     "quarantine_after_days": 30,
                     "quarantine_recheck_interval_days": 10,
                     "stop_checking_after_days": 90,
+                    # Downtime Amnesty Policy
+                    "amnesty_threshold_days": 2.0,
                     # Batching Configuration
                     "batch_size": 10,
                     "batch_delay_sec": 30,
