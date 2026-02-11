@@ -154,6 +154,9 @@ class HealthPolicyConfig:
     batch_size: int = 30
     # Delay in seconds between batches to avoid overwhelming the API.
     batch_delay_sec: int = 15
+    # Maximum time in seconds a single probe task is allowed to run before being force-cancelled.
+    # This prevents "zombie" tasks from hanging indefinitely and blocking the dispatcher.
+    task_timeout_sec: int = 900  # 15 minutes
 
     # --- Verification Loop Configuration (for retryable errors) ---
     # How many times to re-verify a key after a retryable error (e.g., rate limit).

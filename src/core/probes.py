@@ -17,6 +17,10 @@ logger = logging.getLogger(__name__)
 # REFACTORED: The hardcoded constant is removed.
 # The concurrency limit will now be read from the config.
 
+# Timeout for a single provider task to prevent indefinite hanging.
+# This value is a fallback; the actual timeout is read from the provider's health policy.
+DEFAULT_TASK_TIMEOUT_SEC = 900
+
 
 class IResourceProbe(ABC):
     """
@@ -51,10 +55,14 @@ class IResourceProbe(ABC):
         concurrency_limit = self.accessor.get_worker_concurrency()
         self.semaphore = asyncio.Semaphore(concurrency_limit)
 
+        # State management for active tasks to enable non-blocking dispatching.
+        self.active_tasks: dict[str, asyncio.Task[None]] = {}
+
     async def run_cycle(self) -> None:
         """
         Executes one full checking cycle for all resources concurrently.
         This is the main entry point called by the background worker.
+        The dispatcher logic has been refactored to be non-blocking.
         """
         logger.info(
             f"Starting async resource check cycle for {self.__class__.__name__}..."
@@ -74,23 +82,20 @@ class IResourceProbe(ABC):
                 if isinstance(p_name, str):
                     grouped_resources[p_name].append(resource)
 
-            tasks = [
-                asyncio.create_task(
-                    self._process_provider_batch(provider_name, resources)
-                )
-                for provider_name, resources in grouped_resources.items()
-            ]
-
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-
-            for result, task in zip(results, tasks, strict=False):
-                if isinstance(result, Exception):
-                    # This is a bit of a workaround to get context back from the task.
-                    provider_name = task.get_name()
-                    logger.error(
-                        f"An error occurred while processing the batch for provider '{provider_name}'.",
-                        exc_info=result,
+            # Dispatch tasks for providers that are not already active.
+            for provider_name, resources in grouped_resources.items():
+                if provider_name in self.active_tasks:
+                    # The provider is already being processed. Skip it to avoid overlap.
+                    logger.debug(
+                        f"Provider '{provider_name}' is already active. Skipping dispatch."
                     )
+                    continue
+
+                # Create a new task for this provider and track it.
+                task = asyncio.create_task(
+                    self._run_task_wrapper(provider_name, resources)
+                )
+                self.active_tasks[provider_name] = task
 
         except Exception:
             logger.critical(
@@ -166,6 +171,35 @@ class IResourceProbe(ABC):
                 f"An unexpected error occurred while checking and updating resource: {resource}",
                 exc_info=True,
             )
+
+    async def _run_task_wrapper(
+        self, provider_name: str, resources: list[dict[str, Any]]
+    ) -> None:
+        """
+        A safety wrapper for the provider batch processing task.
+        It enforces a timeout and ensures the active_tasks registry is cleaned up.
+        """
+        policy = self.accessor.get_health_policy(provider_name)
+        timeout_sec = policy.task_timeout_sec if policy else DEFAULT_TASK_TIMEOUT_SEC
+
+        try:
+            # Enforce a timeout to prevent indefinite hanging.
+            await asyncio.wait_for(
+                self._process_provider_batch(provider_name, resources),
+                timeout=timeout_sec,
+            )
+        except TimeoutError:
+            logger.error(
+                f"Provider '{provider_name}' task timed out after {timeout_sec} seconds. Task was cancelled."
+            )
+        except Exception as e:
+            logger.error(
+                f"An unexpected error occurred in the task for provider '{provider_name}': {e}",
+                exc_info=True,
+            )
+        finally:
+            # Critical: Always clean up the registry, even if the task failed or was cancelled.
+            self.active_tasks.pop(provider_name, None)
 
     @abstractmethod
     async def _get_resources_to_check(self) -> list[Any]:

@@ -116,3 +116,44 @@ providers:
         # Ensure other default values are still present
         assert provider.worker_health_policy.quarantine_after_days == 30
         assert provider.worker_health_policy.on_success_hr == 24  # from defaults
+        assert provider.worker_health_policy.task_timeout_sec == 900  # from defaults
+
+
+def test_config_loader_task_timeout_field():
+    """
+    Test that the task_timeout_sec field in worker_health_policy is correctly loaded.
+    """
+    mock_yaml_content = """database:
+  host: localhost
+  port: 5432
+  password: test_password
+worker:
+  max_concurrent_providers: 5
+providers:
+  test_provider:
+    enabled: true
+    provider_type: "test"
+    keys_path: "keys/test/"
+    api_base_url: "https://api.test.com/v1"
+    access_control:
+      gateway_access_token: "test_token"
+    gateway_policy:
+      debug_mode: "disabled"
+      streaming_mode: "auto"
+    worker_health_policy:
+      task_timeout_sec: 600
+"""
+
+    with (
+        patch("os.path.exists", return_value=True),
+        patch("builtins.open", mock_open(read_data=mock_yaml_content)),
+    ):
+        loader = ConfigLoader(path="dummy_path.yaml")
+        config = loader.load()
+
+        # Verify task_timeout_sec is loaded correctly
+        provider = config.providers["test_provider"]
+        assert provider.worker_health_policy.task_timeout_sec == 600
+        # Ensure other default values are still present
+        assert provider.worker_health_policy.amnesty_threshold_days == 2.0
+        assert provider.worker_health_policy.batch_size == 10

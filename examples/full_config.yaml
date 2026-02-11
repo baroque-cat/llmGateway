@@ -100,6 +100,9 @@ providers:
       # Batching Configuration
       batch_size: 10
       batch_delay_sec: 30
+      # Maximum time in seconds a single probe task is allowed to run before being force-cancelled.
+      # This prevents "zombie" tasks from hanging indefinitely and blocking the dispatcher.
+      task_timeout_sec: 900
       # Verification Loop Configuration
       # How many times to re-verify a key after a retryable error (e.g., rate limit).
       verification_attempts: 3

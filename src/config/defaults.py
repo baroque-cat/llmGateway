@@ -76,6 +76,7 @@ def get_default_config() -> dict[str, Any]:
                     # Batching Configuration
                     "batch_size": 10,
                     "batch_delay_sec": 30,
+                    "task_timeout_sec": 900,
                     # Verification Loop Configuration
                     "verification_attempts": 3,
                     "verification_delay_sec": 65,
