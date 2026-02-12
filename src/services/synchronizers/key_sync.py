@@ -126,6 +126,10 @@ class KeySyncer(IResourceSyncer):
         self.accessor = accessor
         self.db_manager = db_manager
 
+    def get_resource_type(self) -> str:
+        """Returns the resource type identifier for this syncer."""
+        return "keys"
+
     # REFACTORED: The old 'sync' method is replaced by 'apply_state'.
     # This method receives a complete snapshot of the desired state for all providers
     # and is responsible for applying this state to the database.

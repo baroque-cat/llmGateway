@@ -68,6 +68,10 @@ class ProxySyncer(IResourceSyncer):
         self.accessor = accessor
         self.db_manager = db_manager
 
+    def get_resource_type(self) -> str:
+        """Returns the resource type identifier for this syncer."""
+        return "proxies"
+
     # REFACTORED: The old 'sync' method is replaced by 'apply_state'.
     async def apply_state(
         self,

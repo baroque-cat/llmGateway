@@ -299,6 +299,17 @@ async def test_key_repository_sync_add_only():
         pass
 
 
+# --- Tests for KeySyncer.get_resource_type ---
+
+
+def test_key_syncer_get_resource_type():
+    """Test that KeySyncer returns the correct resource type identifier."""
+    mock_accessor = MagicMock(spec=ConfigAccessor)
+    mock_db_manager = MagicMock(spec=DatabaseManager)
+    syncer = KeySyncer(mock_accessor, mock_db_manager)
+    assert syncer.get_resource_type() == "keys"
+
+
 # We'll also write a test for atomic file rewrite using mocking.
 # However, we already have a test for atomic replace with os.replace.
 

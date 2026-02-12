@@ -133,7 +133,10 @@ async def run_sync_cycle(
         for syncer in all_syncers:
             syncer_name = syncer.__class__.__name__
             try:
-                await syncer.apply_state(provider_id_map, desired_state)
+                # Get the specific part of the desired state that this syncer is responsible for.
+                resource_type = syncer.get_resource_type()
+                state_for_syncer = desired_state[resource_type]
+                await syncer.apply_state(provider_id_map, state_for_syncer)
             except Exception as e:
                 logger.error(
                     f"Error during apply phase for {syncer_name}: {e}", exc_info=True

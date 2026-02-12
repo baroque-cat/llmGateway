@@ -173,6 +173,16 @@ class IResourceSyncer(ABC):
         pass
 
     @abstractmethod
+    def get_resource_type(self) -> str:
+        """
+        Returns a string identifier for the type of resource this syncer handles.
+        This is used by the background worker to route the correct part of the
+        desired_state dictionary to this syncer.
+        Examples: "keys", "proxies".
+        """
+        pass
+
+    @abstractmethod
     async def apply_state(
         self, provider_id_map: dict[str, int], desired_state: dict[str, Any]
     ) -> None:
