@@ -1,0 +1,83 @@
+name: llmgateway
+
+services:
+  database:
+    image: postgres:18-alpine
+    container_name: llmgateway_postgres_db
+    restart: always
+    environment:
+      - POSTGRES_USER=llm_gateway
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=llmgateway
+    volumes:
+      - llmgateway_pg_data:/var/lib/postgresql/data/
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U llm_gateway -d llmgateway"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - llmgateway_net
+
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: llmgateway:latest
+    container_name: llmgateway_gateway
+    command:
+      [
+        "python",
+        "main.py",
+        "gateway",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "55300",
+        "--workers",
+        "1",
+      ]
+    restart: unless-stopped
+    ports:
+      - "55300:55300"
+    environment:
+      - DB_HOST=database
+    env_file:
+      - .env
+    volumes:
+      - ./config:/app/config:ro,Z
+      - ./keys:/app/keys:rw,Z
+    depends_on:
+      database:
+        condition: service_healthy
+    networks:
+      - llmgateway_net
+    security_opt:
+      - no-new-privileges:true
+
+  worker:
+    image: llmgateway:latest
+    container_name: llmgateway_worker
+    command: ["python", "main.py", "worker"]
+    restart: unless-stopped
+    environment:
+      - DB_HOST=database
+    env_file:
+      - .env
+    volumes:
+      - ./config:/app/config:ro,Z
+      - ./keys:/app/keys:rw,Z
+    depends_on:
+      database:
+        condition: service_healthy
+    networks:
+      - llmgateway_net
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  llmgateway_pg_data:
+
+networks:
+  llmgateway_net:
+    driver: bridge
