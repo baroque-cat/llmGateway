@@ -88,6 +88,7 @@ async def test_gateway_dispatcher_routing_debug_mode():
     ):
         # Setup mock instances
         mock_db_manager = MagicMock()
+        mock_db_manager.wait_for_schema_ready = AsyncMock()
         MockDatabaseManager.return_value = mock_db_manager
         mock_http_factory = MagicMock()
         mock_http_factory.close_all = AsyncMock()
@@ -226,6 +227,7 @@ async def test_gateway_dispatcher_routing(
     ):
         # Setup mock instances
         mock_db_manager = MagicMock()
+        mock_db_manager.wait_for_schema_ready = AsyncMock()
         MockDatabaseManager.return_value = mock_db_manager
         mock_http_factory = MagicMock()
         mock_http_factory.close_all = AsyncMock()

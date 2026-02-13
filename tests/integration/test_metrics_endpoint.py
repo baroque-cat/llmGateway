@@ -38,6 +38,7 @@ def mock_accessor():
 def mock_db_manager():
     """Mock DatabaseManager."""
     manager = MagicMock()
+    manager.wait_for_schema_ready = AsyncMock()
     manager.keys = MagicMock()
     manager.providers = MagicMock()
     manager.proxies = MagicMock()

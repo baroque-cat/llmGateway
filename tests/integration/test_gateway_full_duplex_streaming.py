@@ -89,6 +89,7 @@ async def test_gateway_routes_to_full_stream_handler_when_auto_with_eligible_pro
     ):
         # Setup mock instances
         mock_db_manager = MagicMock()
+        mock_db_manager.wait_for_schema_ready = AsyncMock()
         MockDatabaseManager.return_value = mock_db_manager
         mock_http_factory = MagicMock()
         mock_http_factory.close_all = AsyncMock()
@@ -227,6 +228,7 @@ async def test_gateway_routes_to_full_stream_handler_for_gemini_provider():
     ):
         # Setup mock instances
         mock_db_manager = MagicMock()
+        mock_db_manager.wait_for_schema_ready = AsyncMock()
         MockDatabaseManager.return_value = mock_db_manager
         mock_http_factory = MagicMock()
         mock_http_factory.close_all = AsyncMock()

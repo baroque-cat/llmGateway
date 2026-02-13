@@ -1,12 +1,13 @@
 # src/db/database.py
 
+import asyncio
 import logging
 import random
 from datetime import UTC, datetime
 from typing import Any, TypedDict
 
 import asyncpg
-from asyncpg.pool import Pool
+from asyncpg import Pool
 
 from src.core.accessor import ConfigAccessor
 from src.core.constants import ALL_MODELS_MARKER, Status
@@ -634,6 +635,45 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Database connection check failed: {e}")
             return False
+
+    async def wait_for_schema_ready(self, timeout: int = 60) -> None:
+        """
+        Waits for the database schema to be ready by checking for the existence of a key table.
+        This is used by the Gateway service to ensure it doesn't start before the Worker has
+        finished initializing the schema.
+
+        Args:
+            timeout: Maximum time in seconds to wait for the schema to appear.
+
+        Raises:
+            TimeoutError: If the schema is not ready within the specified timeout.
+        """
+        from asyncpg import UndefinedTableError
+
+        start_time = asyncio.get_event_loop().time()
+        while True:
+            try:
+                pool = get_pool()
+                async with pool.acquire() as conn:
+                    # Check for the last table/view in the dependency chain
+                    await conn.fetchval("SELECT 1 FROM key_model_status LIMIT 1")
+                    logger.info("Database schema is ready.")
+                    return
+            except UndefinedTableError:
+                if asyncio.get_event_loop().time() - start_time > timeout:
+                    raise TimeoutError(
+                        f"Database schema not ready after {timeout} seconds."
+                    ) from None
+                logger.debug("Waiting for database schema initialization...")
+                await asyncio.sleep(2)
+            except Exception as e:
+                # Handle other potential errors (e.g., connection issues)
+                if asyncio.get_event_loop().time() - start_time > timeout:
+                    raise TimeoutError(
+                        f"Failed to check database schema readiness: {e}"
+                    ) from None
+                logger.debug(f"Temporary error while checking schema: {e}. Retrying...")
+                await asyncio.sleep(2)
 
     async def run_vacuum(self) -> None:
         """Executes the VACUUM command to optimize the database."""

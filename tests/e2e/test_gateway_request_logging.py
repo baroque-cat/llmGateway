@@ -78,6 +78,7 @@ async def test_gateway_request_logging():
 
         # Mock database manager
         mock_db_manager = MagicMock()
+        mock_db_manager.wait_for_schema_ready = AsyncMock()
         MockDatabaseManager.return_value = mock_db_manager
 
         # Mock HTTP client factory

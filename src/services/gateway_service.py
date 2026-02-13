@@ -1020,6 +1020,10 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
             dsn = accessor.get_database_dsn()
             await database.init_db_pool(dsn)
 
+            # Wait for the Worker to finish initializing the database schema.
+            db_manager_for_wait = DatabaseManager(accessor)
+            await db_manager_for_wait.wait_for_schema_ready(timeout=60)
+
             app.state.db_manager = DatabaseManager(accessor)
             app.state.http_client_factory = HttpClientFactory(accessor)
             app.state.gateway_cache = GatewayCache(accessor, app.state.db_manager)

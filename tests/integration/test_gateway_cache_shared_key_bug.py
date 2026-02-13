@@ -28,6 +28,7 @@ async def test_shared_key_status_bug_reproduction():
     # Arrange: Set up mocks
     mock_accessor = MagicMock(spec=ConfigAccessor)
     mock_db_manager = MagicMock(spec=DatabaseManager)
+    mock_db_manager.wait_for_schema_ready = AsyncMock()
 
     # Mock the keys repository within the db manager
     mock_keys_repo = MagicMock()
@@ -77,6 +78,7 @@ async def test_shared_key_status_working_correctly():
     # Arrange: Set up mocks
     mock_accessor = MagicMock(spec=ConfigAccessor)
     mock_db_manager = MagicMock(spec=DatabaseManager)
+    mock_db_manager.wait_for_schema_ready = AsyncMock()
 
     # Mock the keys repository within the db manager
     mock_keys_repo = MagicMock()
