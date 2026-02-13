@@ -6,9 +6,9 @@ services:
     container_name: llmgateway_postgres_db
     restart: always
     environment:
-      - POSTGRES_USER=llm_gateway
+      - POSTGRES_USER=${DB_USER}
       - POSTGRES_PASSWORD=${DB_PASSWORD}
-      - POSTGRES_DB=llmgateway
+      - POSTGRES_DB=${DB_NAME}
     volumes:
       - llmgateway_pg_data:/var/lib/postgresql/data/
     healthcheck:

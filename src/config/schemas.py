@@ -328,7 +328,7 @@ class DatabaseConfig:
     """
 
     host: str = "localhost"
-    port: int = 5433
+    port: int = 5432
     user: str = "llm_gateway"
     # This should be loaded from an environment variable, e.g., "${DB_PASSWORD}".
     password: str = ""

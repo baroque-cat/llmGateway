@@ -18,7 +18,7 @@ def get_default_config() -> dict[str, Any]:
         },
         "database": {
             "host": "localhost",
-            "port": 5433,
+            "port": 5432,
             "user": "llm_gateway",
             # This value is expected to be loaded from an environment variable.
             # Create a .env file in the project root with the line:
