@@ -9,13 +9,13 @@ worker:
 
 # --- DATABASE SETTINGS ---
 database:
-  host: "localhost"
-  port: 5433
-  user: "llm_gateway"
-  # Use environment variables for sensitive data.
-  # Ensure you have a .env file with DB_PASSWORD set.
+  # All database settings are loaded from environment variables.
+  # See the .env.example file for details.
+  host: "${DB_HOST}"
+  port: ${DB_PORT}
+  user: "${DB_USER}"
   password: "${DB_PASSWORD}"
-  dbname: "llmgateway"
+  dbname: "${DB_NAME}"
 
 # --- LOGGING SETTINGS ---
 # (Application logging only - statistics are now handled by Prometheus metrics)
