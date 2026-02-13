@@ -92,7 +92,34 @@ poetry install
     ```
 2.  Edit `config/providers.yaml` to add your API keys, providers, and desired policies.
 
-### Running
+### Running with Docker Compose (Recommended)
+
+The easiest and most robust way to run `llmGateway` is with `docker-compose`. This method provides full isolation, simplifies dependency management, and is compatible with rootless container engines like Podman.
+
+1.  **Prepare your configuration**:
+    ```bash
+    # Copy the example config and .env file
+    cp examples/full_config.yaml config/providers.yaml
+    cp examples/.env.example .env
+
+    # Edit the files to match your setup
+    edit config/providers.yaml
+    edit .env
+    ```
+
+2.  **Build and start the services**:
+    ```bash
+    docker-compose up --build -d
+    ```
+
+This will start three services: a PostgreSQL database, the API Gateway, and the Background Worker.
+
+> **Why Docker Compose with Podman?**
+> This project's `docker-compose.yml` is designed for maximum compatibility and security. It uses named volumes and the `userns_mode: keep-id` directive, which allows it to run seamlessly in **rootless mode** with [Podman](https://podman.io/). Rootless containers enhance security by running without root privileges on the host system, making them ideal for production environments.
+
+### Running from Source (Development)
+
+If you prefer to run the application directly from source (e.g., for development):
 
 *   **Start the API Gateway:**
     ```bash

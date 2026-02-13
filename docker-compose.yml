@@ -40,8 +40,7 @@ services:
     restart: unless-stopped
     ports:
       - "55300:55300"
-    environment:
-      - DB_HOST=database
+    # All configuration is loaded from the .env file.
     env_file:
       - .env
     volumes:
@@ -60,8 +59,7 @@ services:
     container_name: llmgateway_worker
     command: ["python", "main.py", "worker"]
     restart: unless-stopped
-    environment:
-      - DB_HOST=database
+    # All configuration is loaded from the .env file.
     env_file:
       - .env
     volumes:
