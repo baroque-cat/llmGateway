@@ -26,9 +26,7 @@ The project follows a clean, modular design with a clear separation of concerns.
 /llmGateway
 ├── config/
 │   └── providers.yaml          # Main configuration file
-├── examples/                   # Example configuration files
 ├── keys/                       # Directory for API key files
-├── logs/                       # Directory for log files
 ├── src/
 │   ├── config/                 # Configuration loading, validation, and access
 │   │   ├── __init__.py         # Configuration facade (Singleton)
@@ -88,19 +86,19 @@ poetry install
 
 1.  Create your configuration file by copying an example:
     ```bash
-    cp examples/minimal_config.yaml config/providers.yaml
+    cp config/example_minimal_config.yaml config/providers.yaml
     ```
 2.  Edit `config/providers.yaml` to add your API keys, providers, and desired policies.
 
-### Running with Docker Compose (Recommended)
+### Running with Docker Compose
 
-The easiest and most robust way to run `llmGateway` is with `docker-compose`. This method provides full isolation, simplifies dependency management, and is compatible with rootless container engines like Podman.
+The easiest and most robust way to run `llmGateway` is with `docker-compose`.
 
 1.  **Prepare your configuration**:
     ```bash
     # Copy the example config and .env file
-    cp examples/full_config.yaml config/providers.yaml
-    cp examples/.env.example .env
+    cp config/example_full_config.yaml config/providers.yaml
+    cp .env.example .env
 
     # Edit the files to match your setup
     edit config/providers.yaml
@@ -113,9 +111,6 @@ The easiest and most robust way to run `llmGateway` is with `docker-compose`. Th
     ```
 
 This will start three services: a PostgreSQL database, the API Gateway, and the Background Worker.
-
-> **Why Docker Compose with Podman?**
-> This project's `docker-compose.yml` is designed for maximum compatibility and security. It uses named volumes and the `userns_mode: keep-id` directive, which allows it to run seamlessly in **rootless mode** with [Podman](https://podman.io/). Rootless containers enhance security by running without root privileges on the host system, making them ideal for production environments.
 
 ### Running from Source (Development)
 
@@ -136,40 +131,6 @@ The system is configured via the `providers.yaml` file. The configuration schema
 
 *   **Retry Policies:** Define how many times and with what backoff strategy to retry failed requests.
 *   **Health Probing:** Configure intervals and methods for checking key validity.
-
-> **Note:** The Circuit Breaker pattern is currently **not implemented**, although its configuration structure exists.
-
-## Development
-
-This project adheres to strict development guidelines.
-
-### Testing
-
-```bash
-# Run all tests
-poetry run pytest
-
-# Run type checking
-poetry run pyright
-
-# Run linter
-poetry run ruff check src/ tests/
-
-# Format code
-poetry run black src/ tests/
-```
-
-### Code Style
-
-*   **Python Version:** 3.13+
-*   **Asynchronous:** Full `async`/`await` support.
-*   **Typing:** Strict type hints for all functions and variables.
-*   **Naming:**
-    *   Variables/Functions: `snake_case`
-    *   Classes: `PascalCase`
-    *   Constants: `UPPER_CASE`
-*   **Documentation:** Docstrings are required for all public modules, classes, and functions.
-*   **Error Handling:** Use typed exceptions and enums from `src.core.constants.ErrorReason`.
 
 ## Project Status
 

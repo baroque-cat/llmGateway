@@ -16,10 +16,14 @@ ENV/
 poetry.toml
 
 #tmp
-keys/*
 logs/*
 data/*
+
+keys/*
+!keys/.gitkeep
 config/*
+!config/example_minimal_config.yaml
+!config/example_full_config.yaml
 
 #python
 __pycache__/
