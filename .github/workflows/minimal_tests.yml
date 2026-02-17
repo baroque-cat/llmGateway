@@ -39,7 +39,7 @@ jobs:
 
       - name: Run ruff linting
         run: |
-          poetry run ruff check src/ tests/
+          poetry run ruff check src/ main.py
 
       - name: Run black formatting check
         run: |

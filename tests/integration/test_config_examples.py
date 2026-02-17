@@ -7,7 +7,11 @@ from src.config.loader import ConfigLoader
 
 # Mock environment variables required by the examples
 MOCK_ENV = {
+    "DB_HOST": "localhost",
+    "DB_PORT": "5432",
+    "DB_USER": "test_user",
     "DB_PASSWORD": "test_password",
+    "DB_NAME": "test_db",
     "GEMINI_PROD_TOKEN": "test_token_prod",
     "GEMINI_MINIMAL_TOKEN": "test_token_minimal",
     "DEEPSEEK_TOKEN": "test_token_deepseek",
@@ -22,8 +26,8 @@ def mock_env():
 
 
 def test_load_full_config_example(mock_env):
-    """Verifies that examples/full_config.yaml is valid and loadable."""
-    loader = ConfigLoader(path="examples/full_config.yaml")
+    """Verifies that config/example_full_config.yaml is valid and loadable."""
+    loader = ConfigLoader(path="config/example_full_config.yaml")
     config = loader.load()
 
     assert config.database.password == "test_password"
@@ -46,8 +50,8 @@ def test_load_full_config_example(mock_env):
 
 
 def test_load_minimal_config_example(mock_env):
-    """Verifies that examples/minimal_config.yaml is valid and loadable."""
-    loader = ConfigLoader(path="examples/minimal_config.yaml")
+    """Verifies that config/example_minimal_config.yaml is valid and loadable."""
+    loader = ConfigLoader(path="config/example_minimal_config.yaml")
     config = loader.load()
 
     assert config.database.password == "test_password"
