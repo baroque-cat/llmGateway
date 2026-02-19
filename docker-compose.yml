@@ -1,5 +1,3 @@
-name: llmgateway
-
 services:
   database:
     image: postgres:18-alpine
@@ -10,7 +8,7 @@ services:
       - POSTGRES_PASSWORD=${DB_PASSWORD}
       - POSTGRES_DB=${DB_NAME}
     volumes:
-      - llmgateway_pg_data:/var/lib/postgresql/data/
+      - pg_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U llm_gateway -d llmgateway"]
       interval: 10s
@@ -75,7 +73,7 @@ services:
       - no-new-privileges:true
 
 volumes:
-  llmgateway_pg_data:
+  pg_data:
 
 networks:
   llmgateway_net:
