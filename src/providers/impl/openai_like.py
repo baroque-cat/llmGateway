@@ -136,6 +136,10 @@ class OpenAILikeProvider(AIBaseProvider):
         if status_code >= 500:
             return ErrorReason.SERVER_ERROR
 
+        # Categorical Error Mapping: Any other 4xx error is BAD_REQUEST
+        if 400 <= status_code < 500:
+            return ErrorReason.BAD_REQUEST
+
         return ErrorReason.UNKNOWN
 
     async def check(

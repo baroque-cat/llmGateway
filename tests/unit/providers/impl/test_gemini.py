@@ -386,6 +386,29 @@ class TestGeminiErrorParsing:
         assert result.status_code == 400
         assert result.response_time == 0.5
 
+    def test_map_error_to_reason_4xx_errors(self):
+        """
+        Test that _map_error_to_reason correctly maps various 4xx errors to BAD_REQUEST.
+        This includes 404 (Not Found) and 422 (Unprocessable Entity).
+        """
+        provider = self.create_mock_provider()
+
+        # Test 422 Unprocessable Entity
+        assert provider._map_error_to_reason(422, "") == ErrorReason.BAD_REQUEST
+
+        # Test other 4xx codes (excluding special cases like 404)
+        assert provider._map_error_to_reason(405, "") == ErrorReason.BAD_REQUEST
+        assert provider._map_error_to_reason(406, "") == ErrorReason.BAD_REQUEST
+        assert provider._map_error_to_reason(409, "") == ErrorReason.BAD_REQUEST
+
+        # Ensure existing mappings are preserved
+        assert provider._map_error_to_reason(400, "") == ErrorReason.BAD_REQUEST
+        assert provider._map_error_to_reason(403, "") == ErrorReason.NO_ACCESS
+        assert (
+            provider._map_error_to_reason(404, "") == ErrorReason.NO_MODEL
+        )  # Special case for 404 in Gemini
+        assert provider._map_error_to_reason(429, "") == ErrorReason.NO_QUOTA
+
 
 class TestGeminiProxyRequest:
     """Test suite for Gemini provider proxy_request with streaming data."""

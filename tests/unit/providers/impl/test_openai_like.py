@@ -392,6 +392,31 @@ class TestOpenAILikeErrorParsing:
         # mocking of the entire HTTP request flow, which is beyond the scope
         # of error parsing integration tests.
 
+    def test_map_status_code_to_reason_4xx_errors(self):
+        """
+        Test that _map_status_code_to_reason correctly maps various 4xx errors to BAD_REQUEST.
+        This includes 404 (Not Found) and 422 (Unprocessable Entity).
+        """
+        provider = self.create_mock_provider()
+
+        # Test 404 Not Found
+        assert provider._map_status_code_to_reason(404) == ErrorReason.BAD_REQUEST
+
+        # Test 422 Unprocessable Entity
+        assert provider._map_status_code_to_reason(422) == ErrorReason.BAD_REQUEST
+
+        # Test other 4xx codes
+        assert provider._map_status_code_to_reason(405) == ErrorReason.BAD_REQUEST
+        assert provider._map_status_code_to_reason(406) == ErrorReason.BAD_REQUEST
+        assert provider._map_status_code_to_reason(409) == ErrorReason.BAD_REQUEST
+
+        # Ensure existing mappings are preserved
+        assert provider._map_status_code_to_reason(400) == ErrorReason.BAD_REQUEST
+        assert provider._map_status_code_to_reason(401) == ErrorReason.INVALID_KEY
+        assert provider._map_status_code_to_reason(403) == ErrorReason.INVALID_KEY
+        assert provider._map_status_code_to_reason(402) == ErrorReason.NO_QUOTA
+        assert provider._map_status_code_to_reason(429) == ErrorReason.RATE_LIMITED
+
 
 class TestOpenAILikeProxyRequest:
     """Test suite for OpenAI-like provider proxy_request with streaming data."""

@@ -459,8 +459,13 @@ async def _handle_full_stream_request(
             f"The API key (ID: {key_id}) will NOT be penalized. Forwarding original error to client."
         )
         # Read the error body from the upstream to forward it.
-        response_body = await upstream_response.aread()
-        await upstream_response.aclose()
+        try:
+            response_body = await upstream_response.aread()
+        except Exception:
+            # Поток закрыт оптимизатором провайдера (StreamClosed)
+            response_body = f'{{"error": "Upstream error: {check_result.message or check_result.error_reason.value}"}}'.encode()
+        finally:
+            await upstream_response.aclose()
         # Filter headers just like in the success case.
         filtered_headers = {
             key: value
@@ -479,6 +484,32 @@ async def _handle_full_stream_request(
             f"Request for '{instance_name}' failed due to an upstream/key error: [{check_result.error_reason.value}]. "
             f"The API key (ID: {key_id}) WILL be penalized."
         )
+
+        # --- Гарантированный вывод логов в full_body ---
+        try:
+            response_body = await upstream_response.aread()
+        except Exception:
+            response_body = b""
+        finally:
+            await upstream_response.aclose()
+
+        effective_debug_mode = request.app.state.debug_mode_map.get(
+            instance_name, "disabled"
+        )
+        if effective_debug_mode != "disabled":
+            _log_debug_info(
+                debug_mode=effective_debug_mode,
+                instance_name=instance_name,
+                request_method=request.method,
+                request_path=str(request.url),
+                request_headers=dict(request.headers),
+                request_body=b"",  # We don't have the original request body in full stream mode
+                response_status=upstream_response.status_code,
+                response_headers=dict(upstream_response.headers),
+                response_body=response_body,
+            )
+        # ------------------------------------------------
+
         # Report and remove the failed key from the live cache.
         asyncio.create_task(
             _report_key_failure(
@@ -612,8 +643,13 @@ async def _handle_buffered_request(
             f"Request for '{instance_name}' failed due to a client-side error: [{check_result.error_reason.value}]. "
             f"The API key (ID: {key_id}) will NOT be penalized. Forwarding original error to client."
         )
-        response_body = await upstream_response.aread()
-        await upstream_response.aclose()
+        try:
+            response_body = await upstream_response.aread()
+        except Exception:
+            # Поток закрыт оптимизатором провайдера (StreamClosed)
+            response_body = f'{{"error": "Upstream error: {check_result.message or check_result.error_reason.value}"}}'.encode()
+        finally:
+            await upstream_response.aclose()
 
         # Log debug information for client errors too
         effective_debug_mode = request.app.state.debug_mode_map.get(
@@ -649,6 +685,32 @@ async def _handle_buffered_request(
             f"Request for '{instance_name}' failed due to an upstream/key error: [{check_result.error_reason.value}]. "
             f"The API key (ID: {key_id}) WILL be penalized."
         )
+
+        # --- Гарантированный вывод логов в full_body ---
+        try:
+            response_body = await upstream_response.aread()
+        except Exception:
+            response_body = b""
+        finally:
+            await upstream_response.aclose()
+
+        effective_debug_mode = request.app.state.debug_mode_map.get(
+            instance_name, "disabled"
+        )
+        if effective_debug_mode != "disabled":
+            _log_debug_info(
+                debug_mode=effective_debug_mode,
+                instance_name=instance_name,
+                request_method=request.method,
+                request_path=request.url.path,
+                request_headers=dict(request.headers),
+                request_body=request_body,
+                response_status=upstream_response.status_code,
+                response_headers=dict(upstream_response.headers),
+                response_body=response_body,
+            )
+        # ------------------------------------------------
+
         asyncio.create_task(
             _report_key_failure(
                 db_manager, key_id, instance_name, details.model_name, check_result
@@ -733,8 +795,13 @@ async def _handle_buffered_retryable_request(
 
             if effective_debug_mode != "disabled":
                 # Read the entire response body for logging
-                response_body = await upstream_response.aread()
-                await upstream_response.aclose()
+                try:
+                    response_body = await upstream_response.aread()
+                except Exception:
+                    # Поток закрыт оптимизатором провайдера (StreamClosed)
+                    response_body = f'{{"error": "Upstream error: {check_result.message or check_result.error_reason.value}"}}'.encode()
+                finally:
+                    await upstream_response.aclose()
 
                 # Log debug information
                 _log_debug_info(
@@ -796,8 +863,13 @@ async def _handle_buffered_retryable_request(
             logger.error(
                 f"Non-retryable client error received: {reason.value}. Aborting retry cycle."
             )
-            response_body = await upstream_response.aread()
-            await upstream_response.aclose()
+            try:
+                response_body = await upstream_response.aread()
+            except Exception:
+                # Поток закрыт оптимизатором провайдера (StreamClosed)
+                response_body = f'{{"error": "Upstream error: {check_result.message or check_result.error_reason.value}"}}'.encode()
+            finally:
+                await upstream_response.aclose()
 
             # Log debug information for client errors too
             effective_debug_mode = request.app.state.debug_mode_map.get(

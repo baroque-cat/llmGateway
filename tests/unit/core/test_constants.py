@@ -43,6 +43,39 @@ class TestErrorReasonLogic:
         """
         assert ErrorReason.BAD_REQUEST.is_retryable() is False
 
+    def test_is_client_error_method(self):
+        """
+        Verify the is_client_error() method correctly identifies client-side errors.
+        After the fix, UNKNOWN should also be considered a client error to prevent unfair penalties.
+        """
+        # These errors should be considered client errors
+        client_errors = [
+            ErrorReason.BAD_REQUEST,
+            ErrorReason.UNKNOWN,
+        ]
+
+        for error in client_errors:
+            assert error.is_client_error() is True, f"{error} should be a client error"
+
+        # These errors should NOT be client errors
+        non_client_errors = [
+            ErrorReason.INVALID_KEY,
+            ErrorReason.NO_ACCESS,
+            ErrorReason.RATE_LIMITED,
+            ErrorReason.NO_QUOTA,
+            ErrorReason.NO_MODEL,
+            ErrorReason.NETWORK_ERROR,
+            ErrorReason.TIMEOUT,
+            ErrorReason.SERVER_ERROR,
+            ErrorReason.SERVICE_UNAVAILABLE,
+            ErrorReason.OVERLOADED,
+        ]
+
+        for error in non_client_errors:
+            assert error.is_client_error() is False, (
+                f"{error} should NOT be a client error"
+            )
+
     def test_is_fatal_method(self):
         """
         Verify the new is_fatal() method correctly identifies key-invalidating errors.

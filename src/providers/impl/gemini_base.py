@@ -155,6 +155,10 @@ class GeminiBaseProvider(AIBaseProvider):
         if status_code == 504:
             return ErrorReason.TIMEOUT
 
+        # Categorical Error Mapping: Any other 4xx error is BAD_REQUEST
+        if 400 <= status_code < 500:
+            return ErrorReason.BAD_REQUEST
+
         # Fallback for any other unhandled error.
         return ErrorReason.UNKNOWN
 

@@ -174,15 +174,15 @@ async def test_stream_closed_bug(
     )
 
     # Mock asyncio.sleep to avoid actual delays
-    with (
-        patch("asyncio.sleep", side_effect=lambda x: None),  # type: ignore
-        pytest.raises(httpx.StreamClosed),
-    ):
-        # The bug currently causes httpx.StreamClosed to be raised.
-        # We mark this test as expected to fail until the bug is fixed.
-        # When the bug is fixed, the handler should not raise StreamClosed,
-        # and this test will start passing (XPASS), indicating the fix works.
-        await _handle_buffered_retryable_request(req, provider, instance_name)
+    with patch("asyncio.sleep", side_effect=lambda x: None):  # type: ignore
+        # The bug is now fixed, so the handler should not raise StreamClosed.
+        # Instead, it should return a proper Response object with the error message.
+        response = await _handle_buffered_retryable_request(
+            req, provider, instance_name
+        )
+        assert isinstance(response, Response)
+        # The response should have a status code of 400 (client error)
+        assert response.status_code == 400
 
 
 @pytest.mark.asyncio
