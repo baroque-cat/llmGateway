@@ -462,7 +462,6 @@ async def _handle_full_stream_request(
         try:
             response_body = await upstream_response.aread()
         except Exception:
-            # Поток закрыт оптимизатором провайдера (StreamClosed)
             response_body = f'{{"error": "Upstream error: {check_result.message or check_result.error_reason.value}"}}'.encode()
         finally:
             await upstream_response.aclose()
@@ -485,7 +484,6 @@ async def _handle_full_stream_request(
             f"The API key (ID: {key_id}) WILL be penalized."
         )
 
-        # --- Гарантированный вывод логов в full_body ---
         try:
             response_body = await upstream_response.aread()
         except Exception:
@@ -686,7 +684,6 @@ async def _handle_buffered_request(
             f"The API key (ID: {key_id}) WILL be penalized."
         )
 
-        # --- Гарантированный вывод логов в full_body ---
         try:
             response_body = await upstream_response.aread()
         except Exception:
@@ -801,7 +798,6 @@ async def _handle_buffered_retryable_request(
                 try:
                     response_body = await upstream_response.aread()
                 except Exception:
-                    # Поток закрыт оптимизатором провайдера (StreamClosed)
                     response_body = f'{{"error": "Upstream error: {check_result.message or check_result.error_reason.value}"}}'.encode()
                 finally:
                     await upstream_response.aclose()
@@ -873,7 +869,6 @@ async def _handle_buffered_retryable_request(
             try:
                 response_body = await upstream_response.aread()
             except Exception:
-                # Поток закрыт оптимизатором провайдера (StreamClosed)
                 response_body = f'{{"error": "Upstream error: {check_result.message or check_result.error_reason.value}"}}'.encode()
             finally:
                 await upstream_response.aclose()

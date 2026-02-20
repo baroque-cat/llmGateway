@@ -85,7 +85,7 @@ class ErrorReason(Enum):
         """
         client_errors = {
             ErrorReason.BAD_REQUEST,
-            ErrorReason.UNKNOWN,  # Защита от несправедливого пенальти
+            ErrorReason.UNKNOWN,
         }
         return self in client_errors
 
