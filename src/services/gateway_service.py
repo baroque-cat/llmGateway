@@ -760,16 +760,19 @@ async def _handle_buffered_retryable_request(
             },
         )
 
+    failed_key_ids: set[int] = set()
+    total_attempts = 0
     key_error_attempts = 0
     server_error_attempts = 0
     last_error_response = None
 
-    max_total_attempts = key_error_policy.attempts + server_error_policy.attempts
-
-    for attempt in range(max_total_attempts):
-        key_info = cache.get_key_from_pool(instance_name, details.model_name)
+    while True:
+        total_attempts += 1
+        key_info = cache.get_key_from_pool(
+            instance_name, details.model_name, exclude_key_ids=failed_key_ids
+        )
         if not key_info:
-            return JSONResponse(
+            return last_error_response or JSONResponse(
                 status_code=503,
                 content={"error": "No available API keys to handle the request."},
             )
@@ -855,7 +858,11 @@ async def _handle_buffered_retryable_request(
 
         reason = check_result.error_reason
         logger.warning(
-            f"Attempt {attempt + 1}/{max_total_attempts} failed for '{instance_name}'. Reason: [{reason.value}]"
+            f"Attempt {total_attempts} failed for '{instance_name}'. Reason: [{reason.value}]"
+        )
+        logger.info(
+            f"Retry status - Total attempts: {total_attempts}, Key errors: {key_error_attempts}/{key_error_policy.attempts}, "
+            f"Server errors (current key): {server_error_attempts}/{server_error_policy.attempts}"
         )
 
         if reason.is_client_error():
@@ -909,6 +916,12 @@ async def _handle_buffered_retryable_request(
             # Phase 0 fix: Immediate penalty if fatal
             # (Note: reason.is_fatal() is now true for INVALID_KEY, NO_QUOTA etc from previous refactor)
 
+            # Close the upstream connection to prevent connection pool leaks
+            await upstream_response.aclose()
+
+            # Add to local blacklist to prevent fetching the same broken key again
+            failed_key_ids.add(key_id)
+
             logger.warning(
                 f"Key fault detected (Reason: {reason.value}). "
                 f"Marking key_id {key_id} as failed and removing from pool."
@@ -924,6 +937,10 @@ async def _handle_buffered_retryable_request(
             )
 
             key_error_attempts += 1
+            server_error_attempts = (
+                0  # CRITICAL: Reset server error tracking for the next key
+            )
+
             if key_error_attempts < key_error_policy.attempts:
                 # NEW LOGIC: Apply backoff for key rotation to prevent "Key Storm"
                 # This protects the DB and logic from spinning too fast if all keys are bad
@@ -948,6 +965,9 @@ async def _handle_buffered_retryable_request(
         # Case 4: True Transient Server Errors (Timeout, Connection Error, etc).
         # These are unrelated to the specific key, so we keep the key and use backoff.
         elif reason.is_retryable():
+            # Close the upstream connection to prevent connection pool leaks
+            await upstream_response.aclose()
+
             server_error_attempts += 1
             if server_error_attempts < server_error_policy.attempts:
                 delay = server_error_policy.backoff_sec * (
@@ -962,6 +982,10 @@ async def _handle_buffered_retryable_request(
                 logger.warning(
                     f"Exhausted all {server_error_policy.attempts} retry attempts for server errors. Penalizing key {key_id}."
                 )
+
+                # Add to local blacklist
+                failed_key_ids.add(key_id)
+
                 # Treat exhaustion as a key failure: Penalize and Rotate
                 asyncio.create_task(
                     _report_key_failure(
@@ -980,6 +1004,10 @@ async def _handle_buffered_retryable_request(
 
                 # Fall through to Key Rotation logic
                 key_error_attempts += 1
+                server_error_attempts = (
+                    0  # CRITICAL: Reset server attempts for the new key
+                )
+
                 if key_error_attempts < key_error_policy.attempts:
                     delay = key_error_policy.backoff_sec * (
                         key_error_policy.backoff_factor ** (key_error_attempts - 1)
@@ -988,7 +1016,6 @@ async def _handle_buffered_retryable_request(
                         f"Rotating key after server retry exhaustion... Backoff {delay:.2f}s."
                     )
                     await asyncio.sleep(delay)
-                    server_error_attempts = 0  # Reset server attempts for the new key
                     continue
                 else:
                     last_error_response = JSONResponse(
@@ -996,12 +1023,6 @@ async def _handle_buffered_retryable_request(
                         content={"error": f"Upstream service failed: {reason.value}"},
                     )
                     break
-
-        # Fallback for any unhandled state
-        last_error_response = JSONResponse(
-            status_code=503,
-            content={"error": f"Upstream service failed: {reason.value}"},
-        )
 
     return last_error_response or JSONResponse(
         status_code=503, content={"error": "All retry attempts failed."}

@@ -135,7 +135,10 @@ class GatewayCache:
         return self._auth_token_map.get(token)
 
     def get_key_from_pool(
-        self, provider_name: str, model_name: str
+        self,
+        provider_name: str,
+        model_name: str,
+        exclude_key_ids: set[int] | None = None,
     ) -> tuple[int, str] | None:
         """
         Retrieves one available API key from the specified pool and rotates it.
@@ -146,6 +149,7 @@ class GatewayCache:
         Args:
             provider_name: The name of the provider instance.
             model_name: The name of the requested model.
+            exclude_key_ids: A set of key IDs to ignore during selection.
 
         Returns:
             A tuple of (key_id, key_value) if a key is available, otherwise None.
@@ -162,16 +166,22 @@ class GatewayCache:
         key_queue = self._key_pool.get(pool_key)
 
         if key_queue:
-            try:
-                # Get a key tuple from the left (front) of the deque.
-                key_info = key_queue.popleft()
-                # Append it to the right (back) to rotate it.
-                key_queue.append(key_info)
-                return key_info
-            except IndexError:
-                # This can happen in a rare race condition if the pool becomes empty
-                # between the 'if' check and 'popleft' because of a concurrent removal.
-                return None
+            attempts = len(key_queue)
+            for _ in range(attempts):
+                try:
+                    # Get a key tuple from the left (front) of the deque.
+                    key_info = key_queue.popleft()
+                    # Append it to the right (back) to rotate it.
+                    key_queue.append(key_info)
+
+                    if exclude_key_ids and key_info[0] in exclude_key_ids:
+                        continue
+
+                    return key_info
+                except IndexError:
+                    # This can happen in a rare race condition if the pool becomes empty
+                    # between the 'if' check and 'popleft' because of a concurrent removal.
+                    return None
 
         return None
 

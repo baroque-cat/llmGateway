@@ -90,11 +90,14 @@ async def test_server_retry_fail_then_new_key():
 
     response_500 = MagicMock()
     response_500.status_code = 500
+    response_500.headers = {}
+    response_500.aclose = AsyncMock()
 
     response_200 = MagicMock()
     response_200.status_code = 200
     response_200.headers = {}
     response_200.aread = AsyncMock(return_value=b"Success")
+    response_200.aclose = AsyncMock()
 
     provider.proxy_request = AsyncMock(
         side_effect=[
@@ -157,6 +160,8 @@ async def test_key_storm_protection():
     # All keys fail with INVALID_KEY
     resp_401 = MagicMock()
     resp_401.status_code = 401
+    resp_401.headers = {}
+    resp_401.aclose = AsyncMock()
     provider.proxy_request = AsyncMock(
         return_value=(resp_401, CheckResult.fail(ErrorReason.INVALID_KEY, "Invalid"))
     )
@@ -209,11 +214,15 @@ async def test_unsafe_400_fatal():
     # 1. First response is 400 mapped to INVALID_KEY (Fatal)
     resp_400 = MagicMock()
     resp_400.status_code = 400
+    resp_400.headers = {}
+    resp_400.aclose = AsyncMock()
 
     # 2. Second response is 200
     resp_200 = MagicMock()
     resp_200.status_code = 200
+    resp_200.headers = {}
     resp_200.aread = AsyncMock(return_value=b"Success")
+    resp_200.aclose = AsyncMock()
 
     # We simulate the provider doing the mapping internally or via error parsing
     # Here we just return the result that implies the mapping happened
