@@ -61,3 +61,4 @@ local.json
 # Local files that shouldn't be committed
 qa_report.md
 openspec/*
+examples/*

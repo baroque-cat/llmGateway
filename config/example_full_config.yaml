@@ -195,3 +195,99 @@ providers:
     # Using default health and gateway policies by omitting them
     proxy_config:
       mode: "none"
+
+  # Example 3: Anthropic Provider (Claude models)
+  anthropic-production:
+    provider_type: "anthropic"
+    enabled: true
+    keys_path: "keys/anthropic-production/"
+    
+    api_base_url: "https://api.anthropic.com"
+    default_model: "claude-sonnet-4-20250514"
+    
+    models:
+      claude-sonnet-4-20250514:
+        endpoint_suffix: "/v1/messages"
+        test_payload:
+          model: "claude-sonnet-4-20250514"
+          messages:
+            - role: "user"
+              content: "Hi"
+          max_tokens: 1
+      
+      claude-opus-4-20250514:
+        endpoint_suffix: "/v1/messages"
+        test_payload:
+          model: "claude-opus-4-20250514"
+          messages:
+            - role: "user"
+              content: "Hi"
+          max_tokens: 1
+    
+    access_control:
+      gateway_access_token: "${ANTHROPIC_TOKEN}"
+    
+    timeouts:
+      connect: 5.0
+      read: 30.0
+      write: 10.0
+      pool: 5.0
+    
+    worker_health_policy:
+      # Intervals in Minutes
+      on_server_error_min: 30
+      on_overload_min: 30
+      # Intervals in Hours
+      on_other_error_hr: 1
+      on_success_hr: 24
+      on_rate_limit_hr: 1
+      on_no_quota_hr: 1
+      # Intervals in Days
+      on_invalid_key_days: 10
+      on_no_access_days: 10
+      # Quarantine Policies
+      quarantine_after_days: 30
+      quarantine_recheck_interval_days: 10
+      stop_checking_after_days: 90
+      # Batching Configuration
+      batch_size: 10
+      batch_delay_sec: 30
+      task_timeout_sec: 900
+      # Verification Loop Configuration
+      verification_attempts: 3
+      verification_delay_sec: 65
+    
+    gateway_policy:
+      streaming_mode: "auto"
+      debug_mode: "disabled"
+      
+      fast_status_mapping:
+        400: "bad_request"
+      
+      error_parsing:
+        enabled: false
+        rules: []
+      
+      retry:
+        enabled: true
+        on_key_error:
+          attempts: 3
+          backoff_sec: 0.1
+          backoff_factor: 1.5
+        on_server_error:
+          attempts: 5
+          backoff_sec: 0.5
+          backoff_factor: 2.0
+      
+      circuit_breaker:
+        enabled: true
+        mode: "auto_recovery"
+        failure_threshold: 20
+        jitter_sec: 5
+        backoff:
+          base_duration_sec: 60
+          max_duration_sec: 3600
+          factor: 2.0
+    
+    proxy_config:
+      mode: "none"

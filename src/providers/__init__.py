@@ -7,6 +7,7 @@ from src.core.interfaces import IProvider
 
 # Import concrete provider implementations
 from src.providers.base import AIBaseProvider
+from src.providers.impl.anthropic import AnthropicProvider
 from src.providers.impl.gemini import GeminiProvider
 from src.providers.impl.openai_like import OpenAILikeProvider
 
@@ -17,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 # add its class here.
 _PROVIDER_CLASSES: dict[str, type[AIBaseProvider]] = {
+    "anthropic": AnthropicProvider,
     "openai_like": OpenAILikeProvider,
     "gemini": GeminiProvider,
 }

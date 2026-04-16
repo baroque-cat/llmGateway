@@ -15,6 +15,7 @@ MOCK_ENV = {
     "GEMINI_PROD_TOKEN": "test_token_prod",
     "GEMINI_MINIMAL_TOKEN": "test_token_minimal",
     "DEEPSEEK_TOKEN": "test_token_deepseek",
+    "ANTHROPIC_TOKEN": "test_token_anthropic",
     "METRICS_ACCESS_TOKEN": "test_metrics_token",
 }
 
@@ -47,6 +48,15 @@ def test_load_full_config_example(mock_env):
     deepseek = config.providers["deepseek-main"]
     assert deepseek.provider_type == "openai_like"
     assert "deepseek-chat" in deepseek.models
+
+    # Check Anthropic provider
+    assert "anthropic-production" in config.providers
+    anthropic = config.providers["anthropic-production"]
+    assert anthropic.provider_type == "anthropic"
+    assert anthropic.enabled is True
+    assert anthropic.api_base_url == "https://api.anthropic.com"
+    assert "claude-sonnet-4-20250514" in anthropic.models
+    assert "claude-opus-4-20250514" in anthropic.models
 
 
 def test_load_minimal_config_example(mock_env):
