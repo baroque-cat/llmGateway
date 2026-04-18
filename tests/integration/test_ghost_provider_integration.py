@@ -97,10 +97,18 @@ def test_worker_only_processes_enabled_providers():
     """Verify that the worker logic correctly filters to enabled providers only."""
     config = Config()
     config.providers = {
-        "provider_a": ProviderConfig(enabled=True),
-        "provider_b": ProviderConfig(enabled=False),
-        "provider_c": ProviderConfig(enabled=True),
-        "provider_d": ProviderConfig(enabled=False),
+        "provider_a": ProviderConfig(
+            enabled=True, provider_type="test", keys_path="keys/a/"
+        ),
+        "provider_b": ProviderConfig(
+            enabled=False, provider_type="test", keys_path="keys/b/"
+        ),
+        "provider_c": ProviderConfig(
+            enabled=True, provider_type="test", keys_path="keys/c/"
+        ),
+        "provider_d": ProviderConfig(
+            enabled=False, provider_type="test", keys_path="keys/d/"
+        ),
     }
 
     accessor = ConfigAccessor(config)
@@ -124,8 +132,8 @@ def test_empty_enabled_providers_handling():
 
     # All providers disabled
     config.providers = {
-        "p1": ProviderConfig(enabled=False),
-        "p2": ProviderConfig(enabled=False),
+        "p1": ProviderConfig(enabled=False, provider_type="test", keys_path="keys/p1/"),
+        "p2": ProviderConfig(enabled=False, provider_type="test", keys_path="keys/p2/"),
     }
     accessor = ConfigAccessor(config)
     enabled_providers = accessor.get_enabled_providers()

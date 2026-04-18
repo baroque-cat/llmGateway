@@ -64,7 +64,7 @@ async def test_server_retry_fail_then_new_key():
     provider.parse_request_details.return_value = MagicMock(model_name="gpt-4")
 
     # Setup Config: 2 server attempts, 2 key attempts
-    provider_config = ProviderConfig()
+    provider_config = ProviderConfig(provider_type="test", keys_path="keys/test/")
     provider_config.models = {"gpt-4": {}}
     provider_config.gateway_policy.retry.enabled = True
     provider_config.gateway_policy.retry.on_server_error = RetryOnErrorConfig(
@@ -139,7 +139,7 @@ async def test_key_storm_protection():
     provider.parse_request_details.return_value = MagicMock(model_name="gpt-4")
 
     # Setup Config: 0 server attempts (fail fast), 3 key attempts with backoff
-    provider_config = ProviderConfig()
+    provider_config = ProviderConfig(provider_type="test", keys_path="keys/test/")
     provider_config.models = {"gpt-4": {}}
     provider_config.gateway_policy.retry.enabled = True
     provider_config.gateway_policy.retry.on_server_error = RetryOnErrorConfig(
@@ -197,7 +197,7 @@ async def test_unsafe_400_fatal():
     provider.parse_request_details.return_value = MagicMock(model_name="gpt-4")
 
     # Config: 2 key attempts
-    provider_config = ProviderConfig()
+    provider_config = ProviderConfig(provider_type="test", keys_path="keys/test/")
     provider_config.models = {"gpt-4": {}}
     provider_config.gateway_policy.retry.enabled = True
     provider_config.gateway_policy.retry.on_key_error = RetryOnErrorConfig(

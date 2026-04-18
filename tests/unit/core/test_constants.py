@@ -72,9 +72,9 @@ class TestErrorReasonLogic:
         ]
 
         for error in non_client_errors:
-            assert error.is_client_error() is False, (
-                f"{error} should NOT be a client error"
-            )
+            assert (
+                error.is_client_error() is False
+            ), f"{error} should NOT be a client error"
 
     def test_is_fatal_method(self):
         """

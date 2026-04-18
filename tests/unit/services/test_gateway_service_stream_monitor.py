@@ -2,7 +2,6 @@
 Unit tests for the StreamMonitor class in gateway_service.
 """
 
-import asyncio
 from unittest.mock import AsyncMock, Mock, patch
 
 import httpx

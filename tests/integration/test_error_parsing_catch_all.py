@@ -80,7 +80,7 @@ def make_mock_request(
 
 def create_provider_config_with_catch_all_rule() -> ProviderConfig:
     """Create a provider config with specific catch-all error parsing rules."""
-    config = ProviderConfig()
+    config = ProviderConfig(provider_type="test", keys_path="keys/test/")
     config.models = {"gpt-4": ModelInfo()}
     config.gateway_policy = GatewayPolicyConfig()
     config.gateway_policy.retry = RetryPolicyConfig(enabled=True)
@@ -136,7 +136,9 @@ async def test_catch_all_rule_specific_match():
     """
     Scenario A: Specific rule matches (Access denied message) -> maps to invalid_key.
     """
-    from src.services.gateway_service import _handle_buffered_retryable_request  # type: ignore
+    from src.services.gateway_service import (
+        _handle_buffered_retryable_request,  # type: ignore
+    )
 
     req = make_mock_request()
     provider = MagicMock()
@@ -192,7 +194,9 @@ async def test_catch_all_rule_catch_all_match():
     """
     Scenario B: Specific rule does NOT match, catch-all rule matches -> maps to server_error.
     """
-    from src.services.gateway_service import _handle_buffered_retryable_request  # type: ignore
+    from src.services.gateway_service import (
+        _handle_buffered_retryable_request,  # type: ignore
+    )
 
     req = make_mock_request()
     provider = MagicMock()
@@ -240,7 +244,9 @@ async def test_no_stream_closed_with_catch_all_rule():
     Scenario C: Ensure no httpx.StreamClosed crash when retry enabled and error parsing configured.
     This is a regression test for the StreamClosed bug.
     """
-    from src.services.gateway_service import _handle_buffered_retryable_request  # type: ignore
+    from src.services.gateway_service import (
+        _handle_buffered_retryable_request,  # type: ignore
+    )
 
     req = make_mock_request()
     provider = MagicMock()

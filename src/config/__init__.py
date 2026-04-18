@@ -21,10 +21,7 @@ Usage:
 # Import key components to expose them at the package level.
 # This follows Step 2 of the plan to create a clean public API.
 from src.config.loader import ConfigLoader
-
-# from src.core.accessor import ConfigAccessor
 from src.config.schemas import Config
-from src.config.validator import ConfigValidator
 
 # This variable will hold the single, global instance of the loaded configuration.
 # This is the core of the Singleton pattern implementation, as per Step 3 of the plan.
@@ -44,13 +41,11 @@ def load_config(config_path: str = "config/providers.yaml") -> Config:
     """
     global _config_instance
 
-    # Instantiate the loader and validator
+    # Instantiate the loader
     loader = ConfigLoader(path=config_path)
-    validator = ConfigValidator()
 
-    # Load the raw config, validate it, and store the final object.
+    # Load and validate the config (Pydantic validation happens inside loader.load())
     loaded_config = loader.load()
-    validator.validate(loaded_config)
 
     _config_instance = loaded_config
     return _config_instance
@@ -76,7 +71,6 @@ def get_config() -> Config:
 __all__ = [
     "Config",
     "ConfigLoader",
-    "ConfigValidator",
     #    "ConfigAccessor",
     "load_config",
     "get_config",

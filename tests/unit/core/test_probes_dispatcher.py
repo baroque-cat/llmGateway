@@ -208,8 +208,9 @@ async def test_timeout_handling_task_exceeds_timeout(probe, mock_dependencies):
         await asyncio.sleep(2.0)  # longer than our short timeout
 
     probe._process_provider_batch = AsyncMock(side_effect=slow_batch)
-    # Set a very short timeout (0.1 seconds) for the test
-    policy = HealthPolicyConfig(task_timeout_sec=0.1)
+    # Set a very short timeout (1 second) for the test
+    # Note: task_timeout_sec is an int field with gt=0 constraint (Pydantic v2 migration)
+    policy = HealthPolicyConfig(task_timeout_sec=1)
     mock_accessor.get_health_policy.return_value = policy
 
     # Patch logger.error to capture timeout log
@@ -217,11 +218,11 @@ async def test_timeout_handling_task_exceeds_timeout(probe, mock_dependencies):
         await probe.run_cycle()
 
         # Wait a bit for the timeout to trigger
-        await asyncio.sleep(0.3)
+        await asyncio.sleep(1.5)
 
         # Verify that timeout error was logged
         mock_error.assert_called_once_with(
-            f"Provider '{provider_name}' task timed out after 0.1 seconds. Task was cancelled."
+            f"Provider '{provider_name}' task timed out after 1 seconds. Task was cancelled."
         )
 
     # Verify that active_tasks is cleaned up

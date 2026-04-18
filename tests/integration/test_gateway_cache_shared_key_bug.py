@@ -85,7 +85,7 @@ async def test_shared_key_status_working_correctly():
     mock_db_manager.keys = mock_keys_repo
 
     # Mock provider config with shared_key_status=True
-    provider_config = ProviderConfig()
+    provider_config = ProviderConfig(provider_type="test", keys_path="keys/test/")
     provider_config.shared_key_status = True
     provider_config.models = {"gpt-4": ModelInfo(), "gpt-3.5-turbo": ModelInfo()}
     mock_accessor.get_provider.return_value = provider_config

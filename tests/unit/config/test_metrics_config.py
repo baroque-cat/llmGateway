@@ -13,7 +13,7 @@ from src.config.schemas import Config, MetricsConfig
 
 
 class TestMetricsConfig:
-    """Test MetricsConfig dataclass."""
+    """Test MetricsConfig Pydantic BaseModel."""
 
     def test_default_values(self):
         """Test MetricsConfig default values."""

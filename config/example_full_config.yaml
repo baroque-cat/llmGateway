@@ -99,6 +99,10 @@ providers:
       quarantine_after_days: 30
       quarantine_recheck_interval_days: 10
       stop_checking_after_days: 90
+      # Downtime Amnesty Policy
+      # If a check is performed later than its scheduled time by more than this threshold,
+      # the system assumes it was due to a downtime and resets the 'failing_since' counter.
+      amnesty_threshold_days: 2.0
       # Batching Configuration
       batch_size: 10
       batch_delay_sec: 30
@@ -114,8 +118,9 @@ providers:
       
       # Fast Status Mapping for worker health checks
       # Immediately fails health checks with these status codes without reading the response body.
-      fast_status_mapping:
-        # 418: "no_quota"   # Example: Map 418 Teapot to NO_QUOTA
+      # Uncomment and add entries as needed. An empty mapping is valid.
+      # fast_status_mapping:
+      #   418: "no_quota"   # Example: Map 418 Teapot to NO_QUOTA
 
     # Gateway specific policies
     gateway_policy:
@@ -249,6 +254,10 @@ providers:
       quarantine_after_days: 30
       quarantine_recheck_interval_days: 10
       stop_checking_after_days: 90
+      # Downtime Amnesty Policy
+      # If a check is performed later than its scheduled time by more than this threshold,
+      # the system assumes it was due to a downtime and resets the 'failing_since' counter.
+      amnesty_threshold_days: 2.0
       # Batching Configuration
       batch_size: 10
       batch_delay_sec: 30

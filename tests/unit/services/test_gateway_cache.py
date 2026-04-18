@@ -2,7 +2,9 @@
 
 import collections
 from unittest.mock import MagicMock
+
 import pytest
+
 from src.core.constants import ALL_MODELS_MARKER
 from src.services.gateway_cache import GatewayCache
 

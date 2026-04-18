@@ -24,8 +24,7 @@ def create_mock_provider_config(
     """Helper to create a ProviderConfig with specified settings."""
     if models is None:
         models = {"gpt-4": ModelInfo()}
-    config = ProviderConfig()
-    config.provider_type = provider_type
+    config = ProviderConfig(provider_type=provider_type, keys_path="keys/test/")
     config.enabled = True
     config.models = models
     config.gateway_policy = MagicMock()

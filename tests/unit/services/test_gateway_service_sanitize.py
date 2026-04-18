@@ -4,9 +4,7 @@ Unit tests for sanitization helper functions in gateway_service.
 
 import json
 
-import pytest
-
-from src.services.gateway_service import _sanitize_headers, _sanitize_body
+from src.services.gateway_service import _sanitize_body, _sanitize_headers
 
 
 class TestSanitizeHeaders:

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 
-from dataclasses import dataclass, field
 from typing import Any, Literal
 
-# Import core enums for type hints in schemas.
-# This improves IDE support and documentation clarity,
-# even though runtime validation is performed by the ConfigValidator.
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+# Import core enums for type hints and validation in schemas.
+# Pydantic will automatically validate enum values at runtime.
 
 # ==============================================================================
 # 1. ATOMIC AND NESTED CONFIGURATION CLASSES
@@ -14,8 +14,7 @@ from typing import Any, Literal
 # These will be nested within larger configuration objects.
 
 
-@dataclass
-class ModelInfo:
+class ModelInfo(BaseModel):
     """
     Represents the specific configuration for a single model within a provider.
     This enables a config-driven approach for handling multimodal APIs.
@@ -28,11 +27,10 @@ class ModelInfo:
     # The minimal, valid JSON payload required to perform a health check on this model.
     # Using default_factory=dict to avoid mutable default issues. This is crucial
     # and directly addresses a point from the "Potential Errors" analysis.
-    test_payload: dict[str, Any] = field(default_factory=dict)  # type: ignore
+    test_payload: dict[str, Any] = Field(default_factory=dict)
 
 
-@dataclass
-class AccessControlConfig:
+class AccessControlConfig(BaseModel):
     """
     Configuration for gateway access control for a specific provider instance.
     """
@@ -42,8 +40,7 @@ class AccessControlConfig:
     gateway_access_token: str = ""
 
 
-@dataclass
-class RetryOnErrorConfig:
+class RetryOnErrorConfig(BaseModel):
     """Defines retry behavior for a specific error category (e.g., server errors)."""
 
     # Number of retry attempts for this error type. 0 means no retries.
@@ -54,19 +51,17 @@ class RetryOnErrorConfig:
     backoff_factor: float = 1.5
 
 
-@dataclass
-class RetryPolicyConfig:
+class RetryPolicyConfig(BaseModel):
     """Container for the gateway's request retry policies."""
 
     enabled: bool = False
     # Specific retry settings for when a key is invalid, out of quota, etc.
-    on_key_error: RetryOnErrorConfig = field(default_factory=RetryOnErrorConfig)
+    on_key_error: RetryOnErrorConfig = Field(default_factory=RetryOnErrorConfig)
     # Specific retry settings for 5xx server-side errors.
-    on_server_error: RetryOnErrorConfig = field(default_factory=RetryOnErrorConfig)
+    on_server_error: RetryOnErrorConfig = Field(default_factory=RetryOnErrorConfig)
 
 
-@dataclass
-class BackoffConfig:
+class BackoffConfig(BaseModel):
     """Configuration for the exponential backoff strategy of the circuit breaker."""
 
     # The initial duration in seconds to wait after the circuit opens.
@@ -77,8 +72,7 @@ class BackoffConfig:
     factor: float = 2.0
 
 
-@dataclass
-class CircuitBreakerConfig:
+class CircuitBreakerConfig(BaseModel):
     """
     Configuration for the Circuit Breaker mechanism to prevent cascading failures.
     """
@@ -90,13 +84,12 @@ class CircuitBreakerConfig:
     # The number of consecutive failures required to open the circuit.
     failure_threshold: int = 10
     # Configuration for the backoff strategy when the circuit is open.
-    backoff: BackoffConfig = field(default_factory=BackoffConfig)
+    backoff: BackoffConfig = Field(default_factory=BackoffConfig)
     # A random delay added to backoff to prevent thundering herd problems.
     jitter_sec: int = 5
 
 
-@dataclass
-class MetricsConfig:
+class MetricsConfig(BaseModel):
     """
     Configuration for the Prometheus metrics exporter.
     """
@@ -115,64 +108,75 @@ class MetricsConfig:
 # and the global configuration sections.
 
 
-@dataclass
-class HealthPolicyConfig:
+class HealthPolicyConfig(BaseModel):
     """
     Defines the policy for the background worker's health checks.
     The fields are ordered by the magnitude of their time units for clarity.
     """
 
     # --- Intervals in Minutes (for short-term, recoverable errors) ---
-    on_server_error_min: int = 30
-    on_overload_min: int = 60
+    on_server_error_min: int = Field(default=30, gt=0)
+    on_overload_min: int = Field(default=60, gt=0)
 
     # --- Intervals in Hours (for medium-term issues) ---
-    on_other_error_hr: int = 1
-    on_success_hr: int = 1
-    on_rate_limit_hr: int = 4
-    on_no_quota_hr: int = 4
+    on_other_error_hr: int = Field(default=1, gt=0)
+    on_success_hr: int = Field(default=1, gt=0)
+    on_rate_limit_hr: int = Field(default=4, gt=0)
+    on_no_quota_hr: int = Field(default=4, gt=0)
 
     # --- Intervals in Days (for long-term, persistent errors) ---
-    on_invalid_key_days: int = 10
-    on_no_access_days: int = 10
+    on_invalid_key_days: int = Field(default=10, gt=0)
+    on_no_access_days: int = Field(default=10, gt=0)
 
     # --- Quarantine Policies (for managing chronically failing keys) ---
     # How many days a key must be failing continuously before it is put into quarantine.
-    quarantine_after_days: int = 30
+    quarantine_after_days: int = Field(default=30, gt=0)
     # How often (in days) to re-check a key that is in quarantine.
-    quarantine_recheck_interval_days: int = 10
+    quarantine_recheck_interval_days: int = Field(default=10, gt=0)
     # After how many days of continuous failure to stop checking the key altogether.
-    stop_checking_after_days: int = 90
+    stop_checking_after_days: int = Field(default=90, gt=0)
 
     # --- Downtime Amnesty Policy ---
     # If a check is performed later than its scheduled time by more than this threshold,
     # the system assumes it was due to a downtime and resets the 'failing_since' counter.
-    amnesty_threshold_days: float = 2.0
+    amnesty_threshold_days: float = Field(default=2.0, gt=0)
 
     # --- Batching Configuration (for controlling check request throughput) ---
     # How many keys to check in a single batch for this provider.
-    batch_size: int = 30
+    batch_size: int = Field(default=30, gt=0)
     # Delay in seconds between batches to avoid overwhelming the API.
-    batch_delay_sec: int = 15
+    batch_delay_sec: int = Field(default=15, ge=0)
     # Maximum time in seconds a single probe task is allowed to run before being force-cancelled.
     # This prevents "zombie" tasks from hanging indefinitely and blocking the dispatcher.
-    task_timeout_sec: int = 900  # 15 minutes
+    task_timeout_sec: int = Field(default=900, gt=0)  # 15 minutes
 
     # --- Verification Loop Configuration (for retryable errors) ---
     # How many times to re-verify a key after a retryable error (e.g., rate limit).
-    verification_attempts: int = 3
+    verification_attempts: int = Field(default=3, gt=0)
     # Hard delay between verification attempts (seconds). Should be >60 seconds to survive minute-based rate limits.
-    verification_delay_sec: int = 65
+    verification_delay_sec: int = Field(default=65, ge=60)
 
     # --- Fast Status Mapping (for worker health checks) ---
     # Mapping of HTTP status codes to ErrorReason strings for fast, body-less error handling.
     # When a status code matches an entry here, the worker will IMMEDIATELY fail the check
     # with the mapped reason without reading the response body.
-    fast_status_mapping: dict[int, str] = field(default_factory=dict)  # type: ignore
+    fast_status_mapping: dict[int, str] = Field(
+        default_factory=dict,
+        description="Mapping of HTTP status codes to ErrorReason strings",
+    )
+
+    @model_validator(mode="after")
+    def check_quarantine_logic(self) -> "HealthPolicyConfig":
+        """Enforce quarantine_after_days <= stop_checking_after_days."""
+        if self.quarantine_after_days > self.stop_checking_after_days:
+            raise ValueError(
+                f"quarantine_after_days ({self.quarantine_after_days}) cannot be greater than "
+                f"stop_checking_after_days ({self.stop_checking_after_days})"
+            )
+        return self
 
 
-@dataclass
-class ProxyConfig:
+class ProxyConfig(BaseModel):
     """
     Configuration for using proxies with API requests.
     """
@@ -186,25 +190,32 @@ class ProxyConfig:
     # Path to the directory containing proxy list files if mode is 'stealth'.
     pool_list_path: str | None = None
 
+    @model_validator(mode="after")
+    def validate_proxy_requirements(self) -> "ProxyConfig":
+        """Validate proxy configuration based on mode."""
+        if self.mode == "static" and not self.static_url:
+            raise ValueError("Proxy mode is 'static' but 'static_url' is not set.")
+        if self.mode == "stealth" and not self.pool_list_path:
+            raise ValueError("Proxy mode is 'stealth' but 'pool_list_path' is not set.")
+        return self
 
-@dataclass
-class TimeoutConfig:
+
+class TimeoutConfig(BaseModel):
     """
     Defines granular timeout settings for httpx requests. All values are in seconds.
     """
 
     # Timeout for establishing a connection.
-    connect: float = 5.0
+    connect: float = Field(default=5.0, gt=0)
     # Timeout for waiting for a chunk of the response.
-    read: float = 20.0
+    read: float = Field(default=20.0, gt=0)
     # Timeout for sending a chunk of the request.
-    write: float = 10.0
+    write: float = Field(default=10.0, gt=0)
     # Timeout for acquiring a connection from the connection pool.
-    pool: float = 5.0
+    pool: float = Field(default=5.0, gt=0)
 
 
-@dataclass
-class ErrorParsingRule:
+class ErrorParsingRule(BaseModel):
     """
     Rule for parsing specific errors from response body.
 
@@ -214,7 +225,7 @@ class ErrorParsingRule:
     """
 
     # HTTP status code this rule applies to (e.g., 400, 429, etc.)
-    status_code: int
+    status_code: int = Field(..., ge=400, lt=600)
 
     # JSON path to the error field (e.g., "error.type", "error.code", "error.message")
     error_path: str
@@ -226,14 +237,13 @@ class ErrorParsingRule:
     map_to: str
 
     # Priority for rule matching (higher priority rules are checked first)
-    priority: int = 0
+    priority: int = Field(default=0, ge=0)
 
     # Human-readable description of what this rule detects
     description: str = ""
 
 
-@dataclass
-class ErrorParsingConfig:
+class ErrorParsingConfig(BaseModel):
     """
     Configuration for error response parsing in the gateway.
 
@@ -246,11 +256,10 @@ class ErrorParsingConfig:
     enabled: bool = False
 
     # List of error parsing rules to apply
-    rules: list[ErrorParsingRule] = field(default_factory=list)  # type: ignore
+    rules: list[ErrorParsingRule] = Field(default_factory=list)
 
 
-@dataclass
-class GatewayPolicyConfig:
+class GatewayPolicyConfig(BaseModel):
     """Groups all policies applied by the API Gateway during live request processing."""
 
     # Controls whether streaming is enabled for this provider instance.
@@ -263,33 +272,34 @@ class GatewayPolicyConfig:
 
     # Configuration for parsing error responses to refine error classification
     # This enables distinguishing between different error types with the same HTTP status code
-    error_parsing: ErrorParsingConfig = field(default_factory=ErrorParsingConfig)
+    error_parsing: ErrorParsingConfig = Field(default_factory=ErrorParsingConfig)
 
     # Policy for automatically retrying failed requests.
-    retry: RetryPolicyConfig = field(default_factory=RetryPolicyConfig)
+    retry: RetryPolicyConfig = Field(default_factory=RetryPolicyConfig)
     # Policy for the circuit breaker to handle endpoint failures.
-    circuit_breaker: CircuitBreakerConfig = field(default_factory=CircuitBreakerConfig)
+    circuit_breaker: CircuitBreakerConfig = Field(default_factory=CircuitBreakerConfig)
 
     # Mapping of HTTP status codes to ErrorReason strings for fast, body-less error handling.
     # When a status code matches an entry here, the gateway will IMMEDIATELY fail the request
     # with the mapped reason without reading the response body.
     # WARNING: This prevents forwarding specific upstream error messages to the client.
-    fast_status_mapping: dict[int, str] = field(default_factory=dict)  # type: ignore
+    fast_status_mapping: dict[int, str] = Field(default_factory=dict)
 
 
-@dataclass
-class ProviderConfig:
+class ProviderConfig(BaseModel):
     """
     Configuration for a single, named LLM provider instance.
     This is the core component of the provider configuration, aligning with Step 4 of the plan.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     # The type of the provider, used to look up templates (e.g., 'gemini', 'deepseek').
-    provider_type: str = ""
+    provider_type: str
     # A flag to enable or disable this entire provider instance.
     enabled: bool = True
     # Path to the directory containing API key files for this instance.
-    keys_path: str = ""
+    keys_path: str
     # The base URL for the provider's API.
     api_base_url: str = ""
     # The default model to use for this instance if not specified in the request.
@@ -300,18 +310,18 @@ class ProviderConfig:
     # A dictionary mapping model names to their detailed configurations.
     # This structure is flexible and supports multiple model types under one provider.
     # It correctly uses default_factory to prevent mutable default issues.
-    models: dict[str, ModelInfo] = field(default_factory=dict)  # type: ignore
+    models: dict[str, ModelInfo] = Field(default_factory=dict)
 
     # --- Nested Configuration Objects ---
     # These fields are intentionally not Optional. By using default_factory, we ensure
     # that a default-configured object always exists, even if the section is completely
     # omitted from the user's YAML file. This is the key to the new design and
     # directly implements the user's requirement for "optional sections".
-    access_control: AccessControlConfig = field(default_factory=AccessControlConfig)
-    worker_health_policy: HealthPolicyConfig = field(default_factory=HealthPolicyConfig)
-    proxy_config: ProxyConfig = field(default_factory=ProxyConfig)
-    timeouts: TimeoutConfig = field(default_factory=TimeoutConfig)
-    gateway_policy: GatewayPolicyConfig = field(default_factory=GatewayPolicyConfig)
+    access_control: AccessControlConfig = Field(default_factory=AccessControlConfig)
+    worker_health_policy: HealthPolicyConfig = Field(default_factory=HealthPolicyConfig)
+    proxy_config: ProxyConfig = Field(default_factory=ProxyConfig)
+    timeouts: TimeoutConfig = Field(default_factory=TimeoutConfig)
+    gateway_policy: GatewayPolicyConfig = Field(default_factory=GatewayPolicyConfig)
 
 
 # ==============================================================================
@@ -321,14 +331,13 @@ class ProviderConfig:
 # that are not specific to any single provider.
 
 
-@dataclass
-class DatabaseConfig:
+class DatabaseConfig(BaseModel):
     """
     Configuration for the PostgreSQL database connection.
     """
 
     host: str = "localhost"
-    port: int = 5432
+    port: int = Field(default=5432, gt=0)
     user: str = "llm_gateway"
     # This should be loaded from an environment variable, e.g., "${DB_PASSWORD}".
     password: str = ""
@@ -344,16 +353,14 @@ class DatabaseConfig:
         return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.dbname}"
 
 
-@dataclass
-class WorkerConfig:
+class WorkerConfig(BaseModel):
     """Global settings specifically for the background worker service."""
 
     # The maximum number of provider instances to check concurrently.
-    max_concurrent_providers: int = 10
+    max_concurrent_providers: int = Field(default=10, gt=0)
 
 
-@dataclass
-class LoggingConfig:
+class LoggingConfig(BaseModel):
     """
     Global configuration for application logging.
     """
@@ -369,16 +376,35 @@ class LoggingConfig:
 # the entire application's configuration.
 
 
-@dataclass
-class Config:
+class Config(BaseModel):
     """
     The main configuration object for the entire llmGateway application.
     It serves as the root of the configuration tree.
     """
 
-    database: DatabaseConfig = field(default_factory=DatabaseConfig)
-    logging: LoggingConfig = field(default_factory=LoggingConfig)
-    worker: WorkerConfig = field(default_factory=WorkerConfig)
-    metrics: MetricsConfig = field(default_factory=MetricsConfig)
+    model_config = ConfigDict(extra="forbid")
+
+    database: DatabaseConfig = Field(default_factory=DatabaseConfig)
+    logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    worker: WorkerConfig = Field(default_factory=WorkerConfig)
+    metrics: MetricsConfig = Field(default_factory=MetricsConfig)
     # A dictionary mapping the unique instance name to its full configuration.
-    providers: dict[str, ProviderConfig] = field(default_factory=dict)  # type: ignore
+    providers: dict[str, ProviderConfig] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def check_unique_tokens(self) -> "Config":
+        """Ensure global uniqueness of gateway_access_token across all enabled providers."""
+        used_tokens: set[str] = set()
+        for name, provider in self.providers.items():
+            if not provider.enabled:
+                continue
+            token = provider.access_control.gateway_access_token
+            if not token:
+                continue  # Will be caught by ProviderConfig validation if required
+            if token in used_tokens:
+                raise ValueError(
+                    f"Duplicate gateway_access_token found in provider '{name}'. "
+                    "Tokens must be unique across all enabled providers."
+                )
+            used_tokens.add(token)
+        return self

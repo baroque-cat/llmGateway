@@ -31,7 +31,6 @@ class TestGatewayCacheLogging:
     async def test_cache_refresh_log_level(self, cache, mock_db_manager):
         """Verify that cache refresh logs at DEBUG level on success."""
         # Mock the database query to return some valid keys (async method)
-        from unittest.mock import AsyncMock
 
         mock_db_manager.keys.get_all_valid_keys_for_caching = AsyncMock(
             return_value=[

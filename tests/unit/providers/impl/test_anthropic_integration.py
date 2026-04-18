@@ -31,6 +31,7 @@ class TestAnthropicProviderFactory:
         """Verify that get_provider with anthropic type creates an AnthropicProvider instance."""
         config = ProviderConfig(
             provider_type="anthropic",
+            keys_path="keys/anthropic/",
             api_base_url="https://api.anthropic.com",
             models={"claude-3-opus": ModelInfo()},
         )
@@ -41,7 +42,9 @@ class TestAnthropicProviderFactory:
 
     def test_get_provider_unknown_type_raises_valueerror(self):
         """Verify that get_provider with non-existent provider type raises ValueError."""
-        config = ProviderConfig(provider_type="nonexistent")
+        config = ProviderConfig(
+            provider_type="nonexistent", keys_path="keys/nonexistent/"
+        )
         with pytest.raises(ValueError) as exc_info:
             get_provider("test_bad", config)
         assert "Unknown provider type" in str(exc_info.value)

@@ -5,21 +5,15 @@ from __future__ import annotations
 import logging
 import os
 import re
-from dataclasses import fields, is_dataclass
-from typing import (
-    Any,
-    TypeVar,
-    cast,
-    get_args,
-    get_origin,
-    get_type_hints,
-)
+from typing import Any, cast
 
 from deepmerge import always_merger
 from dotenv import load_dotenv
+from pydantic import ValidationError
 from ruamel.yaml import YAML
 
 from src.config.defaults import get_default_config
+from src.config.error_formatter import handle_validation_error
 from src.config.schemas import Config
 
 # Define a recursive type alias for configuration dictionaries
@@ -28,10 +22,6 @@ type ConfigDict = dict[str, ConfigValue]
 
 logger = logging.getLogger(__name__)
 
-# This is a generic TypeVar used for our recursive dataclass conversion.
-# It allows for type hinting that returns the same type as the input class.
-T = TypeVar("T")
-
 # Regex to find environment variable placeholders like ${VAR_NAME}
 ENV_VAR_PATTERN = re.compile(r"^\$\{(?P<name>[A-Z0-9_]+)\}$")
 
@@ -39,7 +29,7 @@ ENV_VAR_PATTERN = re.compile(r"^\$\{(?P<name>[A-Z0-9_]+)\}$")
 class ConfigLoader:
     """
     Intelligently loads, merges, and parses the application's configuration
-    from a YAML file into type-safe dataclass objects.
+    from a YAML file into type-safe Pydantic BaseModel objects.
     """
 
     def __init__(self, path: str = "config/providers.yaml"):
@@ -77,18 +67,18 @@ class ConfigLoader:
         # Step 3 & 4: Build base config and merge (Plan Step 3.3 & 3.4)
         final_config_dict = self._build_and_merge_config(user_config_resolved)
 
-        # Step 5: Convert the final dictionary to dataclass objects (Plan Step 3.5)
+        # Step 5: Validate with Pydantic (Plan Step 4.2 & 4.3)
         try:
-            app_config = self._dict_to_dataclass(Config, final_config_dict)
-        except (TypeError, ValueError) as e:
-            logger.error(
-                f"Failed to parse configuration into dataclasses. Check for type mismatches in your YAML. Error: {e}"
-            )
-            raise TypeError(f"Configuration parsing error: {e}") from e
+            app_config = Config.model_validate(final_config_dict)
+        except ValidationError as e:
+            # Pass the original unmerged user config for line number extraction
+            handle_validation_error(e, user_config_raw)
+            # handle_validation_error calls sys.exit(1), so this is unreachable
+            raise AssertionError("handle_validation_error should have exited") from None
 
         logger.info("Configuration loaded and parsed successfully.")
 
-        # Step 6: Return the result, ready for the validator (Plan Step 3.6)
+        # Step 6: Return the result
         return app_config
 
     def _resolve_env_vars(self, config_value: Any) -> Any:
@@ -154,60 +144,3 @@ class ConfigLoader:
 
         final_config["providers"] = final_providers
         return final_config
-
-    def _dict_to_dataclass(self, dclass: type[T], data: dict[str, Any]) -> T:
-        """
-        Recursively converts a dictionary to a dataclass instance.
-        """
-        if not is_dataclass(dclass):
-            raise TypeError(f"Expected a dataclass type, but got {dclass}")
-
-        type_hints = get_type_hints(dclass)
-        field_data = {}
-
-        for f in fields(dclass):
-            if f.name in data:
-                field_value = data[f.name]
-                field_type = type_hints[f.name]
-                origin_type = get_origin(field_type)
-
-                if origin_type is dict:
-                    # Handle nested dictionaries of dataclasses
-                    args = get_args(field_type)
-                    if len(args) == 2:
-                        item_type = args[1]
-                        if is_dataclass(item_type) and isinstance(item_type, type):
-                            field_data[f.name] = {
-                                k: self._dict_to_dataclass(item_type, v)
-                                for k, v in field_value.items()
-                            }
-                        else:
-                            field_data[f.name] = field_value
-                    else:
-                        field_data[f.name] = field_value
-
-                elif origin_type is list:
-                    # Handle lists of dataclasses
-                    args = get_args(field_type)
-                    if args:
-                        item_type = args[0]
-                        if is_dataclass(item_type) and isinstance(item_type, type):
-                            field_data[f.name] = [
-                                self._dict_to_dataclass(item_type, item)
-                                for item in field_value
-                            ]
-                        else:
-                            field_data[f.name] = field_value
-                    else:
-                        field_data[f.name] = field_value
-
-                elif is_dataclass(field_type) and isinstance(field_type, type):
-                    # Handle nested single dataclasses
-                    field_data[f.name] = self._dict_to_dataclass(
-                        field_type, field_value
-                    )
-                else:
-                    # Handle primitive types
-                    field_data[f.name] = field_value
-
-        return dclass(**field_data)

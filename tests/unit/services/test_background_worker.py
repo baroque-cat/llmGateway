@@ -19,11 +19,15 @@ def mock_accessor():
     # Default policy setup
     policy = HealthPolicyConfig(
         verification_attempts=2,
-        verification_delay_sec=10,  # Short delay for tests, though logic uses it as is
+        verification_delay_sec=60,  # Minimum value per Pydantic Field(ge=60) constraint
     )
     accessor.get_health_policy.return_value = policy
-    accessor.get_provider_or_raise.return_value = ProviderConfig()
-    accessor.get_provider.return_value = ProviderConfig()
+    accessor.get_provider_or_raise.return_value = ProviderConfig(
+        provider_type="mock", keys_path="keys/mock/"
+    )
+    accessor.get_provider.return_value = ProviderConfig(
+        provider_type="mock", keys_path="keys/mock/"
+    )
     # Mock worker concurrency for semaphore init
     accessor.get_worker_concurrency.return_value = 10
     return accessor

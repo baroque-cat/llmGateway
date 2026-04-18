@@ -91,7 +91,7 @@ async def test_default_400_behavior(mock_client, mock_response):
     - Body NOT read (Zero Overhead).
     - Reason is BAD_REQUEST (No penalty).
     """
-    config = ProviderConfig(provider_type="mock")
+    config = ProviderConfig(provider_type="mock", keys_path="keys/mock/")
     provider = RealisticMockProvider("test", config)
 
     mock_response.status_code = 400
@@ -115,7 +115,7 @@ async def test_default_401_behavior(mock_client, mock_response):
     - Body NOT read (Zero Overhead).
     - Reason is INVALID_KEY (Penalty applies downstream).
     """
-    config = ProviderConfig(provider_type="mock")
+    config = ProviderConfig(provider_type="mock", keys_path="keys/mock/")
     provider = RealisticMockProvider("test", config)
 
     mock_response.status_code = 401
@@ -144,6 +144,7 @@ async def test_fast_400_mapping(mock_client, mock_response):
     """
     config = ProviderConfig(
         provider_type="mock",
+        keys_path="keys/mock/",
         gateway_policy=GatewayPolicyConfig(fast_status_mapping={400: "invalid_key"}),
     )
     provider = RealisticMockProvider("test", config)
@@ -173,6 +174,7 @@ async def test_error_parsing_triggered(mock_client, mock_response):
     """
     config = ProviderConfig(
         provider_type="mock",
+        keys_path="keys/mock/",
         gateway_policy=GatewayPolicyConfig(
             error_parsing=ErrorParsingConfig(
                 enabled=True,
@@ -207,6 +209,7 @@ async def test_error_parsing_ignored_on_mismatch(mock_client, mock_response):
     """
     config = ProviderConfig(
         provider_type="mock",
+        keys_path="keys/mock/",
         gateway_policy=GatewayPolicyConfig(
             error_parsing=ErrorParsingConfig(
                 enabled=True,
@@ -242,7 +245,9 @@ async def test_debug_mode_force_read(mock_client, mock_response):
     Expectation: Body IS read regardless of status.
     """
     config = ProviderConfig(
-        provider_type="mock", gateway_policy=GatewayPolicyConfig(debug_mode="full_body")
+        provider_type="mock",
+        keys_path="keys/mock/",
+        gateway_policy=GatewayPolicyConfig(debug_mode="full_body"),
     )
     provider = RealisticMockProvider("test", config)
 

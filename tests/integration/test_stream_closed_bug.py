@@ -72,7 +72,7 @@ def create_provider_config(
     rule_matches: bool = False,
 ) -> ProviderConfig:
     """Create a provider config with specific error parsing settings."""
-    config = ProviderConfig()
+    config = ProviderConfig(provider_type="test", keys_path="keys/test/")
     config.models = {"gpt-4": ModelInfo()}
     config.gateway_policy = GatewayPolicyConfig()
     config.gateway_policy.retry = RetryPolicyConfig(enabled=retry_enabled)
@@ -126,7 +126,9 @@ async def test_stream_closed_bug(
     Reproduce the StreamClosed bug when provider returns 400 with body,
     retry enabled, error parsing config does not match.
     """
-    from src.services.gateway_service import _handle_buffered_retryable_request  # type: ignore
+    from src.services.gateway_service import (
+        _handle_buffered_retryable_request,  # type: ignore
+    )
 
     req = make_mock_request()
     provider = MagicMock()
@@ -191,7 +193,9 @@ async def test_no_bug_when_error_parsing_rule_matches():
     When error parsing rule matches the response body, the provider reads the body,
     so the stream is not closed. This scenario should work without StreamClosed.
     """
-    from src.services.gateway_service import _handle_buffered_retryable_request  # type: ignore
+    from src.services.gateway_service import (
+        _handle_buffered_retryable_request,  # type: ignore
+    )
 
     req = make_mock_request()
     provider = MagicMock()

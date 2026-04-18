@@ -47,8 +47,12 @@ def test_get_all_providers_includes_disabled():
     """Test that get_all_providers includes both enabled and disabled."""
     config = Config()
     config.providers = {
-        "enabled_provider": ProviderConfig(enabled=True),
-        "disabled_provider": ProviderConfig(enabled=False),
+        "enabled_provider": ProviderConfig(
+            enabled=True, provider_type="test", keys_path="keys/test/"
+        ),
+        "disabled_provider": ProviderConfig(
+            enabled=False, provider_type="test2", keys_path="keys/test2/"
+        ),
     }
 
     accessor = ConfigAccessor(config)
