@@ -18,7 +18,6 @@ from pydantic import ValidationError
 
 from src.config.schemas import AdaptiveBatchingConfig, HealthPolicyConfig
 
-
 # ---------------------------------------------------------------------------
 # UC-33: Valid config with defaults
 # ---------------------------------------------------------------------------

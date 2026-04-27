@@ -13,13 +13,11 @@ These tests verify the adaptive batch controller's:
 - Edge cases (empty batch, boundary values)
 """
 
-import pytest
 
 from src.config.schemas import AdaptiveBatchingConfig
+from src.core.batching import AdaptiveBatchController
 from src.core.constants import ErrorReason
 from src.core.models import CheckResult
-from src.services.batching.adaptive import AdaptiveBatchController
-
 
 # ---------------------------------------------------------------------------
 # Helpers

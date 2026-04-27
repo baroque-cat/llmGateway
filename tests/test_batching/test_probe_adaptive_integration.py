@@ -17,10 +17,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.config.schemas import AdaptiveBatchingConfig, HealthPolicyConfig
+from src.core.batching import AdaptiveBatchController
 from src.core.constants import ErrorReason
 from src.core.models import CheckResult
 from src.core.probes import IResourceProbe
-from src.services.batching.adaptive import AdaptiveBatchController
 
 
 # ----------------------------------------------------------------------
@@ -48,11 +48,11 @@ class ConcreteTestProbe(IResourceProbe):
 # ----------------------------------------------------------------------
 # Helper: build a list of resource dicts
 # ----------------------------------------------------------------------
-def _make_resources(count: int, provider_name: str = "test_provider") -> list[dict[str, Any]]:
+def _make_resources(
+    count: int, provider_name: str = "test_provider"
+) -> list[dict[str, Any]]:
     """Create *count* resource dicts with sequential key_id values."""
-    return [
-        {"key_id": i, "provider_name": provider_name} for i in range(count)
-    ]
+    return [{"key_id": i, "provider_name": provider_name} for i in range(count)]
 
 
 # ----------------------------------------------------------------------
@@ -61,6 +61,7 @@ def _make_resources(count: int, provider_name: str = "test_provider") -> list[di
 def _make_probe(
     policy: HealthPolicyConfig | None = None,
     concurrency: int = 10,
+    on_batch_complete=None,
 ) -> ConcreteTestProbe:
     """
     Build a ConcreteTestProbe with mocked accessor, db_manager, client_factory.
@@ -72,7 +73,9 @@ def _make_probe(
     mock_accessor.get_health_policy.return_value = policy
     mock_db = MagicMock()
     mock_client_factory = MagicMock()
-    return ConcreteTestProbe(mock_accessor, mock_db, mock_client_factory)
+    return ConcreteTestProbe(
+        mock_accessor, mock_db, mock_client_factory, on_batch_complete=on_batch_complete
+    )
 
 
 # ----------------------------------------------------------------------
@@ -119,8 +122,7 @@ async def test_ic01_while_loop_replaces_for_loop():
     probe._check_resource = AsyncMock(side_effect=mock_check)
     probe._update_resource_status = AsyncMock()
 
-    with patch("src.core.probes.update_adaptive_controller_state"):
-        await probe._process_provider_batch("test_provider", resources)
+    await probe._process_provider_batch("test_provider", resources)
 
     # All 100 resources were checked
     assert len(checked_resources) == 100
@@ -181,8 +183,7 @@ async def test_ic02_batch_size_changes_between_batches():
     # We need to observe the batch_size used for each sub-batch.
     # Patch the while-loop body to record batch_size at each iteration.
     # Instead, we can infer from the controller state after processing.
-    with patch("src.core.probes.update_adaptive_controller_state"):
-        await probe._process_provider_batch("test_provider", resources)
+    await probe._process_provider_batch("test_provider", resources)
 
     controller = probe._batch_controllers["test_provider"]
 
@@ -215,9 +216,10 @@ async def test_ic03_batch_delay_changes_between_batches():
 
     sleep_calls: list[float] = []
 
-    with patch("src.core.probes.update_adaptive_controller_state"):
-        with patch("asyncio.sleep", new=AsyncMock(side_effect=lambda s: sleep_calls.append(s))):
-            await probe._process_provider_batch("test_provider", resources)
+    with patch(
+        "asyncio.sleep", new=AsyncMock(side_effect=lambda s: sleep_calls.append(s))
+    ):
+        await probe._process_provider_batch("test_provider", resources)
 
     # First batch success → delay goes from 15 → 13.0 (15 - 2.0)
     # Sleep between batch 1 and batch 2 should use the NEW delay (13.0)
@@ -306,8 +308,7 @@ async def test_ic05_filtering_gather_results_isinstance_checkresult():
     # Pre-populate the controller so _process_provider_batch uses it
     probe._batch_controllers["test_provider"] = controller
 
-    with patch("src.core.probes.update_adaptive_controller_state"):
-        await probe._process_provider_batch("test_provider", resources)
+    await probe._process_provider_batch("test_provider", resources)
 
     # 10 resources, 4 of which return None (key_id 0, 3, 6, 9)
     # Only 6 CheckResult objects should have been reported
@@ -367,8 +368,7 @@ async def test_ic06_classification_of_checkresult_by_error_reason():
     controller.report_batch_result = capturing_report
     probe._batch_controllers["test_provider"] = controller
 
-    with patch("src.core.probes.update_adaptive_controller_state"):
-        await probe._process_provider_batch("test_provider", resources)
+    await probe._process_provider_batch("test_provider", resources)
 
     # All 10 results should be reported (no exceptions/None)
     assert len(reported_results) == 10
@@ -415,8 +415,7 @@ async def test_ic07_batch_controllers_dict_per_provider():
     probe._check_and_update_resource = AsyncMock(return_value=CheckResult.success())
 
     # First call — controller should be created
-    with patch("src.core.probes.update_adaptive_controller_state"):
-        await probe._process_provider_batch("test_provider", resources_batch1)
+    await probe._process_provider_batch("test_provider", resources_batch1)
 
     assert "test_provider" in probe._batch_controllers
     controller_after_first = probe._batch_controllers["test_provider"]
@@ -426,8 +425,7 @@ async def test_ic07_batch_controllers_dict_per_provider():
     assert controller_after_first.consecutive_successes == 1
 
     # Second call — same controller should be reused (not replaced)
-    with patch("src.core.probes.update_adaptive_controller_state"):
-        await probe._process_provider_batch("test_provider", resources_batch2)
+    await probe._process_provider_batch("test_provider", resources_batch2)
 
     controller_after_second = probe._batch_controllers["test_provider"]
 
@@ -538,14 +536,14 @@ async def test_ic09_mixed_results_in_one_batch():
     mixed_results: list[CheckResult] = [
         CheckResult.fail(ErrorReason.INVALID_KEY),  # fatal
         CheckResult.fail(ErrorReason.INVALID_KEY),  # fatal
-        CheckResult.fail(ErrorReason.TIMEOUT),      # transient
-        CheckResult.fail(ErrorReason.TIMEOUT),      # transient
-        CheckResult.fail(ErrorReason.TIMEOUT),      # transient
-        CheckResult.fail(ErrorReason.RATE_LIMITED), # rate_limited
-        CheckResult.success(),                       # success
-        CheckResult.success(),                       # success
-        CheckResult.success(),                       # success
-        CheckResult.success(),                       # success
+        CheckResult.fail(ErrorReason.TIMEOUT),  # transient
+        CheckResult.fail(ErrorReason.TIMEOUT),  # transient
+        CheckResult.fail(ErrorReason.TIMEOUT),  # transient
+        CheckResult.fail(ErrorReason.RATE_LIMITED),  # rate_limited
+        CheckResult.success(),  # success
+        CheckResult.success(),  # success
+        CheckResult.success(),  # success
+        CheckResult.success(),  # success
     ]
 
     controller.report_batch_result(mixed_results)
@@ -597,8 +595,7 @@ async def test_ic11_adaptive_batching_absent_uses_default_factory():
     resources = _make_resources(10)
     probe._check_and_update_resource = AsyncMock(return_value=CheckResult.success())
 
-    with patch("src.core.probes.update_adaptive_controller_state"):
-        await probe._process_provider_batch("test_provider", resources)
+    await probe._process_provider_batch("test_provider", resources)
 
     controller = probe._batch_controllers["test_provider"]
     assert controller is not None
@@ -630,8 +627,7 @@ async def test_ic12_empty_resource_list():
 
     probe._check_and_update_resource = AsyncMock(return_value=CheckResult.success())
 
-    with patch("src.core.probes.update_adaptive_controller_state"):
-        await probe._process_provider_batch("test_provider", [])
+    await probe._process_provider_batch("test_provider", [])
 
     # Controller should be created (lazy init happens before the while-loop)
     assert "test_provider" in probe._batch_controllers
@@ -678,8 +674,7 @@ async def test_ic13_one_resource():
     controller.report_batch_result = capturing_report
     probe._batch_controllers["test_provider"] = controller
 
-    with patch("src.core.probes.update_adaptive_controller_state"):
-        await probe._process_provider_batch("test_provider", resources)
+    await probe._process_provider_batch("test_provider", resources)
 
     # One CheckResult reported
     assert len(reported_results) == 1
@@ -709,9 +704,8 @@ async def test_ic14_semaphore_integration():
     # The semaphore has capacity 5. _process_provider_batch acquires it once
     # for the entire method, so the while-loop should not be blocked between
     # batches. We verify by checking that all resources were processed.
-    with patch("src.core.probes.update_adaptive_controller_state"):
-        with patch("asyncio.sleep", new=AsyncMock()):
-            await probe._process_provider_batch("test_provider", resources)
+    with patch("asyncio.sleep", new=AsyncMock()):
+        await probe._process_provider_batch("test_provider", resources)
 
     # All 60 resources should have been checked
     assert probe._check_and_update_resource.call_count == 60
@@ -737,13 +731,12 @@ async def test_ic15_run_cycle_compatible_with_batch_controllers():
     probe._get_resources_to_check = AsyncMock(return_value=resources)
     probe._check_and_update_resource = AsyncMock(return_value=CheckResult.success())
 
-    with patch("src.core.probes.update_adaptive_controller_state"):
-        await probe.run_cycle()
+    await probe.run_cycle()
 
-        # Wait for the task to complete
-        if "openai" in probe.active_tasks:
-            await probe.active_tasks["openai"]
-        await asyncio.sleep(0.05)
+    # Wait for the task to complete
+    if "openai" in probe.active_tasks:
+        await probe.active_tasks["openai"]
+    await asyncio.sleep(0.05)
 
     # active_tasks should be cleaned up
     assert "openai" not in probe.active_tasks
@@ -791,9 +784,8 @@ async def test_ic16_multiple_providers_separate_controllers():
     openai_resources = _make_resources(30, provider_name="openai")
     gemini_resources = _make_resources(10, provider_name="gemini")
 
-    with patch("src.core.probes.update_adaptive_controller_state"):
-        await probe._process_provider_batch("openai", openai_resources)
-        await probe._process_provider_batch("gemini", gemini_resources)
+    await probe._process_provider_batch("openai", openai_resources)
+    await probe._process_provider_batch("gemini", gemini_resources)
 
     # Two separate controllers
     assert len(probe._batch_controllers) == 2
@@ -839,8 +831,7 @@ async def test_ic17_timeout_wrapper_partial_batch_not_reported_on_timeout():
     probe._check_and_update_resource = AsyncMock(return_value=CheckResult.success())
 
     # Patch asyncio.sleep to sleep for real (so timeout triggers during inter-batch delay)
-    with patch("src.core.probes.update_adaptive_controller_state"):
-        await probe._run_task_wrapper("test_provider", resources)
+    await probe._run_task_wrapper("test_provider", resources)
 
     # The first batch of 30 should have completed and been reported to the controller.
     # The timeout interrupts during the sleep between batch 1 and batch 2.

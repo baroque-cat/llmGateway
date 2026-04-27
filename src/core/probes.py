@@ -4,16 +4,27 @@ import asyncio
 import logging
 from abc import ABC, abstractmethod
 from collections import defaultdict
+from collections.abc import Callable
 from typing import Any
 
-# REFACTORED: Import ConfigAccessor instead of Config.
 from src.core.accessor import ConfigAccessor
+from src.core.batching import AdaptiveBatchController
 from src.core.constants import ErrorReason
 from src.core.http_client_factory import HttpClientFactory
 from src.core.models import CheckResult
 from src.db.database import DatabaseManager
-from src.services.batching.adaptive import AdaptiveBatchController
-from src.services.metrics_exporter import update_adaptive_controller_state
+
+BatchCallback = Callable[[str, int, float, int, int, int], None]
+"""Callback signature for batch-completion notifications.
+
+Args:
+    provider_name: The provider identifier (e.g. "openai", "anthropic").
+    batch_size: Current batch size after the completed batch.
+    batch_delay: Current batch delay in seconds.
+    rate_limit_events: Cumulative rate-limit event counter.
+    backoff_events: Cumulative moderate-backoff event counter.
+    recovery_events: Cumulative recovery (ramp-up) event counter.
+"""
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +51,7 @@ class IResourceProbe(ABC):
         accessor: ConfigAccessor,
         db_manager: DatabaseManager,
         client_factory: HttpClientFactory,
+        on_batch_complete: BatchCallback | None = None,
     ):
         """
         Initializes the probe with dependencies.
@@ -48,10 +60,13 @@ class IResourceProbe(ABC):
             accessor: An instance of ConfigAccessor for safe config access.
             db_manager: An instance of the DatabaseManager for async DB access.
             client_factory: A factory for creating and managing httpx.AsyncClient instances.
+            on_batch_complete: Optional callback invoked after each batch with the controller's
+                updated state. Matches the ``BatchCallback`` signature.
         """
         self.accessor = accessor
         self.db_manager = db_manager
         self.client_factory = client_factory
+        self._on_batch_complete: BatchCallback | None = on_batch_complete
 
         # REFACTORED: The semaphore limit is now dynamically read from the worker config.
         # This makes the probe's behavior configurable.
@@ -213,15 +228,16 @@ class IResourceProbe(ABC):
                 batch_size = controller.batch_size
                 batch_delay = controller.batch_delay
 
-                # Export updated metrics to Prometheus
-                update_adaptive_controller_state(
-                    provider_name,
-                    batch_size=controller.batch_size,
-                    batch_delay=controller.batch_delay,
-                    rate_limit_events=controller.rate_limit_events,
-                    backoff_events=controller.backoff_events,
-                    recovery_events=controller.recovery_events,
-                )
+                # Notify callback (if registered) with updated controller state
+                if self._on_batch_complete:
+                    self._on_batch_complete(
+                        provider_name,
+                        controller.batch_size,
+                        controller.batch_delay,
+                        controller.rate_limit_events,
+                        controller.backoff_events,
+                        controller.recovery_events,
+                    )
 
                 # Structured log after each batch
                 fatal = sum(1 for r in valid_results if r.error_reason.is_fatal())

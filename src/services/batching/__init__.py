@@ -5,6 +5,6 @@ The adaptive batch controller (``adaptive.py``) provides self-tuning
 batch sizing and delay management based on check result statistics.
 """
 
-from src.services.batching.adaptive import AdaptiveBatchController
+from src.core.batching import AdaptiveBatchController
 
 __all__ = ["AdaptiveBatchController"]

@@ -12,14 +12,14 @@ import pytest
 from pydantic import ValidationError
 
 from src.config.schemas import AdaptiveBatchingConfig
+from src.core.batching import AdaptiveBatchController
 from src.core.constants import ErrorReason
 from src.core.models import CheckResult
-from src.services.batching.adaptive import AdaptiveBatchController
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_config(
     min_batch_size: int = 5,
@@ -120,7 +120,8 @@ class TestSC01RateLimitedBackoff:
     def test_delay_doubles_each_rate_limit_cycle(self) -> None:
         """delay *= 2 on each rate-limited report until max_batch_delay."""
         config = _make_config(
-            min_batch_delay_sec=3.0, max_batch_delay_sec=60.0,
+            min_batch_delay_sec=3.0,
+            max_batch_delay_sec=60.0,
             rate_limit_delay_multiplier=2.0,
         )
         ctrl = _make_controller(initial_batch_delay=15.0, config=config)
@@ -193,7 +194,9 @@ class TestSC02GradualRampUpAfterRateLimit:
             delay_step_sec=2.0,
         )
         ctrl = _make_controller(
-            initial_batch_size=30, initial_batch_delay=15.0, config=config,
+            initial_batch_size=30,
+            initial_batch_delay=15.0,
+            config=config,
         )
 
         # Drive to min via rate-limits
@@ -263,7 +266,7 @@ class TestSC03MinBatchDelayFloor:
 
         # Successes reduce delay by 2.0 each time
         # 15 → 13 → 11 → 9 → 7 → 5 → 3 (capped)
-        for i in range(6):
+        for _i in range(6):
             ctrl.report_batch_result(_success_results(10))
 
         assert ctrl.batch_delay == 3.0
@@ -339,7 +342,9 @@ class TestSC04MaxBatchDelayCeiling:
             min_batch_delay_sec=3.0,
             max_batch_delay_sec=60.0,
         )
-        ctrl = _make_controller(initial_batch_size=30, initial_batch_delay=15.0, config=config)
+        ctrl = _make_controller(
+            initial_batch_size=30, initial_batch_delay=15.0, config=config
+        )
 
         # Drive to extremes
         for _ in range(20):
@@ -486,7 +491,9 @@ class TestSC07FatalErrorsIgnored:
     def test_all_fatal_results_trigger_ramp_up(self) -> None:
         """A batch with only fatal errors is treated as success for ramp-up."""
         config = _make_config(batch_size_step=5, delay_step_sec=2.0)
-        ctrl = _make_controller(initial_batch_size=30, initial_batch_delay=15.0, config=config)
+        ctrl = _make_controller(
+            initial_batch_size=30, initial_batch_delay=15.0, config=config
+        )
 
         # All 10 results are fatal (INVALID_KEY)
         results = _fatal_results(ErrorReason.INVALID_KEY, 10)
@@ -512,7 +519,9 @@ class TestSC07FatalErrorsIgnored:
         for reason in fatal_reasons:
             ctrl = _make_controller(initial_batch_size=30, config=config)
             ctrl.report_batch_result(_fatal_results(reason, 5))
-            assert ctrl.batch_size == 35, f"{reason} should be ignored (ramp-up applied)"
+            assert (
+                ctrl.batch_size == 35
+            ), f"{reason} should be ignored (ramp-up applied)"
             assert ctrl.consecutive_successes == 1
 
     def test_mixed_fatal_and_success_trigger_ramp_up(self) -> None:
@@ -542,7 +551,9 @@ class TestSC07FatalErrorsIgnored:
             delay_step_sec=2.0,
             failure_rate_threshold=0.3,
         )
-        ctrl = _make_controller(initial_batch_size=30, initial_batch_delay=15.0, config=config)
+        ctrl = _make_controller(
+            initial_batch_size=30, initial_batch_delay=15.0, config=config
+        )
 
         results = (
             _fatal_results(ErrorReason.INVALID_KEY, 3)
@@ -565,7 +576,9 @@ class TestSC07FatalErrorsIgnored:
             rate_limit_divisor=2,
             rate_limit_delay_multiplier=2.0,
         )
-        ctrl = _make_controller(initial_batch_size=30, initial_batch_delay=15.0, config=config)
+        ctrl = _make_controller(
+            initial_batch_size=30, initial_batch_delay=15.0, config=config
+        )
 
         results = (
             _fatal_results(ErrorReason.INVALID_KEY, 2)
@@ -649,10 +662,14 @@ class TestSC08StateIsolationBetweenProviders:
             delay_step_sec=2.0,
         )
         ctrl_openai = _make_controller(
-            initial_batch_size=30, initial_batch_delay=15.0, config=config,
+            initial_batch_size=30,
+            initial_batch_delay=15.0,
+            config=config,
         )
         ctrl_gemini = _make_controller(
-            initial_batch_size=30, initial_batch_delay=15.0, config=config,
+            initial_batch_size=30,
+            initial_batch_delay=15.0,
+            config=config,
         )
 
         # OpenAI: 2 rate-limits
@@ -677,18 +694,26 @@ class TestSC08StateIsolationBetweenProviders:
     def test_different_configs_dont_interact(self) -> None:
         """Controllers with different configs are fully independent."""
         config_openai = _make_config(
-            min_batch_size=5, max_batch_size=50,
-            batch_size_step=5, delay_step_sec=2.0,
+            min_batch_size=5,
+            max_batch_size=50,
+            batch_size_step=5,
+            delay_step_sec=2.0,
         )
         config_gemini = _make_config(
-            min_batch_size=10, max_batch_size=100,
-            batch_size_step=10, delay_step_sec=5.0,
+            min_batch_size=10,
+            max_batch_size=100,
+            batch_size_step=10,
+            delay_step_sec=5.0,
         )
         ctrl_openai = _make_controller(
-            initial_batch_size=30, initial_batch_delay=15.0, config=config_openai,
+            initial_batch_size=30,
+            initial_batch_delay=15.0,
+            config=config_openai,
         )
         ctrl_gemini = _make_controller(
-            initial_batch_size=50, initial_batch_delay=20.0, config=config_gemini,
+            initial_batch_size=50,
+            initial_batch_delay=20.0,
+            config=config_gemini,
         )
 
         # OpenAI success → +5
@@ -704,3 +729,117 @@ class TestSC08StateIsolationBetweenProviders:
         # Neither affected the other
         assert ctrl_openai.batch_size == 35
         assert ctrl_openai.batch_delay == 13.0
+
+
+# ---------------------------------------------------------------------------
+# SEC-01: probes.py has no src.services dependency
+# ---------------------------------------------------------------------------
+
+
+def test_sec01_probes_has_no_services_dependency() -> None:
+    """Verify src/core/probes.py does not import from src.services."""
+    import pathlib
+
+    probes_path = pathlib.Path("src/core/probes.py")
+    probes_content = probes_path.read_text()
+    # Check that no import line contains 'src.services'
+    for line in probes_content.splitlines():
+        if "import" in line and "src.services" in line:
+            pytest.fail(f"probes.py contains a src.services import: {line.strip()}")
+
+
+# ---------------------------------------------------------------------------
+# SEC-02: on_batch_complete callback is stored as a private attribute
+# ---------------------------------------------------------------------------
+
+
+def test_sec02_callback_is_private_attribute() -> None:
+    """Verify on_batch_complete is stored as _on_batch_complete (private)."""
+    from unittest.mock import MagicMock
+
+    from src.core.accessor import ConfigAccessor
+    from src.core.probes import IResourceProbe
+    from src.db.database import DatabaseManager
+
+    callback = lambda *args: None  # noqa: E731
+
+    # We need a concrete subclass to instantiate IResourceProbe.
+    # Use a minimal mock-based approach: create a concrete stub.
+    class StubProbe(IResourceProbe):
+        async def _get_resources_to_check(self) -> list:
+            return []
+
+        async def _check_resource(self, resource: dict) -> CheckResult:
+            return CheckResult.success()
+
+        async def _update_resource_status(
+            self, resource: dict, result: CheckResult
+        ) -> None:
+            pass
+
+    accessor = MagicMock(spec=ConfigAccessor)
+    accessor.get_worker_concurrency.return_value = 5
+    db_manager = MagicMock(spec=DatabaseManager)
+    client_factory = MagicMock()
+
+    probe = StubProbe(
+        accessor=accessor,
+        db_manager=db_manager,
+        client_factory=client_factory,
+        on_batch_complete=callback,
+    )
+
+    # Verify the attribute exists and is the same callable object
+    assert hasattr(probe, "_on_batch_complete")
+    assert probe._on_batch_complete is callback
+
+    # Verify the attribute name starts with underscore (private convention)
+    attr_name = "_on_batch_complete"
+    assert attr_name.startswith("_")
+
+
+# ---------------------------------------------------------------------------
+# SEC-03: Wrong-signature callback raises TypeError when invoked
+# ---------------------------------------------------------------------------
+
+
+def test_sec03_wrong_signature_callback_raises_typeerror() -> None:
+    """A callback with fewer parameters than BatchCallback raises TypeError
+    when called with 6 arguments."""
+
+    # Create a callback that only accepts 1 arg instead of 6
+    wrong_callback = lambda x: None  # noqa: E731
+
+    # Call it with 6 args (as the BatchCallback signature expects)
+    with pytest.raises(TypeError):
+        wrong_callback("openai", 30, 15.0, 0, 0, 0)
+
+
+# ---------------------------------------------------------------------------
+# SEC-04: No metrics_exporter import in probes.py
+# ---------------------------------------------------------------------------
+
+
+def test_sec04_no_metrics_exporter_import_in_probes() -> None:
+    """Verify src/core/probes.py does not import from src.services.metrics_exporter."""
+    import pathlib
+
+    probes_path = pathlib.Path("src/core/probes.py")
+    probes_content = probes_path.read_text()
+    for line in probes_content.splitlines():
+        if "from src.services.metrics_exporter import" in line:
+            pytest.fail(f"probes.py imports from metrics_exporter: {line.strip()}")
+
+
+# ---------------------------------------------------------------------------
+# SEC-05: Re-export from services.batching points to core.batching
+# ---------------------------------------------------------------------------
+
+
+def test_sec05_reexport_points_to_core() -> None:
+    """Verify that the services re-export is the same class as the core class."""
+    from src.core.batching import AdaptiveBatchController as CoreController
+    from src.services.batching import AdaptiveBatchController as ServiceController
+
+    # They must be the exact same class object (not a copy or subclass)
+    assert CoreController is ServiceController

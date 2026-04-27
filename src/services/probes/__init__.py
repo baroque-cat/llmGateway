@@ -6,7 +6,7 @@ import logging
 # This makes the factory's dependencies explicit and aligned with the new architecture.
 from src.core.accessor import ConfigAccessor
 from src.core.http_client_factory import HttpClientFactory
-from src.core.probes import IResourceProbe
+from src.core.probes import BatchCallback, IResourceProbe
 from src.db.database import DatabaseManager
 
 # Import concrete probe implementations
@@ -25,6 +25,7 @@ def get_all_probes(
     accessor: ConfigAccessor,
     db_manager: DatabaseManager,
     client_factory: HttpClientFactory,
+    on_batch_complete: BatchCallback | None = None,
 ) -> list[IResourceProbe]:
     """
     Factory function to create instances of all registered probes (Async Version).
@@ -37,6 +38,8 @@ def get_all_probes(
         accessor: An instance of ConfigAccessor for safe config access.
         db_manager: An instance of the DatabaseManager.
         client_factory: A factory for creating and managing httpx.AsyncClient instances.
+        on_batch_complete: Optional callback passed to each probe's constructor for
+            batch-completion notifications.
 
     Returns:
         A list of initialized probe instances.
@@ -48,7 +51,10 @@ def get_all_probes(
             # This aligns with the new IResourceProbe constructor contract defined
             # in src/core/probes.py.
             instance = probe_class(
-                accessor=accessor, db_manager=db_manager, client_factory=client_factory
+                accessor=accessor,
+                db_manager=db_manager,
+                client_factory=client_factory,
+                on_batch_complete=on_batch_complete,
             )
             all_probes.append(instance)
             logger.debug(f"Successfully initialized probe: '{probe_name}'")

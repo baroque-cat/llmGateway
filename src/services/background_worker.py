@@ -17,6 +17,7 @@ from src.core.interfaces import IResourceSyncer, ProviderKeyState, ProviderProxy
 from src.db import database
 from src.db.database import DatabaseManager
 from src.services import maintenance
+from src.services.metrics_exporter import update_adaptive_controller_state
 from src.services.probes import get_all_probes
 from src.services.synchronizers import get_all_syncers
 from src.services.synchronizers.key_sync import read_keys_from_directory
@@ -195,7 +196,12 @@ async def run_worker() -> None:
         logger.info("Initial resource synchronization finished.")
 
         # Step 7: Instantiate Services with Dependencies.
-        all_probes = get_all_probes(accessor, db_manager, client_factory)
+        all_probes = get_all_probes(
+            accessor,
+            db_manager,
+            client_factory,
+            on_batch_complete=update_adaptive_controller_state,
+        )
 
         # Step 8: Scheduler Setup.
         scheduler = AsyncIOScheduler(timezone="UTC")
