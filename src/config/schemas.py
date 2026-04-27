@@ -108,10 +108,75 @@ class MetricsConfig(BaseModel):
 # and the global configuration sections.
 
 
+class AdaptiveBatchingConfig(BaseModel):
+    """
+    Configuration for adaptive batch sizing in the background worker.
+
+    Replaces static ``batch_size`` / ``batch_delay_sec`` with a self-tuning
+    controller that adjusts batch size and delay based on the results of each
+    completed batch. The existing ``batch_size`` and ``batch_delay_sec`` fields
+    serve as initial values for the controller.
+
+    **Algorithm Summary**:
+
+    1. **Rate-limited** (RATE_LIMITED in batch) → aggressive backoff:
+       ``batch_size //= rate_limit_divisor``, ``delay *= rate_limit_delay_multiplier``.
+    2. **Transient errors** (>failure_rate_threshold of non-fatal results) →
+       moderate backoff: ``batch_size -= batch_size_step``, ``delay += delay_step_sec``.
+    3. **Fatal errors** (INVALID_KEY, NO_ACCESS, NO_QUOTA, NO_MODEL) → ignored
+       (problem of specific key, not provider).
+    4. **Success** → ramp-up: ``batch_size += step``, ``delay -= step``.
+       After ``recovery_threshold`` consecutive successes, the step multiplier
+       doubles for faster recovery.
+    """
+
+    # Boundaries — batch size
+    min_batch_size: int = Field(default=5, gt=0)
+    max_batch_size: int = Field(default=50, gt=0)
+
+    # Boundaries — delay
+    min_batch_delay_sec: float = Field(default=3.0, gt=0)
+    max_batch_delay_sec: float = Field(default=120.0, gt=0)
+
+    # Additive step sizes
+    batch_size_step: int = Field(default=5, gt=0)
+    delay_step_sec: float = Field(default=2.0, gt=0)
+
+    # Aggressive reaction to rate-limit (multiplicative)
+    rate_limit_divisor: int = Field(default=2, gt=1)
+    rate_limit_delay_multiplier: float = Field(default=2.0, gt=1.0)
+
+    # Recovery tuning
+    recovery_threshold: int = Field(default=5, gt=0)
+    recovery_step_multiplier: float = Field(default=2.0, gt=1.0)
+
+    # Threshold for moderate backoff on transient errors
+    failure_rate_threshold: float = Field(default=0.3, gt=0.0, lt=1.0)
+
+    @model_validator(mode="after")
+    def check_bounds(self) -> "AdaptiveBatchingConfig":
+        """Validate that min bounds are strictly less than max bounds."""
+        if self.min_batch_size >= self.max_batch_size:
+            raise ValueError(
+                f"min_batch_size ({self.min_batch_size}) must be < "
+                f"max_batch_size ({self.max_batch_size})"
+            )
+        if self.min_batch_delay_sec >= self.max_batch_delay_sec:
+            raise ValueError(
+                f"min_batch_delay_sec ({self.min_batch_delay_sec}) must be < "
+                f"max_batch_delay_sec ({self.max_batch_delay_sec})"
+            )
+        return self
+
+
 class HealthPolicyConfig(BaseModel):
     """
     Defines the policy for the background worker's health checks.
     The fields are ordered by the magnitude of their time units for clarity.
+
+    The ``batch_size`` and ``batch_delay_sec`` fields now serve as **initial**
+    values for the adaptive batch controller, which adjusts them dynamically
+    based on batch results.
     """
 
     # --- Intervals in Minutes (for short-term, recoverable errors) ---
@@ -146,6 +211,11 @@ class HealthPolicyConfig(BaseModel):
     batch_size: int = Field(default=30, gt=0)
     # Delay in seconds between batches to avoid overwhelming the API.
     batch_delay_sec: int = Field(default=15, ge=0)
+    # Adaptive batch controller configuration. Uses default_factory to ensure
+    # a valid config always exists even if the user omits the section.
+    adaptive_batching: AdaptiveBatchingConfig = Field(
+        default_factory=AdaptiveBatchingConfig
+    )
     # Maximum time in seconds a single probe task is allowed to run before being force-cancelled.
     # This prevents "zombie" tasks from hanging indefinitely and blocking the dispatcher.
     task_timeout_sec: int = Field(default=900, gt=0)  # 15 minutes

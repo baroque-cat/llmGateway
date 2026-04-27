@@ -190,3 +190,7 @@ providers:
 - Debug logs are written to standard output, captured by systemd/journald or docker-compose
 - Multiline SSE bodies are collapsed to single lines for clean log output
 - The ``"headers_only"`` value is no longer valid — use ``"no_content"`` instead
+- **Debug mode does NOT affect adaptive batching**: the background worker's
+  adaptive batch controller operates independently of per-request debug logging.
+  Retries disabled by debug mode apply to the gateway, not to the worker's
+  probe verification loop.

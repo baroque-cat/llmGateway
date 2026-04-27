@@ -50,6 +50,11 @@ providers:
     #   on_success_hr: 24
     #   verification_attempts: 3
     #   verification_delay_sec: 65
+    #   batch_size: 30               # Initial batch size for adaptive control
+    #   batch_delay_sec: 15          # Initial batch delay
+    #   adaptive_batching:           # Optional: tune adaptive batch behaviour
+    #     min_batch_size: 5
+    #     max_batch_size: 200
     #
     # gateway_policy:
     #   retry:

@@ -8,9 +8,12 @@ from typing import Any
 
 # REFACTORED: Import ConfigAccessor instead of Config.
 from src.core.accessor import ConfigAccessor
+from src.core.constants import ErrorReason
 from src.core.http_client_factory import HttpClientFactory
 from src.core.models import CheckResult
 from src.db.database import DatabaseManager
+from src.services.batching.adaptive import AdaptiveBatchController
+from src.services.metrics_exporter import update_adaptive_controller_state
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +60,9 @@ class IResourceProbe(ABC):
 
         # State management for active tasks to enable non-blocking dispatching.
         self.active_tasks: dict[str, asyncio.Task[None]] = {}
+
+        # Adaptive batch controllers — one per provider, created lazily.
+        self._batch_controllers: dict[str, AdaptiveBatchController] = {}
 
     async def run_cycle(self) -> None:
         """
@@ -111,8 +117,19 @@ class IResourceProbe(ABC):
         self, provider_name: str, resources: list[dict[str, Any]]
     ) -> None:
         """
-        Processes all resources for a single provider, respecting its batching policy.
-        This coroutine is executed concurrently for different providers.
+        Processes all resources for a single provider using an adaptive batch
+        controller that dynamically adjusts ``batch_size`` and ``batch_delay``
+        based on the per-batch classification of check results.
+
+        The controller is created lazily (on first call) and reused across
+        cycles so that state (e.g., consecutive successes) persists.
+
+        On each completed batch the method:
+
+        * Filters valid ``CheckResult`` objects from ``asyncio.gather``.
+        * Feeds them to the controller's ``report_batch_result``.
+        * Re-reads the controller's updated ``batch_size`` / ``batch_delay``.
+        * Advances the iteration cursor by the actual batch size used.
         """
         # Set the task name for better logging in case of an exception in gather
         current_task = asyncio.current_task()
@@ -121,56 +138,152 @@ class IResourceProbe(ABC):
 
         async with self.semaphore:
             # REFACTORED: Use the accessor to get the provider policy directly.
-            # This ensures we are using the facade pattern correctly and not accessing
-            # internal implementation details like 'worker_health_policy'.
             policy = self.accessor.get_health_policy(provider_name)
 
             if not policy:
                 logger.warning(
-                    f"No configuration/policy found for provider '{provider_name}'. Skipping {len(resources)} resources."
+                    f"No configuration/policy found for provider '{provider_name}'. "
+                    f"Skipping {len(resources)} resources."
                 )
                 return
 
-            batch_size = policy.batch_size
-            batch_delay_sec = policy.batch_delay_sec
+            # --- Adaptive batch controller (lazy init) ---
+            controller = self._batch_controllers.get(provider_name)
+            if controller is None:
+                controller = AdaptiveBatchController(
+                    config=policy.adaptive_batching,
+                    initial_batch_size=policy.batch_size,
+                    initial_batch_delay=policy.batch_delay_sec,
+                )
+                self._batch_controllers[provider_name] = controller
+                logger.info(
+                    "[AdaptiveBatch] Provider '%s': controller created. "
+                    "initial_batch_size=%d, initial_batch_delay=%.1fs, "
+                    "bounds=[%d..%d keys, %.1f..%.1fs]",
+                    provider_name,
+                    controller.batch_size,
+                    controller.batch_delay,
+                    policy.adaptive_batching.min_batch_size,
+                    policy.adaptive_batching.max_batch_size,
+                    policy.adaptive_batching.min_batch_delay_sec,
+                    policy.adaptive_batching.max_batch_delay_sec,
+                )
+
+            batch_size = controller.batch_size
+            batch_delay = controller.batch_delay
 
             logger.info(
-                f"Processing {len(resources)} resources for '{provider_name}' with batch_size={batch_size} and delay={batch_delay_sec}s."
+                "Processing %d resources for '%s' with initial batch_size=%d "
+                "and delay=%.1fs.",
+                len(resources),
+                provider_name,
+                batch_size,
+                batch_delay,
             )
 
-            for i in range(0, len(resources), batch_size):
+            i = 0
+            batch_num = 0
+            while i < len(resources):
                 batch = resources[i : i + batch_size]
+                batch_num += 1
                 logger.debug(
-                    f"Processing batch {i // batch_size + 1} for '{provider_name}' with {len(batch)} resources."
+                    "Batch %d for '%s': %d resources (i=%d, batch_size=%d).",
+                    batch_num,
+                    provider_name,
+                    len(batch),
+                    i,
+                    batch_size,
                 )
 
                 # Concurrently check all resources within the current batch
                 check_tasks = [self._check_and_update_resource(res) for res in batch]
-                await asyncio.gather(*check_tasks, return_exceptions=True)
+                gather_results = await asyncio.gather(
+                    *check_tasks, return_exceptions=True
+                )
 
-                if i + batch_size < len(resources):
-                    logger.debug(
-                        f"Batch for '{provider_name}' finished. Waiting for {batch_delay_sec} seconds..."
-                    )
-                    await asyncio.sleep(batch_delay_sec)
+                # Filter out exceptions and None values, keeping only CheckResult
+                valid_results: list[CheckResult] = [
+                    r for r in gather_results if isinstance(r, CheckResult)
+                ]
+
+                # Report results to the adaptive controller
+                controller.report_batch_result(valid_results)
+
+                # Re-read dynamic values — they may have changed
+                batch_size = controller.batch_size
+                batch_delay = controller.batch_delay
+
+                # Export updated metrics to Prometheus
+                update_adaptive_controller_state(
+                    provider_name,
+                    batch_size=controller.batch_size,
+                    batch_delay=controller.batch_delay,
+                    rate_limit_events=controller.rate_limit_events,
+                    backoff_events=controller.backoff_events,
+                    recovery_events=controller.recovery_events,
+                )
+
+                # Structured log after each batch
+                fatal = sum(1 for r in valid_results if r.error_reason.is_fatal())
+                rate_limited = sum(
+                    1
+                    for r in valid_results
+                    if r.error_reason == ErrorReason.RATE_LIMITED
+                )
+                transient = sum(
+                    1
+                    for r in valid_results
+                    if r.error_reason.is_retryable()
+                    and not r.error_reason.is_fatal()
+                    and r.error_reason != ErrorReason.RATE_LIMITED
+                )
+                logger.debug(
+                    "[AdaptiveBatch] Provider '%s' batch %d: "
+                    "total=%d, fatal=%d, rate_limited=%d, transient=%d, "
+                    "next_batch_size=%d, next_delay=%.1fs, "
+                    "consecutive_successes=%d",
+                    provider_name,
+                    batch_num,
+                    len(valid_results),
+                    fatal,
+                    rate_limited,
+                    transient,
+                    controller.batch_size,
+                    controller.batch_delay,
+                    controller.consecutive_successes,
+                )
+
+                i += len(batch)
+
+                if i < len(resources):
+                    await asyncio.sleep(batch_delay)
 
             logger.info(
-                f"Successfully finished processing batch for provider '{provider_name}'."
+                "Successfully finished processing batch for provider '%s'.",
+                provider_name,
             )
 
-    async def _check_and_update_resource(self, resource: dict[str, Any]) -> None:
+    async def _check_and_update_resource(
+        self, resource: dict[str, Any]
+    ) -> CheckResult | None:
         """
         Helper coroutine to wrap the check and update logic for a single resource.
         This allows us to run multiple of these concurrently within a batch.
+
+        Returns:
+            The ``CheckResult`` if the check completed successfully, or ``None``
+            if an unexpected exception was caught (so the caller can filter).
         """
         try:
             result = await self._check_resource(resource)
             await self._update_resource_status(resource, result)
+            return result
         except Exception:
             logger.error(
                 f"An unexpected error occurred while checking and updating resource: {resource}",
                 exc_info=True,
             )
+            return None
 
     async def _run_task_wrapper(
         self, provider_name: str, resources: list[dict[str, Any]]

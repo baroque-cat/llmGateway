@@ -8,12 +8,78 @@ from the database in a format compatible with Prometheus.
 import logging
 from datetime import UTC, datetime
 
-from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from prometheus_client import CONTENT_TYPE_LATEST, Gauge, generate_latest
 from prometheus_client.core import REGISTRY, GaugeMetricFamily
 
 from src.db.database import DatabaseManager, StatusSummaryItem
 
 logger = logging.getLogger(__name__)
+
+
+# --- Adaptive batch controller metrics (module-level, updated by probes) ---
+
+# Gauge — текущий размер батча на провайдер
+_adaptive_batch_size_gauge = Gauge(
+    "llm_gateway_adaptive_batch_size",
+    "Current adaptive batch size per provider",
+    labelnames=["provider"],
+)
+
+# Gauge — текущая задержка между батчами на провайдер
+_adaptive_batch_delay_gauge = Gauge(
+    "llm_gateway_adaptive_batch_delay",
+    "Current adaptive batch delay in seconds per provider",
+    labelnames=["provider"],
+)
+
+# Gauge — срабатываний агрессивного отката (rate-limit detection)
+_adaptive_rate_limit_gauge = Gauge(
+    "llm_gateway_adaptive_rate_limit_events_total",
+    "Total number of aggressive (rate-limit) backoff events per provider",
+    labelnames=["provider"],
+)
+
+# Gauge — срабатываний умеренного отката (transient > threshold)
+_adaptive_backoff_gauge = Gauge(
+    "llm_gateway_adaptive_backoff_events_total",
+    "Total number of moderate (transient-threshold) backoff events per provider",
+    labelnames=["provider"],
+)
+
+# Gauge — срабатываний ramp-up (recovery events)
+_adaptive_recovery_gauge = Gauge(
+    "llm_gateway_adaptive_recovery_events_total",
+    "Total number of recovery (ramp-up) events per provider",
+    labelnames=["provider"],
+)
+
+
+def update_adaptive_controller_state(
+    provider_name: str,
+    batch_size: int,
+    batch_delay: float,
+    rate_limit_events: int,
+    backoff_events: int,
+    recovery_events: int,
+) -> None:
+    """
+    Update Prometheus gauges and counters with the latest controller state.
+
+    Called by probe code after each completed batch to keep metrics current.
+
+    Args:
+        provider_name: The provider instance name.
+        batch_size: Current adaptive batch size.
+        batch_delay: Current adaptive batch delay in seconds.
+        rate_limit_events: Cumulative rate-limit backoff count.
+        backoff_events: Cumulative moderate backoff count.
+        recovery_events: Cumulative recovery (ramp-up) count.
+    """
+    _adaptive_batch_size_gauge.labels(provider=provider_name).set(batch_size)
+    _adaptive_batch_delay_gauge.labels(provider=provider_name).set(batch_delay)
+    _adaptive_rate_limit_gauge.labels(provider=provider_name).set(rate_limit_events)
+    _adaptive_backoff_gauge.labels(provider=provider_name).set(backoff_events)
+    _adaptive_recovery_gauge.labels(provider=provider_name).set(recovery_events)
 
 
 class KeyStatusCollector:

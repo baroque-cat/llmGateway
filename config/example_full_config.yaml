@@ -104,8 +104,35 @@ providers:
       # the system assumes it was due to a downtime and resets the 'failing_since' counter.
       amnesty_threshold_days: 2.0
       # Batching Configuration
+      # NOTE: batch_size and batch_delay_sec are now INITIAL values for the
+      # adaptive batch controller. The controller adjusts them dynamically.
       batch_size: 10
       batch_delay_sec: 30
+      
+      # Adaptive Batching Configuration
+      # The controller adjusts batch size and delay based on provider response:
+      # - Any RATE_LIMITED → aggressive backoff (batch_size //= 2, delay *= 2)
+      # - Transient errors > failure_rate_threshold → moderate backoff
+      # - Fatal errors (invalid key, no access) → ignored (key-specific)
+      # - Success → gradual ramp-up; accelerated after recovery_threshold
+      adaptive_batching:
+        # Boundaries: batch size never drops below min nor exceeds max
+        min_batch_size: 5                # Lower bound (default: 5)
+        max_batch_size: 50               # Upper bound (default: 50)
+        # Boundaries: delay never goes below min nor above max (seconds)
+        min_batch_delay_sec: 3.0         # Minimum pause between batches (default: 3.0)
+        max_batch_delay_sec: 120.0       # Maximum pause under heavy throttling (default: 120.0)
+        # Step sizes: how fast the controller adjusts
+        batch_size_step: 5               # Keys added/removed per step (default: 5)
+        delay_step_sec: 2.0              # Seconds added/removed per step (default: 2.0)
+        # Rate-limit reaction (multipliers — aggressive)
+        rate_limit_divisor: 2            # batch_size //= divisor (default: 2)
+        rate_limit_delay_multiplier: 2.0 # delay *= multiplier (default: 2.0)
+        # Recovery: after N consecutive successes, step size doubles
+        recovery_threshold: 5            # Consecutive successes for fast recovery (default: 5)
+        recovery_step_multiplier: 2.0    # Step multiplier during recovery (default: 2.0)
+        # Moderate backoff threshold: transient > this fraction → slow down
+        failure_rate_threshold: 0.3      # 30% transient errors in non-fatal results (default: 0.3)
       # Maximum time in seconds a single probe task is allowed to run before being force-cancelled.
       # This prevents "zombie" tasks from hanging indefinitely and blocking the dispatcher.
       task_timeout_sec: 900

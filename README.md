@@ -131,6 +131,27 @@ The system is configured via the `providers.yaml` file. The configuration schema
 
 *   **Retry Policies:** Define how many times and with what backoff strategy to retry failed requests.
 *   **Health Probing:** Configure intervals and methods for checking key validity.
+*   **Adaptive Batching:** Self-tuning batch controller that adjusts batch size and delay based on real-time provider response behaviour. When a provider returns rate-limit errors, the controller automatically reduces throughput; on success it gradually ramps up. Configurable per provider under ``worker_health_policy.adaptive_batching``.
+
+### Adaptive Batching Parameters
+
+The ``worker_health_policy.adaptive_batching`` section supports the following fields (all optional — sensible defaults are provided):
+
+| Parameter | Default | Description |
+|---|---|---|
+| ``min_batch_size`` | 5 | Lower bound — never drops below this |
+| ``max_batch_size`` | 50 | Upper bound — never exceeds this |
+| ``min_batch_delay_sec`` | 3.0 | Lower bound — never less pause than this |
+| ``max_batch_delay_sec`` | 120.0 | Upper bound — pause cap under heavy throttling |
+| ``batch_size_step`` | 5 | Keys added/removed per adjustment step |
+| ``delay_step_sec`` | 2.0 | Seconds added/removed per adjustment step |
+| ``rate_limit_divisor`` | 2 | ``batch_size //= divisor`` on rate-limit |
+| ``rate_limit_delay_multiplier`` | 2.0 | ``delay *= multiplier`` on rate-limit |
+| ``recovery_threshold`` | 5 | Consecutive successes before doubling step |
+| ``recovery_step_multiplier`` | 2.0 | Step multiplier during accelerated recovery |
+| ``failure_rate_threshold`` | 0.3 | Transient error proportion that triggers moderate backoff |
+
+Existing ``batch_size`` and ``batch_delay_sec`` fields (under ``worker_health_policy``) now serve as **initial** values for the adaptive controller.
 
 ## Project Status
 

@@ -76,8 +76,23 @@ def get_default_config() -> dict[str, Any]:
                     # Downtime Amnesty Policy
                     "amnesty_threshold_days": 2.0,
                     # Batching Configuration
+                    # NOTE: batch_size and batch_delay_sec are INITIAL values
                     "batch_size": 10,
                     "batch_delay_sec": 30,
+                    # Adaptive Batching — self-tuning controller (all optional)
+                    "adaptive_batching": {
+                        "min_batch_size": 5,
+                        "max_batch_size": 50,
+                        "min_batch_delay_sec": 3.0,
+                        "max_batch_delay_sec": 120.0,
+                        "batch_size_step": 5,
+                        "delay_step_sec": 2.0,
+                        "rate_limit_divisor": 2,
+                        "rate_limit_delay_multiplier": 2.0,
+                        "recovery_threshold": 5,
+                        "recovery_step_multiplier": 2.0,
+                        "failure_rate_threshold": 0.3,
+                    },
                     "task_timeout_sec": 900,
                     # Verification Loop Configuration
                     "verification_attempts": 3,
