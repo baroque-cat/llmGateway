@@ -125,7 +125,7 @@ providers:
     # Gateway specific policies
     gateway_policy:
       streaming_mode: "auto" # "auto" or "disabled"
-      debug_mode: "disabled" # "disabled", "headers_only", "full_body"
+      debug_mode: "disabled" # "disabled", "no_content", "full_body"
       
       # Fast Status Mapping (Fast Fail)
       # Immediately fails requests with these status codes without reading the response body.

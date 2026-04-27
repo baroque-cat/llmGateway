@@ -93,8 +93,10 @@ def get_default_config() -> dict[str, Any]:
                     "streaming_mode": "auto",
                     # Controls the debug logging mode for this provider instance.
                     # - "disabled": No additional debug logging.
-                    # - "headers_only": Log request and response headers only.
-                    # - "full_body": Log request and response headers and body content (truncated to 10KB).
+                    # - "no_content": Log all request/response metadata and parameters,
+                    #                 but redact content fields (messages, thinking, generated text).
+                    # - "full_body": Log full request and response including all bodies,
+                    #                with sensitive fields (api_key, token) redacted.
                     "debug_mode": "disabled",
                     # Configuration for parsing error responses to refine error classification
                     # This enables distinguishing between different error types with the same HTTP status code

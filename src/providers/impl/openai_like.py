@@ -2,7 +2,7 @@
 
 import json
 import logging
-from collections.abc import AsyncGenerator, AsyncIterable
+from collections.abc import AsyncGenerator
 from typing import Any
 
 import httpx
@@ -292,22 +292,13 @@ class OpenAILikeProvider(AIBaseProvider):
         )
 
         # 3. Build the request object.
-        if isinstance(content, AsyncIterable):
-            upstream_request = client.build_request(
-                method=method,
-                url=upstream_url,
-                headers=proxy_headers,
-                content=content,
-                timeout=timeout,
-            )
-        else:
-            upstream_request = client.build_request(
-                method=method,
-                url=upstream_url,
-                headers=proxy_headers,
-                content=content,
-                timeout=timeout,
-            )
+        upstream_request = client.build_request(
+            method=method,
+            url=upstream_url,
+            headers=proxy_headers,
+            content=content,
+            timeout=timeout,
+        )
 
         # 4. Delegate to the centralized, reliable sender method.
         return await self._send_proxy_request(client, upstream_request)

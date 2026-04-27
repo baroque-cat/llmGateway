@@ -273,8 +273,8 @@ class AIBaseProvider(IProvider):
                 else:
                     should_read_body = False
 
-                    # Check Debug Mode
-                    if gateway_policy.debug_mode == "full_body":
+                    # Check Debug Mode (both full_body and no_content need the body)
+                    if gateway_policy.debug_mode in ("full_body", "no_content"):
                         should_read_body = True
 
                     # Check Error Parsing Rules

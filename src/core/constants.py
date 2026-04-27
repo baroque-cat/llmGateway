@@ -126,10 +126,17 @@ class Status(StrEnum):
 class DebugMode(Enum):
     """
     Defines the allowed debug logging modes for a provider instance.
+
+    Modes:
+        ``DISABLED`` — No additional debug logging.
+        ``NO_CONTENT`` — Log all request/response metadata and parameters,
+            but redact content and thinking/reasoning fields per provider.
+        ``FULL_BODY`` — Log full request and response including all bodies,
+            with sensitive fields (api_key, token) redacted.
     """
 
     DISABLED = "disabled"
-    HEADERS_ONLY = "headers_only"
+    NO_CONTENT = "no_content"
     FULL_BODY = "full_body"
 
 

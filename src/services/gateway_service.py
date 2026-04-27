@@ -23,6 +23,7 @@ from src.db.database import DatabaseManager
 from src.providers import get_provider
 from src.services.gateway_cache import GatewayCache
 from src.services.metrics_exporter import MetricsService
+from src.services.sanitize_content import redact_content
 
 # --- Dependency Injection Helpers ---
 # These functions provide a typed and safe way to access app state,
@@ -83,9 +84,6 @@ HOP_BY_HOP_HEADERS: set[str] = {
     "content-encoding",
 }
 
-# Maximum size for body content in debug logs (10KB)
-MAX_DEBUG_BODY_SIZE = 10 * 1024
-
 # --- Helper Functions ---
 
 
@@ -108,16 +106,54 @@ def _sanitize_headers(headers: dict[str, str]) -> dict[str, str]:
     return sanitized
 
 
-def _sanitize_body(body: bytes) -> str:
+def _sanitize_body(body: bytes, provider_type: str | None = None) -> str:
     """
     Sanitizes the request/response body for logging in debug mode.
     Attempts to parse as JSON and redact known sensitive fields.
+    Handles SSE (Server-Sent Events) payloads correctly by parsing
+    individual ``data:`` lines as JSON and applying redaction separately.
     Falls back to safe decoding if parsing fails.
+
+    Args:
+        body: Raw request or response body bytes.
+        provider_type: Optional provider type string for content redaction
+            in ``no_content`` mode. Passed through to ``redact_content()``.
+
+    Returns:
+        Sanitized string representation of the body.
     """
     try:
-        # First, try to decode as UTF-8
         decoded_str = body.decode("utf-8")
-        # Check if it looks like JSON
+
+        # Detect SSE payloads: body contains "data: " lines
+        if "data: " in decoded_str:
+            events = decoded_str.split("\n\n")
+            sanitized_events: list[str] = []
+            for event in events:
+                lines = event.split("\n")
+                sanitized_lines: list[str] = []
+                for line in lines:
+                    if line.startswith("data: "):
+                        json_str = line.removeprefix("data: ")
+                        try:
+                            # Parse JSON to validate, re-serialize, and apply regex
+                            parsed = json.loads(json_str)
+                            serialized = json.dumps(parsed)
+                            redacted = re.sub(
+                                r'("api[_-]?key"|"token"|"secret"|"password")\s*:\s*"[^"]*"',
+                                r'\1: "***"',
+                                serialized,
+                                flags=re.IGNORECASE,
+                            )
+                            line = f"data: {redacted}"
+                        except (json.JSONDecodeError, TypeError):
+                            # Malformed JSON inside data: — leave line as-is
+                            pass
+                    sanitized_lines.append(line)
+                sanitized_events.append("\n".join(sanitized_lines))
+            return "\n\n".join(sanitized_events)
+
+        # Plain JSON fast path
         if decoded_str.strip().startswith(("{", "[")):
             # Simple regex-based redaction for common sensitive keys
             # This is a best-effort approach and may not catch all cases.
@@ -228,20 +264,22 @@ def _log_debug_info(
     response_status: int,
     response_headers: dict[str, str],
     response_body: bytes,
+    provider_type: str | None = None,
 ) -> None:
     """
     Logs debug information based on the debug mode setting.
 
     Args:
-        debug_mode: The effective debug mode ("headers_only" or "full_body").
+        debug_mode: The effective debug mode (``"no_content"`` or ``"full_body"``).
         instance_name: The name of the provider instance.
         request_method: HTTP method of the request.
         request_path: Path of the request.
         request_headers: Headers from the client request.
-        request_body: Body content from the client request.
+        request_body: Body content from the client request (pre-sanitized).
         response_status: HTTP status code from the upstream response.
         response_headers: Headers from the upstream response.
-        response_body: Body content from the upstream response.
+        response_body: Body content from the upstream response (pre-sanitized).
+        provider_type: Provider type string for content redaction in ``no_content`` mode.
     """
     # Sanitize headers before logging
     sanitized_request_headers = _sanitize_headers(request_headers)
@@ -251,25 +289,110 @@ def _log_debug_info(
     logger.info(f"Request to {instance_name}: {request_method} {request_path}")
     logger.info(f"Request headers: {sanitized_request_headers}")
 
-    # Log request body if in full_body mode
-    if debug_mode == "full_body":
-        request_body_preview = request_body[:MAX_DEBUG_BODY_SIZE]
-        if len(request_body) > MAX_DEBUG_BODY_SIZE:
-            request_body_preview += b"... (truncated)"
-        decoded_request_body = _sanitize_body(request_body_preview)
-        logger.info(f"Request body: {decoded_request_body}")
+    # Log request body if in full_body or no_content mode
+    if debug_mode in ("full_body", "no_content"):
+        decoded_request_body = _sanitize_body(request_body, provider_type)
+        # Collapse newlines for single-line log output
+        safe_body = decoded_request_body.replace("\n", "\\n").replace("\r", "\\r")
+        logger.info(f"Request body: {safe_body}")
 
     # Log response info
     logger.info(f"Response from {instance_name}: {response_status}")
     logger.info(f"Response headers: {sanitized_response_headers}")
 
-    # Log response body if in full_body mode
-    if debug_mode == "full_body":
-        response_body_preview = response_body[:MAX_DEBUG_BODY_SIZE]
-        if len(response_body) > MAX_DEBUG_BODY_SIZE:
-            response_body_preview += b"... (truncated)"
-        decoded_response_body = _sanitize_body(response_body_preview)
-        logger.info(f"Response body: {decoded_response_body}")
+    # Log response body if in full_body or no_content mode
+    if debug_mode in ("full_body", "no_content"):
+        decoded_response_body = _sanitize_body(response_body, provider_type)
+        # Collapse newlines for single-line log output
+        safe_body = decoded_response_body.replace("\n", "\\n").replace("\r", "\\r")
+        logger.info(f"Response body: {safe_body}")
+
+
+async def _debug_and_respond(
+    upstream_response: httpx.Response,
+    debug_mode: str,
+    instance_name: str,
+    provider_type: str,
+    request: Request,
+    request_body: bytes,
+) -> Response:
+    """
+    Unified handler for reading, logging, and returning a buffered response.
+
+    This consolidates the previously duplicated debug-read-filter-respond
+    logic (5 call sites) into a single async helper.
+
+    1. Reads the upstream body (with ``try`` / ``finally`` around ``aread()``).
+    2. If debug mode is active, pre-sanitizes the body and calls
+       ``_log_debug_info`` (failures are caught and logged, never blocked).
+    3. Filters hop-by-hop headers and returns the ``Response``.
+
+    Args:
+        upstream_response: The raw ``httpx.Response`` from the upstream provider.
+        debug_mode: Effective debug mode string (``"disabled"``, ``"no_content"``,
+            ``"full_body"``).
+        instance_name: Provider instance name for logging.
+        provider_type: Provider type string (e.g. ``"openai_like"``) for content
+            redaction in ``no_content`` mode.
+        request: The original FastAPI ``Request`` object (used for path/method/
+            headers extraction).
+        request_body: The already-buffered request body bytes.
+
+    Returns:
+        A FastAPI ``Response`` with the upstream body and filtered headers.
+    """
+    # --- 1. Read upstream body defensively ---
+    try:
+        body = await upstream_response.aread()
+    except Exception:
+        logger.error("Failed to read upstream body for debug", exc_info=True)
+        body = b""
+    finally:
+        await upstream_response.aclose()
+
+    # --- 2. Pre-sanitize and log if debug is active ---
+    if debug_mode != "disabled":
+        sanitized_request_body = request_body
+        sanitized_response_body = body
+
+        # Apply content redaction for no_content mode
+        if debug_mode == "no_content":
+            try:
+                sanitized_request_body = redact_content(request_body, provider_type)
+                sanitized_response_body = redact_content(body, provider_type)
+            except Exception:
+                logger.error(
+                    "Content redaction failed, falling back to sensitive-only",
+                    exc_info=True,
+                )
+
+        try:
+            _log_debug_info(
+                debug_mode=debug_mode,
+                instance_name=instance_name,
+                request_method=request.method,
+                request_path=str(request.url),
+                request_headers=dict(request.headers),
+                request_body=sanitized_request_body,
+                response_status=upstream_response.status_code,
+                response_headers=dict(upstream_response.headers),
+                response_body=sanitized_response_body,
+                provider_type=provider_type,
+            )
+        except Exception:
+            logger.error("Debug logging failed", exc_info=True)
+
+    # --- 3. Filter headers and return response ---
+    filtered_headers = {
+        k: v
+        for k, v in upstream_response.headers.items()
+        if k.lower() not in HOP_BY_HOP_HEADERS
+    }
+    return Response(
+        content=body,
+        status_code=upstream_response.status_code,
+        headers=filtered_headers,
+    )
 
 
 async def _report_key_failure(
@@ -581,35 +704,13 @@ async def _handle_buffered_request(
         )
 
         if effective_debug_mode != "disabled":
-            # Read the entire response body for logging
-            response_body = await upstream_response.aread()
-            await upstream_response.aclose()
-
-            # Log debug information
-            _log_debug_info(
+            return await _debug_and_respond(
+                upstream_response=upstream_response,
                 debug_mode=effective_debug_mode,
                 instance_name=instance_name,
-                request_method=request.method,
-                request_path=request.url.path,
-                request_headers=dict(request.headers),
+                provider_type=provider_config.provider_type,
+                request=request,
                 request_body=request_body,
-                response_status=upstream_response.status_code,
-                response_headers=dict(upstream_response.headers),
-                response_body=response_body,
-            )
-
-            # Filter out hop-by-hop headers for the final response
-            filtered_headers = {
-                key: value
-                for key, value in upstream_response.headers.items()
-                if key.lower() not in HOP_BY_HOP_HEADERS
-            }
-
-            # Return buffered response (not streaming) since we've read the entire body
-            return Response(
-                content=response_body,
-                status_code=upstream_response.status_code,
-                headers=filtered_headers,
             )
         else:
             # Normal streaming response when debug is disabled
@@ -641,6 +742,19 @@ async def _handle_buffered_request(
             f"Request for '{instance_name}' failed due to a client-side error: [{check_result.error_reason.value}]. "
             f"The API key (ID: {key_id}) will NOT be penalized. Forwarding original error to client."
         )
+        effective_debug_mode = request.app.state.debug_mode_map.get(
+            instance_name, "disabled"
+        )
+        if effective_debug_mode != "disabled":
+            return await _debug_and_respond(
+                upstream_response=upstream_response,
+                debug_mode=effective_debug_mode,
+                instance_name=instance_name,
+                provider_type=provider_config.provider_type,
+                request=request,
+                request_body=request_body,
+            )
+
         try:
             response_body = await upstream_response.aread()
         except Exception:
@@ -648,23 +762,6 @@ async def _handle_buffered_request(
             response_body = f'{{"error": "Upstream error: {check_result.message or check_result.error_reason.value}"}}'.encode()
         finally:
             await upstream_response.aclose()
-
-        # Log debug information for client errors too
-        effective_debug_mode = request.app.state.debug_mode_map.get(
-            instance_name, "disabled"
-        )
-        if effective_debug_mode != "disabled":
-            _log_debug_info(
-                debug_mode=effective_debug_mode,
-                instance_name=instance_name,
-                request_method=request.method,
-                request_path=request.url.path,
-                request_headers=dict(request.headers),
-                request_body=request_body,
-                response_status=upstream_response.status_code,
-                response_headers=dict(upstream_response.headers),
-                response_body=response_body,
-            )
 
         filtered_headers = {
             key: value
@@ -684,30 +781,7 @@ async def _handle_buffered_request(
             f"The API key (ID: {key_id}) WILL be penalized."
         )
 
-        try:
-            response_body = await upstream_response.aread()
-        except Exception:
-            response_body = b""
-        finally:
-            await upstream_response.aclose()
-
-        effective_debug_mode = request.app.state.debug_mode_map.get(
-            instance_name, "disabled"
-        )
-        if effective_debug_mode != "disabled":
-            _log_debug_info(
-                debug_mode=effective_debug_mode,
-                instance_name=instance_name,
-                request_method=request.method,
-                request_path=request.url.path,
-                request_headers=dict(request.headers),
-                request_body=request_body,
-                response_status=upstream_response.status_code,
-                response_headers=dict(upstream_response.headers),
-                response_body=response_body,
-            )
-        # ------------------------------------------------
-
+        # Report and remove the failed key from the live cache.
         asyncio.create_task(
             _report_key_failure(
                 db_manager, key_id, instance_name, details.model_name, check_result
@@ -716,6 +790,20 @@ async def _handle_buffered_request(
         asyncio.create_task(
             cache.remove_key_from_pool(instance_name, details.model_name, key_id)
         )
+
+        effective_debug_mode = request.app.state.debug_mode_map.get(
+            instance_name, "disabled"
+        )
+        if effective_debug_mode != "disabled":
+            return await _debug_and_respond(
+                upstream_response=upstream_response,
+                debug_mode=effective_debug_mode,
+                instance_name=instance_name,
+                provider_type=provider_config.provider_type,
+                request=request,
+                request_body=request_body,
+            )
+
         return JSONResponse(
             status_code=503,
             content={
@@ -794,39 +882,13 @@ async def _handle_buffered_retryable_request(
             )
 
             if effective_debug_mode != "disabled":
-                # Read the entire response body for logging
-                try:
-                    response_body = await upstream_response.aread()
-                except Exception:
-                    response_body = f'{{"error": "Upstream error: {check_result.message or check_result.error_reason.value}"}}'.encode()
-                finally:
-                    await upstream_response.aclose()
-
-                # Log debug information
-                _log_debug_info(
+                return await _debug_and_respond(
+                    upstream_response=upstream_response,
                     debug_mode=effective_debug_mode,
                     instance_name=instance_name,
-                    request_method=request.method,
-                    request_path=request.url.path,
-                    request_headers=dict(request.headers),
+                    provider_type=provider_config.provider_type,
+                    request=request,
                     request_body=request_body,
-                    response_status=upstream_response.status_code,
-                    response_headers=dict(upstream_response.headers),
-                    response_body=response_body,
-                )
-
-                # Filter out hop-by-hop headers for the final response
-                filtered_headers = {
-                    key: value
-                    for key, value in upstream_response.headers.items()
-                    if key.lower() not in HOP_BY_HOP_HEADERS
-                }
-
-                # Return buffered response (not streaming) since we've read the entire body
-                return Response(
-                    content=response_body,
-                    status_code=upstream_response.status_code,
-                    headers=filtered_headers,
                 )
             else:
                 # Normal streaming response when debug is disabled
@@ -866,29 +928,25 @@ async def _handle_buffered_retryable_request(
             logger.error(
                 f"Non-retryable client error received: {reason.value}. Aborting retry cycle."
             )
+            effective_debug_mode = request.app.state.debug_mode_map.get(
+                instance_name, "disabled"
+            )
+            if effective_debug_mode != "disabled":
+                return await _debug_and_respond(
+                    upstream_response=upstream_response,
+                    debug_mode=effective_debug_mode,
+                    instance_name=instance_name,
+                    provider_type=provider_config.provider_type,
+                    request=request,
+                    request_body=request_body,
+                )
+
             try:
                 response_body = await upstream_response.aread()
             except Exception:
                 response_body = f'{{"error": "Upstream error: {check_result.message or check_result.error_reason.value}"}}'.encode()
             finally:
                 await upstream_response.aclose()
-
-            # Log debug information for client errors too
-            effective_debug_mode = request.app.state.debug_mode_map.get(
-                instance_name, "disabled"
-            )
-            if effective_debug_mode != "disabled":
-                _log_debug_info(
-                    debug_mode=effective_debug_mode,
-                    instance_name=instance_name,
-                    request_method=request.method,
-                    request_path=request.url.path,
-                    request_headers=dict(request.headers),
-                    request_body=request_body,
-                    response_status=upstream_response.status_code,
-                    response_headers=dict(upstream_response.headers),
-                    response_body=response_body,
-                )
 
             filtered_headers = {
                 key: value
@@ -1059,6 +1117,17 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
 
                 # Store the effective debug mode for use during request handling.
                 debug_mode_map[name] = effective_debug_mode
+
+                # Warn if both debug mode and retry are configured
+                if (
+                    effective_debug_mode != "disabled"
+                    and config.gateway_policy.retry.enabled
+                ):
+                    logger.warning(
+                        f"[Gateway Startup] Instance '{name}': Retry policy is CONFIGURED but "
+                        f"WILL BE IGNORED because debug mode '{effective_debug_mode}' takes priority. "
+                        f"Disable debug mode to restore retry behavior."
+                    )
 
                 # Determine the effective streaming mode for this provider.
                 effective_streaming_mode = config.gateway_policy.streaming_mode

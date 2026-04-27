@@ -1,6 +1,7 @@
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -63,7 +64,7 @@ async def test_gateway_dispatcher_routing_debug_mode():
 
     # Create a mock accessor with debug mode enabled
     accessor = MagicMock()
-    provider_config = create_mock_provider_config(debug_mode=DebugMode.HEADERS_ONLY)
+    provider_config = create_mock_provider_config(debug_mode=DebugMode.NO_CONTENT)
     accessor.get_enabled_providers.return_value = {"test_instance": provider_config}
     accessor.get_provider_or_raise.return_value = provider_config
     accessor.get_database_dsn.return_value = "postgresql://user:pass@localhost/test"
@@ -157,7 +158,7 @@ async def test_gateway_dispatcher_routing_debug_mode():
     [
         # Debug mode enabled -> _handle_buffered_request
         (
-            {"debug_mode": DebugMode.HEADERS_ONLY},
+            {"debug_mode": DebugMode.NO_CONTENT},
             "_handle_buffered_request",
         ),
         (
@@ -293,6 +294,146 @@ async def test_gateway_dispatcher_routing(
                 mock_full_stream_handler.assert_called_once()
             else:
                 pytest.fail(f"Unknown expected handler: {expected_handler_name}")
+
+
+@pytest.mark.asyncio
+async def test_gateway_dispatcher_routing_full_body_regression():
+    """
+    Regression test: verify that DebugMode.FULL_BODY still routes to
+    _handle_buffered_request (not retry or full-stream handlers).
+    """
+    from src.services.gateway_service import create_app
+
+    accessor = MagicMock()
+    provider_config = create_mock_provider_config(debug_mode=DebugMode.FULL_BODY)
+    accessor.get_enabled_providers.return_value = {"test_instance": provider_config}
+    accessor.get_provider_or_raise.return_value = provider_config
+    accessor.get_database_dsn.return_value = "postgresql://user:pass@localhost/test"
+
+    with (
+        patch(
+            "src.services.gateway_service.database.init_db_pool", new_callable=AsyncMock
+        ),
+        patch(
+            "src.services.gateway_service.database.close_db_pool",
+            new_callable=AsyncMock,
+        ),
+        patch("src.services.gateway_service.DatabaseManager") as MockDatabaseManager,
+        patch(
+            "src.services.gateway_service.HttpClientFactory"
+        ) as MockHttpClientFactory,
+        patch("src.services.gateway_service.GatewayCache") as MockGatewayCache,
+        patch("src.services.gateway_service._get_token_from_headers") as mock_get_token,
+        patch("src.services.gateway_service.get_provider") as mock_get_provider,
+    ):
+        mock_db_manager = MagicMock()
+        mock_db_manager.wait_for_schema_ready = AsyncMock()
+        MockDatabaseManager.return_value = mock_db_manager
+        mock_http_factory = MagicMock()
+        mock_http_factory.close_all = AsyncMock()
+        MockHttpClientFactory.return_value = mock_http_factory
+        mock_cache = MagicMock()
+        mock_cache.get_instance_name_by_token.return_value = "test_instance"
+        mock_cache.get_key_from_pool.return_value = (1, "fake_api_key")
+        mock_cache.populate_caches = AsyncMock()
+        MockGatewayCache.return_value = mock_cache
+        mock_get_token.return_value = "valid_token"
+        mock_provider = MagicMock()
+        mock_get_provider.return_value = mock_provider
+
+        app = create_app(accessor)
+
+        with (
+            patch(
+                "src.services.gateway_service._handle_buffered_request"
+            ) as mock_buffered_handler,
+            patch(
+                "src.services.gateway_service._handle_buffered_retryable_request"
+            ) as mock_retry_handler,
+            patch(
+                "src.services.gateway_service._handle_full_stream_request"
+            ) as mock_full_stream_handler,
+        ):
+            from fastapi.responses import JSONResponse
+
+            mock_response = JSONResponse(content={"test": "full_body_regression"})
+            mock_buffered_handler.return_value = mock_response
+            mock_retry_handler.return_value = mock_response
+            mock_full_stream_handler.return_value = mock_response
+
+            with TestClient(app) as client:
+                client.post(
+                    "/v1/chat/completions",
+                    headers={"Authorization": "Bearer valid_token"},
+                    json={"model": "gpt-4", "messages": []},
+                )
+
+            assert mock_buffered_handler.called
+            assert not mock_retry_handler.called
+            assert not mock_full_stream_handler.called
+
+
+@pytest.mark.asyncio
+async def test_debug_mode_forces_buffered_response_no_streaming():
+    """
+    When debug_mode is "no_content" and upstream returns text/event-stream,
+    the gateway must call aread() (not StreamMonitor) and return a non-streaming
+    Response. Debug mode forces buffered response regardless of content-type.
+    """
+    from src.services.gateway_service import (
+        _debug_and_respond,
+    )
+
+    # Build a mock upstream response with SSE content-type
+    upstream_response = MagicMock()
+    upstream_response.status_code = 200
+    upstream_response.headers = httpx.Headers(
+        {"content-type": "text/event-stream", "x-request-id": "req-123"}
+    )
+    upstream_response.aread = AsyncMock(return_value=b'data: {"choices": []}\n\n')
+    upstream_response.aclose = AsyncMock()
+
+    # Build a mock request with debug_mode_map set to "no_content"
+    request = MagicMock()
+    request.method = "POST"
+    request.url = MagicMock()
+    request.url.__str__ = lambda self: "http://test/v1/chat/completions"
+    request.headers = {
+        "authorization": "Bearer test-token",
+        "content-type": "application/json",
+    }
+
+    state = MagicMock()
+    state.debug_mode_map = {"test_instance": "no_content"}
+    request.app.state = state
+
+    request_body = (
+        b'{"model": "gpt-4", "messages": [{"role": "user", "content": "hello"}]}'
+    )
+
+    # Call _debug_and_respond directly
+    response = await _debug_and_respond(
+        upstream_response=upstream_response,
+        debug_mode="no_content",
+        instance_name="test_instance",
+        provider_type="openai_like",
+        request=request,
+        request_body=request_body,
+    )
+
+    # Verify aread() was called (not StreamMonitor)
+    assert upstream_response.aread.called
+    # Verify aclose() was called
+    assert upstream_response.aclose.called
+    # Verify response is a plain Response (not StreamingResponse)
+    from starlette.responses import Response as StarletteResponse
+    from starlette.responses import StreamingResponse
+
+    assert isinstance(response, StarletteResponse)
+    assert not isinstance(response, StreamingResponse)
+    # Verify the response body contains the upstream data
+    assert response.body == b'data: {"choices": []}\n\n'
+    assert response.status_code == 200
 
 
 if __name__ == "__main__":

@@ -268,7 +268,7 @@ class GatewayPolicyConfig(BaseModel):
 
     # Controls the debug logging mode for this provider instance.
     # See src.core.constants.DebugMode for allowed values.
-    debug_mode: Literal["disabled", "headers_only", "full_body"] = "disabled"
+    debug_mode: Literal["disabled", "no_content", "full_body"] = "disabled"
 
     # Configuration for parsing error responses to refine error classification
     # This enables distinguishing between different error types with the same HTTP status code
