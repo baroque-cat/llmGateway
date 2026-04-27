@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
 
 """
-Integration test for the StreamClosed bug.
+Integration test for the StreamClosed bug (now fixed).
 
-Reproduces the scenario where:
+Verifies that:
 1. A provider returns a 400 error with a body.
 2. The gateway has retry.enabled: true.
 3. The error_parsing config either doesn't exist for status 400, or has rules that don't match the response body.
 4. The default error mapping for 400 is bad_request (a client error).
 
-The bug: The base provider closes the HTTP stream without reading the body if no matching error_parsing rule is found.
-The gateway service then tries to read the body of this closed stream to forward the error to the client, causing httpx.StreamClosed crash.
-
-This test verifies that the gateway handles this scenario gracefully (does not crash).
+After the fix: The base provider does NOT close the HTTP stream for 400 without matching rules,
+so the gateway can read the body via aread() and return the original provider error to the client,
+instead of a synthetic placeholder like "Upstream error: bad_request".
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -123,8 +122,12 @@ async def test_stream_closed_bug(
     error_parsing_rule_for_400: bool,
 ):
     """
-    Reproduce the StreamClosed bug when provider returns 400 with body,
-    retry enabled, error parsing config does not match.
+    Verify that when a provider returns 400 with body, retry enabled,
+    and error parsing config does not match, the gateway preserves the
+    original error body and returns it to the client (not a synthetic placeholder).
+
+    After the fix in _send_proxy_request: for 400 without matching rules,
+    the stream is NOT closed, so aread() succeeds and returns the original body.
     """
     from src.services.gateway_service import (
         _handle_buffered_retryable_request,  # type: ignore
@@ -149,13 +152,14 @@ async def test_stream_closed_bug(
     req.app.state.gateway_cache.get_key_from_pool.return_value = (1, "key1")
 
     # Create a mock response with 400 status and a body.
-    # Simulate that the provider's _send_proxy_request will close the stream without reading.
-    # We'll mock the response's aread to raise httpx.StreamClosed (as would happen if stream closed).
+    # After the fix: for 400 without matching rules, the stream is preserved (not closed),
+    # so aread() succeeds and returns the original provider error body.
     mock_response = MagicMock(spec=httpx.Response)
     mock_response.status_code = 400
     mock_response.headers = {}
-    # Mock aread to raise StreamClosed (simulating closed stream)
-    mock_response.aread = AsyncMock(side_effect=httpx.StreamClosed)
+    # Mock aread to return the original provider error body (stream is open after fix)
+    provider_error_body = b'{"error":{"message":"provider specific error"}}'
+    mock_response.aread = AsyncMock(return_value=provider_error_body)
     mock_response.aclose = AsyncMock()
     # Mock elapsed to avoid RuntimeError
     mock_response.elapsed = MagicMock()
@@ -177,14 +181,19 @@ async def test_stream_closed_bug(
 
     # Mock asyncio.sleep to avoid actual delays
     with patch("asyncio.sleep", side_effect=lambda x: None):  # type: ignore
-        # The bug is now fixed, so the handler should not raise StreamClosed.
-        # Instead, it should return a proper Response object with the error message.
+        # After the fix: the stream is open for 400, aread() succeeds,
+        # so the handler returns the original provider error body (not a synthetic placeholder).
         response = await _handle_buffered_retryable_request(
             req, provider, instance_name
         )
         assert isinstance(response, Response)
         # The response should have a status code of 400 (client error)
         assert response.status_code == 400
+        # The response body should contain the original provider error message,
+        # NOT the synthetic placeholder "Upstream error: bad_request"
+        response_body = response.body
+        assert b"provider specific error" in response_body
+        assert b"Upstream error" not in response_body
 
 
 @pytest.mark.asyncio

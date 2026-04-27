@@ -321,7 +321,7 @@ async def test_debug_and_respond_pre_sanitizes_body():
     ).encode()
 
     with patch("src.services.gateway_service._log_debug_info") as mock_log_debug_info:
-        response = await _debug_and_respond(
+        _response = await _debug_and_respond(
             upstream_response=upstream_response,
             debug_mode="no_content",
             instance_name="test_instance",
@@ -771,3 +771,568 @@ def test_pydantic_rejects_headers_only():
     assert any(
         e["loc"] == ("debug_mode",) for e in errors
     ), f"Expected validation error on 'debug_mode' field, got: {errors}"
+
+
+# ---------------------------------------------------------------------------
+# NEW: Integration tests for preserve-400-error-body change
+# ---------------------------------------------------------------------------
+
+# Original error body that the upstream provider would return for a 400
+ORIGINAL_400_BODY = (
+    b'{"error":{"message":"Invalid model","type":"invalid_request_error"}}'
+)
+SYNTHETIC_400_BODY = b'{"error": "Upstream error: bad_request"}'
+
+
+@pytest.mark.asyncio
+async def test_IT1_handle_full_stream_request_400_client_gets_original_body():
+    """
+    IT-1: _handle_full_stream_request + 400 → client gets original error body.
+
+    Provider returns CheckResult.fail(BAD_REQUEST) with an OPEN stream
+    (aread succeeds). Verify: aread() reads the original body, aclose()
+    called in finally, client gets Response(400) with original body,
+    NOT synthetic placeholder.
+    """
+    from src.services.gateway_service import _handle_full_stream_request
+
+    req = make_mock_request()
+    provider = MagicMock()
+    instance_name = "test-provider"
+    model_name = "gpt-4"
+
+    provider.proxy_request = AsyncMock()
+
+    # Setup key pool to return a valid key
+    req.app.state.gateway_cache.get_key_from_pool.return_value = (1, "test-api-key")
+
+    # Create mock upstream response with 400 status and open stream
+    upstream_response = MagicMock()
+    upstream_response.status_code = 400
+    upstream_response.headers = httpx.Headers({"content-type": "application/json"})
+    upstream_response.aread = AsyncMock(return_value=ORIGINAL_400_BODY)
+    upstream_response.aclose = AsyncMock()
+
+    provider.proxy_request.return_value = (
+        upstream_response,
+        CheckResult.fail(ErrorReason.BAD_REQUEST, "Bad request", status_code=400),
+    )
+
+    response = await _handle_full_stream_request(
+        req, provider, instance_name, model_name
+    )
+
+    # Verify aread was called and succeeded
+    assert upstream_response.aread.called
+    # Verify aclose was called in finally
+    assert upstream_response.aclose.called
+    # Verify client gets original body, NOT synthetic placeholder
+    assert response.status_code == 400
+    assert response.body == ORIGINAL_400_BODY
+    assert SYNTHETIC_400_BODY not in response.body
+
+
+@pytest.mark.asyncio
+async def test_IT2_handle_buffered_request_400_client_gets_original_body():
+    """
+    IT-2: _handle_buffered_request + 400 → client gets original error body.
+
+    Same as IT-1 but through _handle_buffered_request.
+    Verify: client gets original error body, hop-by-hop headers filtered.
+    """
+    from src.services.gateway_service import _handle_buffered_request
+
+    req = make_mock_request()
+    provider = MagicMock()
+    instance_name = "test-provider"
+
+    provider.parse_request_details = AsyncMock()
+    provider.parse_request_details.return_value = MagicMock(model_name="gpt-4")
+    provider.proxy_request = AsyncMock()
+
+    # Setup provider config
+    provider_config = ProviderConfig(provider_type="test", keys_path="keys/test/")
+    provider_config.models = {"gpt-4": {}}
+    req.app.state.accessor.get_provider_or_raise.return_value = provider_config
+
+    # Setup key pool to return a valid key
+    req.app.state.gateway_cache.get_key_from_pool.return_value = (1, "test-api-key")
+
+    # Create mock upstream response with 400 status and open stream
+    upstream_response = MagicMock()
+    upstream_response.status_code = 400
+    upstream_response.headers = httpx.Headers(
+        {
+            "content-type": "application/json",
+            "connection": "keep-alive",  # hop-by-hop header
+            "transfer-encoding": "chunked",  # hop-by-hop header
+            "x-custom": "value",  # non hop-by-hop header
+        }
+    )
+    upstream_response.aread = AsyncMock(return_value=ORIGINAL_400_BODY)
+    upstream_response.aclose = AsyncMock()
+
+    provider.proxy_request.return_value = (
+        upstream_response,
+        CheckResult.fail(ErrorReason.BAD_REQUEST, "Bad request", status_code=400),
+    )
+
+    response = await _handle_buffered_request(req, provider, instance_name)
+
+    # Verify aread was called and succeeded
+    assert upstream_response.aread.called
+    # Verify aclose was called in finally
+    assert upstream_response.aclose.called
+    # Verify client gets original body, NOT synthetic placeholder
+    assert response.status_code == 400
+    assert response.body == ORIGINAL_400_BODY
+    assert SYNTHETIC_400_BODY not in response.body
+    # Verify hop-by-hop headers are filtered out
+    response_headers = dict(response.headers)
+    assert "connection" not in {k.lower() for k in response_headers}
+    assert "transfer-encoding" not in {k.lower() for k in response_headers}
+    assert "x-custom" in {k.lower() for k in response_headers}
+
+
+@pytest.mark.asyncio
+async def test_IT3_handle_buffered_retryable_request_400_retry_aborted_key_not_removed():
+    """
+    IT-3: _handle_buffered_retryable_request + 400 → retry aborted, client
+    gets error body, key NOT removed.
+
+    Provider returns 400/BAD_REQUEST in retryable handler.
+    Verify: retry loop immediately breaks (is_client_error → True),
+    aread() reads body, client gets Response(400) with original body,
+    key NOT marked as failed, remove_key_from_pool NOT called for this key.
+    """
+    from src.services.gateway_service import _handle_buffered_retryable_request
+
+    req = make_mock_request()
+    provider = MagicMock()
+    instance_name = "test-provider"
+
+    provider.parse_request_details = AsyncMock()
+    provider.parse_request_details.return_value = MagicMock(model_name="gpt-4")
+    provider.proxy_request = AsyncMock()
+
+    # Setup Config: retry enabled with multiple key attempts
+    provider_config = ProviderConfig(provider_type="test", keys_path="keys/test/")
+    provider_config.models = {"gpt-4": {}}
+    provider_config.gateway_policy.retry.enabled = True
+    provider_config.gateway_policy.retry.on_key_error = RetryOnErrorConfig(
+        attempts=3, backoff_sec=0.1
+    )
+    provider_config.gateway_policy.retry.on_server_error = RetryOnErrorConfig(
+        attempts=2, backoff_sec=0.1
+    )
+
+    req.app.state.accessor.get_provider_or_raise.return_value = provider_config
+    req.app.state.gateway_cache.get_key_from_pool.return_value = (1, "key1")
+
+    # Create mock upstream response with 400 status and open stream
+    upstream_response = MagicMock()
+    upstream_response.status_code = 400
+    upstream_response.headers = httpx.Headers({"content-type": "application/json"})
+    upstream_response.aread = AsyncMock(return_value=ORIGINAL_400_BODY)
+    upstream_response.aclose = AsyncMock()
+
+    provider.proxy_request.return_value = (
+        upstream_response,
+        CheckResult.fail(ErrorReason.BAD_REQUEST, "Bad request", status_code=400),
+    )
+
+    with patch("asyncio.sleep", side_effect=mock_sleep):
+        response = await _handle_buffered_retryable_request(
+            req, provider, instance_name
+        )
+        await asyncio.sleep(0.01)
+
+    # Verify client gets original body, NOT synthetic placeholder
+    assert response.status_code == 400
+    assert response.body == ORIGINAL_400_BODY
+    assert SYNTHETIC_400_BODY not in response.body
+
+    # Verify key NOT marked as failed — BAD_REQUEST is client error, not key fault
+    assert not req.app.state.db_manager.keys.update_status.called
+
+    # Verify remove_key_from_pool NOT called for this key
+    # (it might be called for other reasons, but not for this key due to client error)
+    remove_calls = req.app.state.gateway_cache.remove_key_from_pool.call_args_list
+    # No remove_key_from_pool call should exist for key_id=1 with this instance/model
+    for call in remove_calls:
+        args, _ = call
+        # The call signature is remove_key_from_pool(instance_name, model_name, key_id)
+        if len(args) >= 3 and args[2] == 1:
+            raise AssertionError(
+                "remove_key_from_pool was called for key_id=1, "
+                "but BAD_REQUEST should NOT remove the key"
+            )
+
+
+@pytest.mark.asyncio
+async def test_IT4_handle_buffered_retryable_request_401_existing_behavior_regression():
+    """
+    IT-4: _handle_buffered_retryable_request + 401 (INVALID_KEY) → existing
+    behavior (regression).
+
+    Provider returns 401/INVALID_KEY (is_fatal).
+    Verify: key marked as failed, retry with new key, client does NOT get
+    original 401 body (stream closed by provider, aread fails → synthetic
+    placeholder).
+    """
+    from src.services.gateway_service import _handle_buffered_retryable_request
+
+    req = make_mock_request()
+    provider = MagicMock()
+    instance_name = "test-provider"
+
+    provider.parse_request_details = AsyncMock()
+    provider.parse_request_details.return_value = MagicMock(model_name="gpt-4")
+
+    # Setup Config: 2 key attempts
+    provider_config = ProviderConfig(provider_type="test", keys_path="keys/test/")
+    provider_config.models = {"gpt-4": {}}
+    provider_config.gateway_policy.retry.enabled = True
+    provider_config.gateway_policy.retry.on_key_error = RetryOnErrorConfig(
+        attempts=2, backoff_sec=0.1
+    )
+    provider_config.gateway_policy.retry.on_server_error = RetryOnErrorConfig(
+        attempts=2, backoff_sec=0.1
+    )
+
+    req.app.state.accessor.get_provider_or_raise.return_value = provider_config
+
+    # Setup Cache: Return key1 (fails), then key2 (succeeds)
+    req.app.state.gateway_cache.get_key_from_pool.side_effect = [
+        (1, "key1"),
+        (2, "key2"),
+    ]
+
+    # 1. First response: 401/INVALID_KEY — stream closed by provider, aread fails
+    resp_401 = MagicMock()
+    resp_401.status_code = 401
+    resp_401.headers = {}
+    resp_401.aread = AsyncMock(side_effect=httpx.StreamClosed)
+    resp_401.aclose = AsyncMock()
+
+    # 2. Second response: 200 (success)
+    resp_200 = MagicMock()
+    resp_200.status_code = 200
+    resp_200.headers = {}
+    resp_200.aread = AsyncMock(return_value=b"Success")
+    resp_200.aclose = AsyncMock()
+
+    provider.proxy_request = AsyncMock(
+        side_effect=[
+            (
+                resp_401,
+                CheckResult.fail(
+                    ErrorReason.INVALID_KEY, "Invalid key", status_code=401
+                ),
+            ),
+            (resp_200, CheckResult.success(100)),
+        ]
+    )
+
+    with patch("asyncio.sleep", side_effect=mock_sleep):
+        response = await _handle_buffered_retryable_request(
+            req, provider, instance_name
+        )
+        await asyncio.sleep(0.01)
+
+    # Verify: retry succeeded with new key → client gets 200
+    assert response.status_code == 200
+
+    # Verify: key1 was marked as failed (INVALID_KEY is fatal)
+    assert req.app.state.db_manager.keys.update_status.called
+
+    # Verify: key1 was removed from pool
+    assert req.app.state.gateway_cache.remove_key_from_pool.called
+
+
+@pytest.mark.asyncio
+async def test_IT5_handle_full_stream_request_500_existing_behavior_regression():
+    """
+    IT-5: _handle_full_stream_request + 500 (SERVER_ERROR) → existing
+    behavior (regression).
+
+    Provider returns 500/SERVER_ERROR (not client_error, not fatal).
+    Verify: gateway enters Case 3 (upstream/key error), key marked failed,
+    client gets empty/synthetic body (503 JSONResponse).
+    """
+    from src.services.gateway_service import _handle_full_stream_request
+
+    req = make_mock_request()
+    provider = MagicMock()
+    instance_name = "test-provider"
+    model_name = "gpt-4"
+
+    provider.proxy_request = AsyncMock()
+
+    # Setup key pool to return a valid key
+    req.app.state.gateway_cache.get_key_from_pool.return_value = (1, "test-api-key")
+
+    # Create mock upstream response with 500 status
+    upstream_response = MagicMock()
+    upstream_response.status_code = 500
+    upstream_response.headers = httpx.Headers({"content-type": "application/json"})
+    upstream_response.aread = AsyncMock(return_value=b"Internal server error")
+    upstream_response.aclose = AsyncMock()
+
+    provider.proxy_request.return_value = (
+        upstream_response,
+        CheckResult.fail(ErrorReason.SERVER_ERROR, "Server error", status_code=500),
+    )
+
+    response = await _handle_full_stream_request(
+        req, provider, instance_name, model_name
+    )
+    await asyncio.sleep(0.01)
+
+    # Verify: gateway returns 503 (not 500) — Case 3 transforms to 503
+    assert response.status_code == 503
+
+    # Verify: key marked as failed
+    assert req.app.state.db_manager.keys.update_status.called
+
+    # Verify: key removed from pool
+    assert req.app.state.gateway_cache.remove_key_from_pool.called
+
+    # Verify: aclose was called (no connection leak)
+    assert upstream_response.aclose.called
+
+
+@pytest.mark.asyncio
+async def test_IT6_handle_buffered_request_400_content_type_preserved():
+    """
+    IT-6: _handle_buffered_request + 400 with Content-Type: application/json
+    → media_type preserved.
+
+    Upstream returns 400 with Content-Type: application/json header and JSON body.
+    Verify: client response has media_type="application/json" and original body
+    unchanged.
+    """
+    from src.services.gateway_service import _handle_buffered_request
+
+    req = make_mock_request()
+    provider = MagicMock()
+    instance_name = "test-provider"
+
+    provider.parse_request_details = AsyncMock()
+    provider.parse_request_details.return_value = MagicMock(model_name="gpt-4")
+    provider.proxy_request = AsyncMock()
+
+    # Setup provider config
+    provider_config = ProviderConfig(provider_type="test", keys_path="keys/test/")
+    provider_config.models = {"gpt-4": {}}
+    req.app.state.accessor.get_provider_or_raise.return_value = provider_config
+
+    # Setup key pool to return a valid key
+    req.app.state.gateway_cache.get_key_from_pool.return_value = (1, "test-api-key")
+
+    # Create mock upstream response with 400 status and Content-Type header
+    upstream_response = MagicMock()
+    upstream_response.status_code = 400
+    upstream_response.headers = httpx.Headers(
+        {
+            "content-type": "application/json",
+            "x-request-id": "req-123",
+        }
+    )
+    upstream_response.aread = AsyncMock(return_value=ORIGINAL_400_BODY)
+    upstream_response.aclose = AsyncMock()
+
+    provider.proxy_request.return_value = (
+        upstream_response,
+        CheckResult.fail(ErrorReason.BAD_REQUEST, "Bad request", status_code=400),
+    )
+
+    response = await _handle_buffered_request(req, provider, instance_name)
+
+    # Verify: client gets original body unchanged
+    assert response.status_code == 400
+    assert response.body == ORIGINAL_400_BODY
+
+    # Verify: Content-Type header is preserved in the response
+    response_headers = dict(response.headers)
+    content_type_keys = [k for k in response_headers if k.lower() == "content-type"]
+    assert len(content_type_keys) >= 1, "Content-Type header must be present"
+    assert response_headers[content_type_keys[0]] == "application/json"
+
+
+@pytest.mark.asyncio
+async def test_IT7_handle_buffered_retryable_request_400_debug_mode_priority():
+    """
+    IT-7: _handle_buffered_retryable_request + 400 with debug_mode →
+    debug_and_respond has priority.
+
+    Provider returns 400/BAD_REQUEST, debug_mode = "no_content".
+    Verify: _debug_and_respond is called instead of direct aread(),
+    client gets response through debug path.
+    """
+    from src.services.gateway_service import _handle_buffered_retryable_request
+
+    req = make_mock_request()
+    provider = MagicMock()
+    instance_name = "test-provider"
+
+    provider.parse_request_details = AsyncMock()
+    provider.parse_request_details.return_value = MagicMock(model_name="gpt-4")
+    provider.proxy_request = AsyncMock()
+
+    # Setup Config: retry enabled + debug_mode = "no_content"
+    provider_config = ProviderConfig(provider_type="test", keys_path="keys/test/")
+    provider_config.models = {"gpt-4": {}}
+    provider_config.gateway_policy.retry.enabled = True
+    provider_config.gateway_policy.retry.on_key_error = RetryOnErrorConfig(
+        attempts=2, backoff_sec=0.1
+    )
+    provider_config.gateway_policy.retry.on_server_error = RetryOnErrorConfig(
+        attempts=2, backoff_sec=0.1
+    )
+
+    req.app.state.accessor.get_provider_or_raise.return_value = provider_config
+    req.app.state.gateway_cache.get_key_from_pool.return_value = (1, "key1")
+    # Enable debug mode for this instance
+    req.app.state.debug_mode_map = {instance_name: "no_content"}
+
+    # Create mock upstream response with 400 status
+    upstream_response = MagicMock()
+    upstream_response.status_code = 400
+    upstream_response.headers = httpx.Headers({"content-type": "application/json"})
+    upstream_response.aread = AsyncMock(return_value=ORIGINAL_400_BODY)
+    upstream_response.aclose = AsyncMock()
+
+    provider.proxy_request.return_value = (
+        upstream_response,
+        CheckResult.fail(ErrorReason.BAD_REQUEST, "Bad request", status_code=400),
+    )
+
+    with patch(
+        "src.services.gateway_service._debug_and_respond",
+        new_callable=AsyncMock,
+    ) as mock_debug_and_respond:
+        # Configure the mock to return a proper Response
+        mock_debug_and_respond.return_value = StarletteResponse(
+            content=ORIGINAL_400_BODY,
+            status_code=400,
+            media_type="application/json",
+        )
+
+        response = await _handle_buffered_retryable_request(
+            req, provider, instance_name
+        )
+
+    # Verify: _debug_and_respond was called (debug path has priority)
+    assert mock_debug_and_respond.called
+
+    # Verify: client gets response through debug path
+    assert response.status_code == 400
+
+    # Verify: direct aread() was NOT called on upstream_response
+    # (because _debug_and_respond handles the reading internally)
+    assert not upstream_response.aread.called
+
+
+@pytest.mark.asyncio
+async def test_SEC1_aclose_called_in_finally_for_400():
+    """
+    SEC-1: Connection leak — aclose() called in finally for 400.
+
+    Verify: even with successful aread() for 400, aclose() is called in
+    finally block of gateway handler. Mock both calls, verify aclose
+    called exactly once after aread.
+    """
+    from src.services.gateway_service import _handle_full_stream_request
+
+    req = make_mock_request()
+    provider = MagicMock()
+    instance_name = "test-provider"
+    model_name = "gpt-4"
+
+    provider.proxy_request = AsyncMock()
+
+    # Setup key pool to return a valid key
+    req.app.state.gateway_cache.get_key_from_pool.return_value = (1, "test-api-key")
+
+    # Create mock upstream response with 400 status and open stream
+    upstream_response = MagicMock()
+    upstream_response.status_code = 400
+    upstream_response.headers = httpx.Headers({"content-type": "application/json"})
+    upstream_response.aread = AsyncMock(return_value=ORIGINAL_400_BODY)
+    upstream_response.aclose = AsyncMock()
+
+    provider.proxy_request.return_value = (
+        upstream_response,
+        CheckResult.fail(ErrorReason.BAD_REQUEST, "Bad request", status_code=400),
+    )
+
+    response = await _handle_full_stream_request(
+        req, provider, instance_name, model_name
+    )
+
+    # Verify: aread was called
+    assert upstream_response.aread.called
+
+    # Verify: aclose was called exactly once (in finally block)
+    assert upstream_response.aclose.call_count == 1
+
+    # Verify: response is correct
+    assert response.status_code == 400
+    assert response.body == ORIGINAL_400_BODY
+
+
+@pytest.mark.asyncio
+async def test_SEC2_aread_fails_for_non_400_finally_still_calls_aclose():
+    """
+    SEC-2: aread() fails for non-400 code — finally still calls aclose().
+
+    For 401 (stream closed by provider) aread() raises StreamClosed.
+    Verify: except block generates synthetic body, finally calls aclose(),
+    client gets Response(401) with synthetic body. No connection leak.
+    """
+    from src.services.gateway_service import _handle_full_stream_request
+
+    req = make_mock_request()
+    provider = MagicMock()
+    instance_name = "test-provider"
+    model_name = "gpt-4"
+
+    provider.proxy_request = AsyncMock()
+
+    # Setup key pool to return a valid key
+    req.app.state.gateway_cache.get_key_from_pool.return_value = (1, "test-api-key")
+
+    # Create mock upstream response with 401 status
+    # aread fails because stream was closed by the provider
+    upstream_response = MagicMock()
+    upstream_response.status_code = 401
+    upstream_response.headers = httpx.Headers({"content-type": "application/json"})
+    upstream_response.aread = AsyncMock(side_effect=httpx.StreamClosed)
+    upstream_response.aclose = AsyncMock()
+
+    # INVALID_KEY is NOT a client_error (is_client_error returns False),
+    # so this goes to Case 3 (upstream/key error), not Case 2.
+    # But we also need to test the Case 2 path for UNKNOWN (which IS client_error).
+    # Let's test with ErrorReason.UNKNOWN which IS client_error.
+    provider.proxy_request.return_value = (
+        upstream_response,
+        CheckResult.fail(ErrorReason.UNKNOWN, "Unknown error", status_code=401),
+    )
+
+    response = await _handle_full_stream_request(
+        req, provider, instance_name, model_name
+    )
+
+    # Verify: aread was called (even though it failed)
+    assert upstream_response.aread.called
+
+    # Verify: aclose was called in finally (no connection leak)
+    assert upstream_response.aclose.call_count == 1
+
+    # Verify: client gets synthetic body (since aread failed)
+    assert response.status_code == 401
+    # The synthetic placeholder should contain "Upstream error"
+    assert b"Upstream error" in response.body
+    # The original body was NOT successfully read
+    assert response.body != ORIGINAL_400_BODY

@@ -35,7 +35,9 @@ class MockAIBaseProvider(AIBaseProvider):
     def _get_headers(self, token: str) -> dict[str, str] | None:
         return {}
 
-    async def _parse_proxy_error(self, response: httpx.Response) -> CheckResult:
+    async def _parse_proxy_error(
+        self, response: httpx.Response, content: bytes | None = None
+    ) -> CheckResult:
         return CheckResult.fail(ErrorReason.UNKNOWN)
 
     async def check(
@@ -597,3 +599,276 @@ class TestErrorParsingBase:
             response_data=response_data_500,
         )
         assert result_500 == ErrorReason.SERVER_ERROR
+
+
+class TestSendProxyRequest400BodyPreservation:
+    """
+    Test suite for the preserve-400-error-body change in _send_proxy_request.
+
+    Verifies that for HTTP 400 in the Zero-Overhead Fallback branch,
+    the upstream stream is NOT closed (so the gateway can read the body
+    via aread() and return the original provider error to the client).
+    All other status codes keep the existing behavior (stream closed).
+    """
+
+    def _create_provider_with_config(
+        self,
+        fast_status_mapping: dict[int, str] | None = None,
+        debug_mode: str = "disabled",
+        error_parsing_enabled: bool = False,
+        error_parsing_rules: list | None = None,
+    ) -> MockAIBaseProvider:
+        """Helper to create a MockAIBaseProvider with specific gateway policy config."""
+        if fast_status_mapping is None:
+            fast_status_mapping = {}
+        if error_parsing_rules is None:
+            error_parsing_rules = []
+
+        gateway_policy = GatewayPolicyConfig(
+            debug_mode=debug_mode,
+            fast_status_mapping=fast_status_mapping,
+            error_parsing=ErrorParsingConfig(
+                enabled=error_parsing_enabled, rules=error_parsing_rules
+            ),
+        )
+
+        # Build a minimal ProviderConfig. We need keys_path and provider_type
+        # which are required fields. Use MagicMock for the rest to avoid
+        # needing to construct every nested config.
+        provider_config = ProviderConfig(
+            provider_type="test",
+            keys_path="/tmp/nonexistent",
+            gateway_policy=gateway_policy,
+        )
+
+        return MockAIBaseProvider("test_provider", provider_config)
+
+    def _create_mock_upstream_response(
+        self, status_code: int, body: bytes = b'{"error":"test"}'
+    ) -> AsyncMock:
+        """Helper to create a mock httpx.Response with async methods."""
+        mock_response = AsyncMock(spec=httpx.Response)
+        mock_response.status_code = status_code
+        mock_response.is_success = status_code < 400
+        mock_response.aread = AsyncMock(return_value=body)
+        mock_response.aclose = AsyncMock()
+        return mock_response
+
+    # --- UT-1: 400 without rules — stream NOT closed ---
+    @pytest.mark.asyncio
+    async def test_400_without_rules_stream_not_closed(self):
+        """
+        UT-1: _send_proxy_request with 400, no fast_status_mapping,
+        no debug_mode, no error_parsing.
+
+        Verifies: aclose() is NOT called, _parse_proxy_error is called
+        with content=None, CheckResult.fail(BAD_REQUEST) is returned
+        with an open stream.
+        """
+        provider = self._create_provider_with_config()
+
+        mock_upstream = self._create_mock_upstream_response(status_code=400)
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.send = AsyncMock(return_value=mock_upstream)
+        mock_request = MagicMock(spec=httpx.Request)
+
+        # Patch _parse_proxy_error to track its call and return BAD_REQUEST
+        with patch.object(
+            provider,
+            "_parse_proxy_error",
+            new=AsyncMock(return_value=CheckResult.fail(ErrorReason.BAD_REQUEST)),
+        ) as mock_parse:
+            response, check_result = await provider._send_proxy_request(
+                mock_client, mock_request
+            )
+
+            # Verify: aclose() was NOT called (stream preserved for 400)
+            mock_upstream.aclose.assert_not_called()
+
+            # Verify: _parse_proxy_error was called with content=None
+            mock_parse.assert_called_once_with(mock_upstream, None)
+
+            # Verify: CheckResult is fail with BAD_REQUEST
+            assert check_result.available is False
+            assert check_result.error_reason == ErrorReason.BAD_REQUEST
+
+            # Verify: the response stream is still open (aread would work)
+            # The mock's aread hasn't been consumed by _send_proxy_request
+            mock_upstream.aread.assert_not_called()
+
+    # --- UT-2: 401 without rules — stream closed (regression) ---
+    @pytest.mark.asyncio
+    async def test_401_without_rules_stream_closed_regression(self):
+        """
+        UT-2: _send_proxy_request with 401, no fast_status_mapping,
+        no debug_mode, no error_parsing.
+
+        Verifies: aclose() IS called (existing Zero-Overhead Fallback
+        behavior unchanged for non-400 codes).
+        """
+        provider = self._create_provider_with_config()
+
+        mock_upstream = self._create_mock_upstream_response(status_code=401)
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.send = AsyncMock(return_value=mock_upstream)
+        mock_request = MagicMock(spec=httpx.Request)
+
+        with patch.object(
+            provider,
+            "_parse_proxy_error",
+            new=AsyncMock(return_value=CheckResult.fail(ErrorReason.INVALID_KEY)),
+        ) as mock_parse:
+            response, check_result = await provider._send_proxy_request(
+                mock_client, mock_request
+            )
+
+            # Verify: aclose() WAS called (stream closed for 401)
+            mock_upstream.aclose.assert_called_once()
+
+            # Verify: _parse_proxy_error was called with content=None
+            mock_parse.assert_called_once_with(mock_upstream, None)
+
+    # --- UT-3: 400 + fast_status_mapping — stream closed, fast mapping priority ---
+    @pytest.mark.asyncio
+    async def test_400_with_fast_status_mapping_stream_closed_regression(self):
+        """
+        UT-3: _send_proxy_request with 400, fast_status_mapping = {400: "INVALID_KEY"}.
+
+        Verifies: aclose() IS called (fast mapping has priority over
+        body preservation), CheckResult.fail(INVALID_KEY) returned.
+        """
+        provider = self._create_provider_with_config(
+            fast_status_mapping={400: "invalid_key"}
+        )
+
+        mock_upstream = self._create_mock_upstream_response(status_code=400)
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.send = AsyncMock(return_value=mock_upstream)
+        mock_request = MagicMock(spec=httpx.Request)
+
+        response, check_result = await provider._send_proxy_request(
+            mock_client, mock_request
+        )
+
+        # Verify: aclose() WAS called (fast mapping closes stream)
+        mock_upstream.aclose.assert_called_once()
+
+        # Verify: CheckResult is fail with INVALID_KEY (from fast mapping)
+        assert check_result.available is False
+        assert check_result.error_reason == ErrorReason.INVALID_KEY
+
+    # --- UT-4: 400 + error_parsing — body read, error_parsing priority ---
+    @pytest.mark.asyncio
+    async def test_400_with_error_parsing_body_read_priority(self):
+        """
+        UT-4: _send_proxy_request with 400, error_parsing.enabled = true,
+        rule exists for 400.
+
+        Verifies: aread() IS called (error_parsing has priority),
+        _refine_error_reason is called with body content,
+        _parse_proxy_error receives content_bytes, stream is consumed.
+        """
+        provider = self._create_provider_with_config(
+            error_parsing_enabled=True,
+            error_parsing_rules=[
+                ErrorParsingRule(
+                    status_code=400,
+                    error_path="error.type",
+                    match_pattern="Arrearage",
+                    map_to="invalid_key",
+                    priority=10,
+                )
+            ],
+        )
+
+        body = b'{"error":{"type":"Arrearage"}}'
+        mock_upstream = self._create_mock_upstream_response(status_code=400, body=body)
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.send = AsyncMock(return_value=mock_upstream)
+        mock_request = MagicMock(spec=httpx.Request)
+
+        # Patch _parse_proxy_error to track its call and return a result
+        with patch.object(
+            provider,
+            "_parse_proxy_error",
+            new=AsyncMock(return_value=CheckResult.fail(ErrorReason.INVALID_KEY)),
+        ) as mock_parse:
+            response, check_result = await provider._send_proxy_request(
+                mock_client, mock_request
+            )
+
+            # Verify: aread() WAS called (error_parsing reads body)
+            mock_upstream.aread.assert_called_once()
+
+            # Verify: _parse_proxy_error was called with content_bytes (not None)
+            call_args = mock_parse.call_args
+            assert (
+                call_args[0][1] is not None
+            ), "Expected content_bytes to be passed to _parse_proxy_error, got None"
+
+            # Verify: the content_bytes match the body
+            assert call_args[0][1] == body
+
+    # --- UT-5: 400 + debug_mode — body read, debug priority ---
+    @pytest.mark.asyncio
+    async def test_400_with_debug_mode_body_read_priority(self):
+        """
+        UT-5: _send_proxy_request with 400, debug_mode = "full_body".
+
+        Verifies: aread() IS called (debug mode has priority over
+        Zero-Overhead Fallback), body read for logging.
+        """
+        provider = self._create_provider_with_config(debug_mode="full_body")
+
+        body = b'{"error":{"message":"Invalid model"}}'
+        mock_upstream = self._create_mock_upstream_response(status_code=400, body=body)
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.send = AsyncMock(return_value=mock_upstream)
+        mock_request = MagicMock(spec=httpx.Request)
+
+        with patch.object(
+            provider,
+            "_parse_proxy_error",
+            new=AsyncMock(return_value=CheckResult.fail(ErrorReason.BAD_REQUEST)),
+        ) as mock_parse:
+            response, check_result = await provider._send_proxy_request(
+                mock_client, mock_request
+            )
+
+            # Verify: aread() WAS called (debug mode reads body)
+            mock_upstream.aread.assert_called_once()
+
+            # Verify: _parse_proxy_error was called with content_bytes
+            call_args = mock_parse.call_args
+            assert call_args[0][1] == body
+
+    # --- UT-6: 500 without rules — stream closed (regression) ---
+    @pytest.mark.asyncio
+    async def test_500_without_rules_stream_closed_regression(self):
+        """
+        UT-6: _send_proxy_request with 500, no fast_status_mapping,
+        no debug_mode, no error_parsing.
+
+        Verifies: aclose() IS called (existing behavior for 5xx unchanged).
+        """
+        provider = self._create_provider_with_config()
+
+        mock_upstream = self._create_mock_upstream_response(status_code=500)
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.send = AsyncMock(return_value=mock_upstream)
+        mock_request = MagicMock(spec=httpx.Request)
+
+        with patch.object(
+            provider,
+            "_parse_proxy_error",
+            new=AsyncMock(return_value=CheckResult.fail(ErrorReason.SERVER_ERROR)),
+        ) as mock_parse:
+            response, check_result = await provider._send_proxy_request(
+                mock_client, mock_request
+            )
+
+            # Verify: aclose() WAS called (stream closed for 500)
+            mock_upstream.aclose.assert_called_once()
+
+            # Verify: _parse_proxy_error was called with content=None
+            mock_parse.assert_called_once_with(mock_upstream, None)

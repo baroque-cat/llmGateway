@@ -225,6 +225,13 @@ class AIBaseProvider(IProvider):
         It delegates the parsing of provider-specific errors to the
         `_parse_proxy_error` method.
 
+        For the Zero-Overhead Fallback path (no fast_status_mapping, no error_parsing,
+        no debug_mode), the upstream stream is normally closed with aclose() to release
+        resources. However, for HTTP 400 (Bad Request), the stream is intentionally
+        left open so the gateway's client-error handler can read the body via aread()
+        and return the original provider error message to the client, instead of a
+        synthetic placeholder.
+
         Args:
             client: The httpx.AsyncClient to use for the request.
             request: The pre-built httpx.Request object.
@@ -299,8 +306,12 @@ class AIBaseProvider(IProvider):
                         )
                     else:
                         # STOP: Fast Fallback (Default Behavior)
-                        # Do NOT read body. Close stream.
-                        await upstream_response.aclose()
+                        # Do NOT read body; close stream to release resources.
+                        # Exception: For status 400, preserve the stream so the gateway
+                        # can read the error body via aread() and return it to the client
+                        # instead of a synthetic placeholder.
+                        if status_code != 400:
+                            await upstream_response.aclose()
 
                         # Delegate parsing WITHOUT content (will use status code mapping)
                         check_result = await self._parse_proxy_error(
