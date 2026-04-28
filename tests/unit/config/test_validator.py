@@ -512,3 +512,100 @@ def test_ut_h13_new_format_yaml_with_start_batch_size_is_valid():
             provider.worker_health_policy.adaptive_batching.start_batch_delay_sec
             == 30.0
         )
+
+
+# ==============================================================================
+# G2: ProviderConfig.dedicated_http_client — default, explicit, type validation,
+#     YAML parsing
+# ==============================================================================
+
+
+def test_g2_1_1_dedicated_http_client_default_is_false():
+    """
+    G2-1.1: ProviderConfig.dedicated_http_client defaults to False when the
+    field is not explicitly provided.
+    """
+    provider = ProviderConfig(provider_type="test", keys_path="keys/test/")
+    assert provider.dedicated_http_client is False
+
+
+def test_g2_1_2_dedicated_http_client_explicit_true():
+    """
+    G2-1.2: ProviderConfig.dedicated_http_client can be explicitly set to True.
+    """
+    provider = ProviderConfig(
+        provider_type="test", keys_path="keys/test/", dedicated_http_client=True
+    )
+    assert provider.dedicated_http_client is True
+
+
+def test_g2_1_3_dedicated_http_client_invalid_type_raises_validation_error():
+    """
+    G2-1.3: ProviderConfig rejects a non-bool value for dedicated_http_client.
+
+    Passing a string like "yes" should raise ValidationError because
+    dedicated_http_client is typed as bool. However, Pydantic v2 in lax
+    (default) mode coerces certain string values ("yes", "no", "true",
+    "false", "1", "0") to bool. To reliably trigger a ValidationError,
+    we pass a type that Pydantic cannot coerce to bool (e.g., a list).
+    """
+    with pytest.raises(ValidationError) as exc_info:
+        ProviderConfig(
+            provider_type="test", keys_path="keys/test/", dedicated_http_client=["yes"]
+        )
+
+    error_message = str(exc_info.value)
+    assert "dedicated_http_client" in error_message
+
+
+def test_g2_1_4_yaml_dedicated_http_client_true():
+    """
+    G2-1.4: YAML config with dedicated_http_client: true loads correctly
+    and the provider's dedicated_http_client field is True.
+    """
+    mock_yaml_content = """providers:
+  test_provider:
+    enabled: true
+    provider_type: "test"
+    keys_path: "keys/test/"
+    api_base_url: "https://api.test.com/v1"
+    access_control:
+      gateway_access_token: "test_token"
+    dedicated_http_client: true
+"""
+
+    with (
+        patch("os.path.exists", return_value=True),
+        patch("builtins.open", mock_open(read_data=mock_yaml_content)),
+    ):
+        loader = ConfigLoader(path="dummy_path.yaml")
+        config = loader.load()
+
+        provider = config.providers["test_provider"]
+        assert provider.dedicated_http_client is True
+
+
+def test_g2_1_5_yaml_dedicated_http_client_absent_defaults_to_false():
+    """
+    G2-1.5: YAML config without dedicated_http_client field loads correctly
+    and the provider's dedicated_http_client defaults to False.
+    """
+    mock_yaml_content = """providers:
+  test_provider:
+    enabled: true
+    provider_type: "test"
+    keys_path: "keys/test/"
+    api_base_url: "https://api.test.com/v1"
+    access_control:
+      gateway_access_token: "test_token"
+"""
+
+    with (
+        patch("os.path.exists", return_value=True),
+        patch("builtins.open", mock_open(read_data=mock_yaml_content)),
+    ):
+        loader = ConfigLoader(path="dummy_path.yaml")
+        config = loader.load()
+
+        provider = config.providers["test_provider"]
+        assert provider.dedicated_http_client is False

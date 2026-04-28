@@ -4,7 +4,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
+from fastapi import Request
 from fastapi.testclient import TestClient
+from starlette.responses import StreamingResponse
 
 from src.config.schemas import (
     GatewayPolicyConfig,
@@ -13,7 +15,7 @@ from src.config.schemas import (
     RetryOnErrorConfig,
     RetryPolicyConfig,
 )
-from src.core.constants import DebugMode, StreamingMode
+from src.core.constants import DebugMode, ErrorReason, StreamingMode
 from src.core.models import CheckResult, RequestDetails
 
 
@@ -337,6 +339,93 @@ async def test_gateway_routes_to_full_stream_handler_for_gemini_provider():
                 == "/v1beta/models/gemini-2.5-pro:generateContent"
             )
             assert parse_args.kwargs["content"] == b""
+
+
+@pytest.mark.asyncio
+async def test_gateway_full_stream_read_error_converted_to_gateway_stream_error():
+    """
+    6.2 (full duplex context): When aiter_bytes() raises httpx.ReadError during
+    full-duplex streaming, StreamMonitor catches it and raises GatewayStreamError
+    with provider_name and model_name context.
+
+    This test directly calls _handle_full_stream_request to verify that:
+    1. The handler returns StreamingResponse for successful proxy_request
+    2. When iterating the stream, httpx.ReadError is converted to GatewayStreamError
+    3. GatewayStreamError carries provider_name and model_name
+    4. The raw httpx.ReadError does NOT reach the caller directly
+    """
+    from src.services.gateway_service import (
+        GatewayStreamError,
+        _handle_full_stream_request,
+    )
+
+    # Create a mock request with all necessary state
+    req = MagicMock(spec=Request)
+    req.url.path = "/v1/chat/completions"
+    req.url.query = ""
+    req.method = "POST"
+    req.headers = {"authorization": "Bearer test-token"}
+    req.body = AsyncMock(return_value=b'{"model": "gpt-4"}')
+    req.client = MagicMock()
+    req.client.host = "127.0.0.1"
+
+    # Create state mock
+    state = MagicMock()
+    state.gateway_cache = MagicMock()
+    state.gateway_cache.get_key_from_pool = MagicMock(return_value=(1, "fake_api_key"))
+    state.gateway_cache.remove_key_from_pool = AsyncMock()
+    state.http_client_factory = MagicMock()
+    state.http_client_factory.get_client_for_provider = AsyncMock(
+        return_value=MagicMock()
+    )
+    state.db_manager = MagicMock()
+    state.db_manager.keys.update_status = AsyncMock()
+    state.accessor = MagicMock()
+    state.debug_mode_map = {}
+
+    req.app.state = state
+
+    # Mock provider
+    provider = MagicMock()
+    instance_name = "test_instance"
+    model_name = "gpt-4"
+
+    # Create mock upstream response with aiter_bytes() that raises ReadError
+    mock_upstream_response = MagicMock(spec=httpx.Response)
+    mock_upstream_response.status_code = 200
+    mock_upstream_response.reason_phrase = "OK"
+    mock_upstream_response.headers = {"content-type": "application/json"}
+
+    async def read_error_iterator():
+        yield b"partial_chunk"
+        raise httpx.ReadError("Connection lost during streaming")
+
+    mock_upstream_response.aiter_bytes = MagicMock(return_value=read_error_iterator())
+    mock_upstream_response.aclose = AsyncMock()
+
+    provider.proxy_request = AsyncMock(
+        return_value=(mock_upstream_response, CheckResult.success())
+    )
+
+    response = await _handle_full_stream_request(
+        req, provider, instance_name, model_name
+    )
+
+    # Handler returns StreamingResponse
+    assert isinstance(response, StreamingResponse)
+
+    # Iterating the stream raises GatewayStreamError (not httpx.ReadError)
+    with pytest.raises(GatewayStreamError) as exc_info:
+        async for _ in response.body_iterator:
+            pass
+
+    # Verify GatewayStreamError attributes
+    assert exc_info.value.provider_name == instance_name
+    assert exc_info.value.model_name == model_name
+    assert exc_info.value.error_reason == ErrorReason.STREAM_DISCONNECT
+
+    # Verify that httpx.ReadError was intercepted (not raised directly)
+    assert not isinstance(exc_info.value, httpx.ReadError)
 
 
 if __name__ == "__main__":

@@ -40,6 +40,11 @@ class ErrorReason(Enum):
     NO_QUOTA = "no_quota"
     NO_MODEL = "no_model"
 
+    # Stream Errors — upstream provider disconnected the streaming connection.
+    # Classified as a server error (is_server_error=True),
+    # retryable (may succeed on a subsequent attempt).
+    STREAM_DISCONNECT = "stream_disconnect"
+
     def is_retryable(self) -> bool:
         """
         Check if an error reason suggests that the operation could succeed on a subsequent attempt.
@@ -55,8 +60,29 @@ class ErrorReason(Enum):
             ErrorReason.SERVER_ERROR,
             ErrorReason.SERVICE_UNAVAILABLE,
             ErrorReason.OVERLOADED,
+            ErrorReason.STREAM_DISCONNECT,
         }
         return self in retryable_errors
+
+    def is_server_error(self) -> bool:
+        """
+        Checks if the error is a problem on the upstream server side.
+
+        These errors indicate issues with the provider's infrastructure,
+        not with a specific API key.
+
+        Returns:
+            bool: True if the error is server-side, False otherwise.
+        """
+        server_errors = {
+            ErrorReason.NETWORK_ERROR,
+            ErrorReason.TIMEOUT,
+            ErrorReason.SERVER_ERROR,
+            ErrorReason.SERVICE_UNAVAILABLE,
+            ErrorReason.OVERLOADED,
+            ErrorReason.STREAM_DISCONNECT,
+        }
+        return self in server_errors
 
     def is_fatal(self) -> bool:
         """

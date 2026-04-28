@@ -1336,3 +1336,411 @@ async def test_SEC2_aread_fails_for_non_400_finally_still_calls_aclose():
     assert b"Upstream error" in response.body
     # The original body was NOT successfully read
     assert response.body != ORIGINAL_400_BODY
+
+
+# ---------------------------------------------------------------------------
+# NEW: Integration tests for ReadError handling in streaming handlers (G5)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_6_2_handle_full_stream_request_read_error_intercepted():
+    """
+    6.2: _handle_full_stream_request — httpx.ReadError intercepted by StreamMonitor.
+
+    Mock aiter_bytes() raises httpx.ReadError → StreamMonitor catches it,
+    raises GatewayStreamError with provider_name and model_name.
+    The handler returns StreamingResponse; the error surfaces during stream iteration.
+    """
+    from src.services.gateway_service import (
+        GatewayStreamError,
+        _handle_full_stream_request,
+    )
+
+    req = make_mock_request()
+    provider = MagicMock()
+    instance_name = "test-provider"
+    model_name = "gpt-4"
+
+    provider.proxy_request = AsyncMock()
+    req.app.state.gateway_cache.get_key_from_pool.return_value = (1, "test-api-key")
+
+    # Create mock upstream response with aiter_bytes() that raises ReadError
+    upstream_response = MagicMock()
+    upstream_response.status_code = 200
+    upstream_response.reason_phrase = "OK"
+    upstream_response.headers = httpx.Headers({"content-type": "application/json"})
+
+    async def read_error_iterator():
+        yield b"partial_data"
+        raise httpx.ReadError("Connection lost")
+
+    upstream_response.aiter_bytes = MagicMock(return_value=read_error_iterator())
+    upstream_response.aclose = AsyncMock()
+
+    provider.proxy_request.return_value = (
+        upstream_response,
+        CheckResult.success(100),
+    )
+
+    response = await _handle_full_stream_request(
+        req, provider, instance_name, model_name
+    )
+
+    # Handler returns StreamingResponse immediately (before stream is consumed)
+    assert isinstance(response, StreamingResponse)
+
+    # Iterating the stream triggers GatewayStreamError
+    with pytest.raises(GatewayStreamError) as exc_info:
+        async for _ in response.body_iterator:
+            pass
+
+    # Verify GatewayStreamError has provider/model context
+    assert exc_info.value.provider_name == instance_name
+    assert exc_info.value.model_name == model_name
+    assert exc_info.value.error_reason == ErrorReason.STREAM_DISCONNECT
+
+
+@pytest.mark.asyncio
+async def test_6_3_handle_buffered_request_read_error_intercepted():
+    """
+    6.3: _handle_buffered_request — httpx.ReadError intercepted by StreamMonitor.
+
+    Mock aiter_bytes() raises httpx.ReadError → StreamMonitor catches it,
+    raises GatewayStreamError with provider_name and model_name.
+    """
+    from src.services.gateway_service import (
+        GatewayStreamError,
+        _handle_buffered_request,
+    )
+
+    req = make_mock_request()
+    provider = MagicMock()
+    instance_name = "test-provider"
+
+    provider.parse_request_details = AsyncMock()
+    provider.parse_request_details.return_value = MagicMock(model_name="gpt-4")
+    provider.proxy_request = AsyncMock()
+
+    provider_config = ProviderConfig(provider_type="test", keys_path="keys/test/")
+    provider_config.models = {"gpt-4": {}}
+    req.app.state.accessor.get_provider_or_raise.return_value = provider_config
+    req.app.state.gateway_cache.get_key_from_pool.return_value = (1, "test-api-key")
+
+    # Create mock upstream response with aiter_bytes() that raises ReadError
+    upstream_response = MagicMock()
+    upstream_response.status_code = 200
+    upstream_response.reason_phrase = "OK"
+    upstream_response.headers = httpx.Headers({"content-type": "application/json"})
+
+    async def read_error_iterator():
+        yield b"partial_data"
+        raise httpx.ReadError("Connection lost")
+
+    upstream_response.aiter_bytes = MagicMock(return_value=read_error_iterator())
+    upstream_response.aclose = AsyncMock()
+
+    provider.proxy_request.return_value = (
+        upstream_response,
+        CheckResult.success(100),
+    )
+
+    response = await _handle_buffered_request(req, provider, instance_name)
+
+    # Handler returns StreamingResponse immediately
+    assert isinstance(response, StreamingResponse)
+
+    # Iterating the stream triggers GatewayStreamError
+    with pytest.raises(GatewayStreamError) as exc_info:
+        async for _ in response.body_iterator:
+            pass
+
+    # Verify GatewayStreamError has provider/model context
+    assert exc_info.value.provider_name == instance_name
+    assert exc_info.value.model_name == "gpt-4"
+    assert exc_info.value.error_reason == ErrorReason.STREAM_DISCONNECT
+
+
+@pytest.mark.asyncio
+async def test_6_4_handle_buffered_retryable_request_read_error_first_attempt():
+    """
+    6.4: _handle_buffered_retryable_request — ReadError at first attempt.
+
+    First proxy_request returns success, but aiter_bytes() raises httpx.ReadError.
+    StreamMonitor catches it and raises GatewayStreamError.
+    """
+    from src.services.gateway_service import (
+        GatewayStreamError,
+        _handle_buffered_retryable_request,
+    )
+
+    req = make_mock_request()
+    provider = MagicMock()
+    instance_name = "test-provider"
+
+    provider.parse_request_details = AsyncMock()
+    provider.parse_request_details.return_value = MagicMock(model_name="gpt-4")
+    provider.proxy_request = AsyncMock()
+
+    provider_config = ProviderConfig(provider_type="test", keys_path="keys/test/")
+    provider_config.models = {"gpt-4": {}}
+    provider_config.gateway_policy.retry.enabled = True
+    provider_config.gateway_policy.retry.on_key_error = RetryOnErrorConfig(
+        attempts=2, backoff_sec=0.1
+    )
+    provider_config.gateway_policy.retry.on_server_error = RetryOnErrorConfig(
+        attempts=2, backoff_sec=0.1
+    )
+
+    req.app.state.accessor.get_provider_or_raise.return_value = provider_config
+    req.app.state.gateway_cache.get_key_from_pool.return_value = (1, "key1")
+
+    # Create mock upstream response with aiter_bytes() that raises ReadError
+    upstream_response = MagicMock()
+    upstream_response.status_code = 200
+    upstream_response.reason_phrase = "OK"
+    upstream_response.headers = httpx.Headers({"content-type": "application/json"})
+
+    async def read_error_iterator():
+        yield b"partial_data"
+        raise httpx.ReadError("Connection lost")
+
+    upstream_response.aiter_bytes = MagicMock(return_value=read_error_iterator())
+    upstream_response.aclose = AsyncMock()
+
+    provider.proxy_request.return_value = (
+        upstream_response,
+        CheckResult.success(100),
+    )
+
+    with patch("asyncio.sleep", side_effect=mock_sleep):
+        response = await _handle_buffered_retryable_request(
+            req, provider, instance_name
+        )
+
+    # Handler returns StreamingResponse immediately
+    assert isinstance(response, StreamingResponse)
+
+    # Iterating the stream triggers GatewayStreamError
+    with pytest.raises(GatewayStreamError) as exc_info:
+        async for _ in response.body_iterator:
+            pass
+
+    # Verify GatewayStreamError has provider/model context
+    assert exc_info.value.provider_name == instance_name
+    assert exc_info.value.model_name == "gpt-4"
+    assert exc_info.value.error_reason == ErrorReason.STREAM_DISCONNECT
+
+
+@pytest.mark.asyncio
+async def test_6_5_handle_buffered_retryable_request_read_error_on_retry():
+    """
+    6.5: _handle_buffered_retryable_request — ReadError on retry.
+
+    First attempt: server error → retry → second attempt: aiter_bytes() raises
+    httpx.ReadError. StreamMonitor catches it and raises GatewayStreamError.
+    """
+    from src.services.gateway_service import (
+        GatewayStreamError,
+        _handle_buffered_retryable_request,
+    )
+
+    req = make_mock_request()
+    provider = MagicMock()
+    instance_name = "test-provider"
+
+    provider.parse_request_details = AsyncMock()
+    provider.parse_request_details.return_value = MagicMock(model_name="gpt-4")
+
+    provider_config = ProviderConfig(provider_type="test", keys_path="keys/test/")
+    provider_config.models = {"gpt-4": {}}
+    provider_config.gateway_policy.retry.enabled = True
+    provider_config.gateway_policy.retry.on_key_error = RetryOnErrorConfig(
+        attempts=2, backoff_sec=0.1
+    )
+    provider_config.gateway_policy.retry.on_server_error = RetryOnErrorConfig(
+        attempts=2, backoff_sec=0.1
+    )
+
+    req.app.state.accessor.get_provider_or_raise.return_value = provider_config
+
+    # Key pool returns same key for both attempts (server error retry keeps same key)
+    req.app.state.gateway_cache.get_key_from_pool.side_effect = [
+        (1, "key1"),  # First attempt
+        (1, "key1"),  # Server error retry (same key)
+    ]
+
+    # First response: 500 server error
+    resp_500 = MagicMock()
+    resp_500.status_code = 500
+    resp_500.headers = {}
+    resp_500.aclose = AsyncMock()
+
+    # Second response: success but aiter_bytes() raises ReadError
+    upstream_response = MagicMock()
+    upstream_response.status_code = 200
+    upstream_response.reason_phrase = "OK"
+    upstream_response.headers = httpx.Headers({"content-type": "application/json"})
+
+    async def read_error_iterator():
+        yield b"partial_data"
+        raise httpx.ReadError("Connection lost")
+
+    upstream_response.aiter_bytes = MagicMock(return_value=read_error_iterator())
+    upstream_response.aclose = AsyncMock()
+
+    provider.proxy_request = AsyncMock(
+        side_effect=[
+            (
+                resp_500,
+                CheckResult.fail(
+                    ErrorReason.SERVER_ERROR, "Server error", status_code=500
+                ),
+            ),
+            (upstream_response, CheckResult.success(100)),
+        ]
+    )
+
+    with patch("asyncio.sleep", side_effect=mock_sleep):
+        response = await _handle_buffered_retryable_request(
+            req, provider, instance_name
+        )
+
+    # Handler returns StreamingResponse (from second attempt)
+    assert isinstance(response, StreamingResponse)
+
+    # Iterating the stream triggers GatewayStreamError
+    with pytest.raises(GatewayStreamError) as exc_info:
+        async for _ in response.body_iterator:
+            pass
+
+    # Verify GatewayStreamError has provider/model context
+    assert exc_info.value.provider_name == instance_name
+    assert exc_info.value.model_name == "gpt-4"
+    assert exc_info.value.error_reason == ErrorReason.STREAM_DISCONNECT
+
+
+@pytest.mark.asyncio
+async def test_6_6_read_error_log_contains_provider_and_model(caplog):
+    """
+    6.6: When ReadError is intercepted, the WARNING log contains provider_name
+    and model_name.
+
+    StreamMonitor.__anext__() catches httpx.ReadError and logs a WARNING
+    with provider_name and model_name before raising GatewayStreamError.
+    """
+    from src.services.gateway_service import (
+        GatewayStreamError,
+        _handle_full_stream_request,
+    )
+
+    req = make_mock_request()
+    provider = MagicMock()
+    instance_name = "my-openai-instance"
+    model_name = "gpt-4o-mini"
+
+    provider.proxy_request = AsyncMock()
+    req.app.state.gateway_cache.get_key_from_pool.return_value = (1, "test-api-key")
+
+    # Create mock upstream response with aiter_bytes() that raises ReadError
+    upstream_response = MagicMock()
+    upstream_response.status_code = 200
+    upstream_response.reason_phrase = "OK"
+    upstream_response.headers = httpx.Headers({"content-type": "application/json"})
+
+    async def read_error_iterator():
+        yield b"partial_data"
+        raise httpx.ReadError("Connection lost")
+
+    upstream_response.aiter_bytes = MagicMock(return_value=read_error_iterator())
+    upstream_response.aclose = AsyncMock()
+
+    provider.proxy_request.return_value = (
+        upstream_response,
+        CheckResult.success(100),
+    )
+
+    with caplog.at_level(logging.WARNING, logger="src.services.gateway_service"):
+        response = await _handle_full_stream_request(
+            req, provider, instance_name, model_name
+        )
+
+        # Iterate the stream to trigger the ReadError and WARNING log
+        with pytest.raises(GatewayStreamError):
+            async for _ in response.body_iterator:
+                pass
+
+    # Verify WARNING log contains provider_name and model_name
+    warning_records = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    found = any(
+        instance_name in r.message and model_name in r.message for r in warning_records
+    )
+    assert found, (
+        f"Expected WARNING log containing '{instance_name}' and '{model_name}', "
+        f"but got: {[r.message for r in warning_records]}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_SEC3_read_error_does_not_bubble_as_unhandled_500():
+    """
+    SEC-3: httpx.ReadError does not bubble to ASGI as unhandled 500.
+
+    When aiter_bytes() raises httpx.ReadError, StreamMonitor catches it and
+    raises GatewayStreamError (a controlled domain exception) instead.
+    The raw httpx.ReadError does NOT reach the ASGI layer directly.
+
+    Note: GatewayStreamError itself currently propagates uncaught through
+    StreamingResponse to ASGI. This test verifies that at minimum,
+    httpx.ReadError is intercepted and converted to a domain exception.
+    For full SEC-3 compliance, the handler should catch GatewayStreamError
+    and return a controlled HTTP error response (e.g., 503).
+    """
+    from src.services.gateway_service import (
+        GatewayStreamError,
+        _handle_full_stream_request,
+    )
+
+    req = make_mock_request()
+    provider = MagicMock()
+    instance_name = "test-provider"
+    model_name = "gpt-4"
+
+    provider.proxy_request = AsyncMock()
+    req.app.state.gateway_cache.get_key_from_pool.return_value = (1, "test-api-key")
+
+    # Create mock upstream response with aiter_bytes() that raises ReadError
+    upstream_response = MagicMock()
+    upstream_response.status_code = 200
+    upstream_response.reason_phrase = "OK"
+    upstream_response.headers = httpx.Headers({"content-type": "application/json"})
+
+    async def read_error_iterator():
+        yield b"partial_data"
+        raise httpx.ReadError("Connection lost")
+
+    upstream_response.aiter_bytes = MagicMock(return_value=read_error_iterator())
+    upstream_response.aclose = AsyncMock()
+
+    provider.proxy_request.return_value = (
+        upstream_response,
+        CheckResult.success(100),
+    )
+
+    response = await _handle_full_stream_request(
+        req, provider, instance_name, model_name
+    )
+
+    assert isinstance(response, StreamingResponse)
+
+    # The raised exception is GatewayStreamError, NOT httpx.ReadError
+    with pytest.raises(GatewayStreamError) as exc_info:
+        async for _ in response.body_iterator:
+            pass
+
+    # httpx.ReadError was intercepted — the exception is a domain exception
+    assert not isinstance(exc_info.value, httpx.ReadError)
+    assert isinstance(exc_info.value, GatewayStreamError)
+    assert exc_info.value.provider_name == instance_name
+    assert exc_info.value.model_name == model_name
+    assert exc_info.value.error_reason == ErrorReason.STREAM_DISCONNECT

@@ -41,7 +41,7 @@ class HttpClientFactory:
         # same client simultaneously.
         self._locks: dict[str, asyncio.Lock] = {}
 
-    def _get_cache_key_for_provider(self, provider_name: str) -> str:
+    def _get_cache_key_for_proxy(self, provider_name: str) -> str:
         """
         Determines the unique cache key based on the provider's proxy configuration.
         """
@@ -65,13 +65,35 @@ class HttpClientFactory:
                 f"Proxy mode '{proxy_config.mode}' is not supported by the factory yet."
             )
 
+    def _get_cache_key_for_provider(self, provider_name: str) -> str:
+        """
+        Determines the httpx.AsyncClient cache key for a provider.
+
+        If the provider has ``dedicated_http_client=True``, returns the instance name
+        (unique dedicated client for this instance). Otherwise the key is determined
+        via ``_get_cache_key_for_proxy`` — proxy-based caching (shared client
+        for providers with the same proxy mode).
+
+        Args:
+            provider_name: The provider instance name from the configuration.
+
+        Returns:
+            str: The cache key for the httpx.AsyncClient.
+        """
+        provider = self.accessor.get_provider(provider_name)
+        if provider and provider.dedicated_http_client:
+            return provider_name
+        return self._get_cache_key_for_proxy(provider_name)
+
     async def get_client_for_provider(self, provider_name: str) -> httpx.AsyncClient:
         """
         Retrieves or creates an httpx.AsyncClient for a specific provider.
 
-        It uses an internal cache to avoid recreating clients. If a client for the
-        provider's configuration doesn't exist, it creates a new one, enables
-        HTTP/2, and configures proxies as needed.
+        Uses an internal cache to avoid recreating clients. If the provider
+        has ``dedicated_http_client=True``, a dedicated client is created with
+        key = instance name (not shared with other providers). Otherwise the
+        client is cached by proxy configuration (shared among providers with
+        the same proxy mode).
 
         Args:
             provider_name: The name of the provider instance as defined in the config.

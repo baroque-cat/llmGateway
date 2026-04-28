@@ -9,7 +9,7 @@ import pytest
 
 from src.core.constants import ALL_MODELS_MARKER, ErrorReason
 from src.core.models import CheckResult
-from src.services.gateway_service import StreamMonitor
+from src.services.gateway_service import GatewayStreamError, StreamMonitor
 
 
 class TestStreamMonitor:
@@ -238,3 +238,49 @@ class TestStreamMonitor:
         assert chunks == [b"chunk1", b"chunk2", b"chunk3"]
         # Ensure aiter_bytes not called again (still once)
         assert call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_stream_monitor_read_error_raises_gateway_stream_error(
+        self, mock_httpx_response, mock_logger
+    ):
+        """
+        6.8 + 6.6: httpx.ReadError during streaming → StreamMonitor catches it,
+        raises GatewayStreamError with provider/model context, logs WARNING
+        with provider_name and model_name, and calls _finalize_logging().
+        """
+
+        async def chunk_iterator():
+            yield b"partial_data"
+            raise httpx.ReadError("Connection lost")
+
+        mock_httpx_response.aiter_bytes.return_value = chunk_iterator()
+        monitor = StreamMonitor(
+            upstream_response=mock_httpx_response,
+            client_ip="10.0.0.1",
+            request_method="POST",
+            request_path="/v1/chat/completions",
+            provider_name="openai",
+            model_name="gpt-4",
+            check_result=CheckResult.success(),
+        )
+
+        with pytest.raises(GatewayStreamError) as exc_info:
+            async for _ in monitor:
+                pass
+
+        # Verify GatewayStreamError attributes (6.8)
+        assert exc_info.value.provider_name == "openai"
+        assert exc_info.value.model_name == "gpt-4"
+        assert exc_info.value.error_reason == ErrorReason.STREAM_DISCONNECT
+
+        # 6.6: WARNING log contains provider_name and model_name
+        mock_logger.warning.assert_called_once()
+        log_message = mock_logger.warning.call_args[0][0]
+        assert "openai" in log_message
+        assert "gpt-4" in log_message
+
+        # 6.8: _finalize_logging was called (GATEWAY_ACCESS info log)
+        mock_logger.info.assert_called_once()
+
+        # Verify upstream response was closed
+        mock_httpx_response.aclose.assert_called_once()

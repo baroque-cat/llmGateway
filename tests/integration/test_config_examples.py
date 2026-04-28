@@ -160,3 +160,58 @@ def test_minimal_config_gateway_defaults(mock_env):
     assert config.gateway.host == "0.0.0.0"
     assert config.gateway.port == 55300
     assert config.gateway.workers == 4
+
+
+# --- Dedicated HTTP Client Tests (G6: Section 7) ---
+
+
+def test_full_config_dedicated_http_client_in_yaml():
+    """IT-Y07-2: Raw example_full_config.yaml contains 'dedicated_http_client' field
+    for every provider (with a comment explaining its purpose)."""
+    yaml = YAML()
+    with open("config/example_full_config.yaml", encoding="utf-8") as f:
+        data = yaml.load(f)
+
+    providers_section = data["providers"]
+    for provider_name, provider_data in providers_section.items():
+        assert "dedicated_http_client" in provider_data, (
+            f"Provider '{provider_name}' in example_full_config.yaml "
+            f"does not contain 'dedicated_http_client' key. "
+            f"Available keys: {list(provider_data.keys())}"
+        )
+        assert provider_data["dedicated_http_client"] is False, (
+            f"Provider '{provider_name}' has dedicated_http_client="
+            f"{provider_data['dedicated_http_client']}, expected False"
+        )
+
+
+def test_full_config_dedicated_http_client_loaded(mock_env):
+    """IT-Y07-2: ConfigLoader.load() on example_full_config.yaml → every provider
+    has dedicated_http_client attribute."""
+    loader = ConfigLoader(path="config/example_full_config.yaml")
+    config = loader.load()
+
+    for provider_name, provider in config.providers.items():
+        assert hasattr(
+            provider, "dedicated_http_client"
+        ), f"Provider '{provider_name}' loaded object has no 'dedicated_http_client' attribute"
+        assert provider.dedicated_http_client is False, (
+            f"Provider '{provider_name}' has dedicated_http_client="
+            f"{provider.dedicated_http_client}, expected False"
+        )
+
+
+def test_providers_yaml_dedicated_http_client(mock_env):
+    """IT-Y07-3: ConfigLoader.load() on config/providers.yaml → all providers
+    have dedicated_http_client == False."""
+    loader = ConfigLoader(path="config/providers.yaml")
+    config = loader.load()
+
+    for provider_name, provider in config.providers.items():
+        assert hasattr(
+            provider, "dedicated_http_client"
+        ), f"Provider '{provider_name}' loaded object has no 'dedicated_http_client' attribute"
+        assert provider.dedicated_http_client is False, (
+            f"Provider '{provider_name}' has dedicated_http_client="
+            f"{provider.dedicated_http_client}, expected False"
+        )

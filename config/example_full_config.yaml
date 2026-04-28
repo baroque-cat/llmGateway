@@ -63,6 +63,8 @@ providers:
     api_base_url: "https://generativelanguage.googleapis.com"
     default_model: "gemini-2.5-flash"
     shared_key_status: false
+    # Set to true to give this instance its own HTTP client pool (high-load instances)
+    dedicated_http_client: false
 
     # Defined models for this provider
     models:
@@ -228,6 +230,7 @@ providers:
     
     api_base_url: "https://api.deepseek.com/v1"
     default_model: "deepseek-chat"
+    dedicated_http_client: false
     
     models:
       deepseek-chat:
@@ -253,7 +256,8 @@ providers:
     
     api_base_url: "https://api.anthropic.com"
     default_model: "claude-sonnet-4-20250514"
-    
+    dedicated_http_client: false
+
     models:
       claude-sonnet-4-20250514:
         endpoint_suffix: "/v1/messages"

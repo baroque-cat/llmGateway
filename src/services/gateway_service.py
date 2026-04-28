@@ -171,6 +171,31 @@ def _sanitize_body(body: bytes, provider_type: str | None = None) -> str:
         return repr(body)
 
 
+class GatewayStreamError(Exception):
+    """
+    Domain exception raised when a streaming connection is dropped
+    (``httpx.ReadError``) while reading a response from an upstream provider.
+
+    Attributes:
+        provider_name: Name of the provider instance where the disconnect occurred.
+        model_name: Name of the model the request was targeting.
+        error_reason: ``ErrorReason.STREAM_DISCONNECT`` constant.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        provider_name: str,
+        model_name: str,
+        error_reason: ErrorReason = ErrorReason.STREAM_DISCONNECT,
+    ) -> None:
+        self.provider_name = provider_name
+        self.model_name = model_name
+        self.error_reason = error_reason
+        super().__init__(message)
+
+
 class StreamMonitor:
     """
     An async generator wrapper to monitor and log streaming responses.
@@ -227,6 +252,20 @@ class StreamMonitor:
         except StopAsyncIteration:
             await self._finalize_logging()
             raise
+        except httpx.ReadError as e:
+            # Upstream provider disconnected the stream prematurely.
+            # Log with provider/model context and raise a domain exception
+            # so the gateway can return a controlled error instead of a 500.
+            logger.warning(
+                f"Upstream stream disconnect for provider '{self.provider_name}' "
+                f"model '{self.model_name}': {e}"
+            )
+            await self._finalize_logging()
+            raise GatewayStreamError(
+                f"Stream disconnected by upstream provider '{self.provider_name}'",
+                provider_name=self.provider_name,
+                model_name=self.model_name,
+            ) from e
         except Exception as e:
             # Log the error but re-raise it so FastAPI can handle it properly.
             logger.error(f"Error during streaming: {e}")

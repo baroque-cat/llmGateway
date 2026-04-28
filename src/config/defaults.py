@@ -59,6 +59,8 @@ def get_default_config() -> dict[str, Any]:
                 # This path is customized by the config manager.
                 "keys_path": "keys/llm_provider_default/",
                 "api_base_url": "https://api.example.com/v1",
+                # Set to true to give this instance its own HTTP client pool (high-load instances)
+                "dedicated_http_client": False,
                 "models": {},
                 "access_control": {
                     "gateway_access_token": "${LLM_PROVIDER_DEFAULT_TOKEN}",

@@ -38,3 +38,21 @@ def test_default_config_keys_and_values():
     assert "max_size" in pool
     assert pool["min_size"] == 1
     assert pool["max_size"] == 15
+
+
+def test_default_config_dedicated_http_client():
+    """IT-Y07-1: get_default_config()['providers']['llm_provider_default'] contains
+    'dedicated_http_client' key with value False."""
+    defaults = get_default_config()
+
+    assert "providers" in defaults
+    llm_default = defaults["providers"]["llm_provider_default"]
+
+    # Verify the dedicated_http_client key exists and is False
+    assert "dedicated_http_client" in llm_default, (
+        f"Key 'dedicated_http_client' not found in llm_provider_default. "
+        f"Available keys: {list(llm_default.keys())}"
+    )
+    assert (
+        llm_default["dedicated_http_client"] is False
+    ), f"Expected dedicated_http_client=False, got {llm_default['dedicated_http_client']}"

@@ -393,6 +393,12 @@ class ProviderConfig(BaseModel):
     # If true, all keys for this provider share the same status (e.g., for APIs with account-level rate limits).
     shared_key_status: bool = False
 
+    # If True, the instance gets a dedicated httpx.AsyncClient (separate connection pool).
+    # Useful for high-load instances (e.g., litellm with agents) so their
+    # TCP connections do not starve connections from other providers in the shared client.
+    # Defaults to False — a shared client is used with other providers of the same proxy mode.
+    dedicated_http_client: bool = False
+
     # A dictionary mapping model names to their detailed configurations.
     # This structure is flexible and supports multiple model types under one provider.
     # It correctly uses default_factory to prevent mutable default issues.

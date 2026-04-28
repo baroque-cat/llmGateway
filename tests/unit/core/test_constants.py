@@ -17,6 +17,7 @@ class TestErrorReasonLogic:
             ErrorReason.SERVICE_UNAVAILABLE,
             ErrorReason.OVERLOADED,
             ErrorReason.RATE_LIMITED,
+            ErrorReason.STREAM_DISCONNECT,
         ]
 
         for error in retryable:
@@ -69,6 +70,7 @@ class TestErrorReasonLogic:
             ErrorReason.SERVER_ERROR,
             ErrorReason.SERVICE_UNAVAILABLE,
             ErrorReason.OVERLOADED,
+            ErrorReason.STREAM_DISCONNECT,
         ]
 
         for error in non_client_errors:
@@ -101,7 +103,61 @@ class TestErrorReasonLogic:
             ErrorReason.RATE_LIMITED,
             ErrorReason.BAD_REQUEST,
             ErrorReason.UNKNOWN,
+            ErrorReason.STREAM_DISCONNECT,
         ]
 
         for error in non_fatal_errors:
             assert error.is_fatal() is False, f"{error} should NOT be fatal"
+
+
+class TestStreamDisconnect:
+    """
+    Tests for the new ErrorReason.STREAM_DISCONNECT enum member.
+
+    STREAM_DISCONNECT represents an upstream provider dropping a streaming
+    connection. It is classified as a server-side, retryable error — not
+    fatal and not a client error.
+    """
+
+    def test_stream_disconnect_value(self):
+        """
+        5.1: STREAM_DISCONNECT exists and has value "stream_disconnect".
+        """
+        assert hasattr(
+            ErrorReason, "STREAM_DISCONNECT"
+        ), "ErrorReason should have STREAM_DISCONNECT member"
+        assert (
+            ErrorReason.STREAM_DISCONNECT.value == "stream_disconnect"
+        ), f"Expected value 'stream_disconnect', got '{ErrorReason.STREAM_DISCONNECT.value}'"
+
+    def test_stream_disconnect_is_retryable(self):
+        """
+        5.2: STREAM_DISCONNECT.is_retryable() → True.
+        """
+        assert (
+            ErrorReason.STREAM_DISCONNECT.is_retryable() is True
+        ), "STREAM_DISCONNECT should be retryable"
+
+    def test_stream_disconnect_is_server_error(self):
+        """
+        5.3: STREAM_DISCONNECT.is_server_error() → True.
+        """
+        assert (
+            ErrorReason.STREAM_DISCONNECT.is_server_error() is True
+        ), "STREAM_DISCONNECT should be a server error"
+
+    def test_stream_disconnect_is_not_fatal(self):
+        """
+        5.4: STREAM_DISCONNECT.is_fatal() → False.
+        """
+        assert (
+            ErrorReason.STREAM_DISCONNECT.is_fatal() is False
+        ), "STREAM_DISCONNECT should NOT be fatal"
+
+    def test_stream_disconnect_is_not_client_error(self):
+        """
+        5.5: STREAM_DISCONNECT.is_client_error() → False.
+        """
+        assert (
+            ErrorReason.STREAM_DISCONNECT.is_client_error() is False
+        ), "STREAM_DISCONNECT should NOT be a client error"
