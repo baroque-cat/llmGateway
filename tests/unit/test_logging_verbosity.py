@@ -10,7 +10,7 @@ import pytest
 
 from src.core.constants import ALL_MODELS_MARKER, ErrorReason
 from src.core.models import CheckResult
-from src.services.gateway_cache import GatewayCache
+from src.config.schemas import DatabaseConfig, DatabaseRetryConfig
 from src.services.probes.key_probe import KeyProbe
 
 
@@ -103,6 +103,9 @@ class TestKeyProbeLoggingVerbosity:
         """Create mocked dependencies for KeyProbe."""
         mock_accessor = Mock()
         mock_accessor.get_worker_concurrency.return_value = 10
+        mock_accessor.get_database_config.return_value = DatabaseConfig(
+            password="test", retry=DatabaseRetryConfig()
+        )
         mock_db = Mock()
         mock_db.keys.update_status = AsyncMock()
         mock_client_factory = Mock()

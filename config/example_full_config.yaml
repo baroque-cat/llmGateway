@@ -16,6 +16,13 @@ database:
   user: "${DB_USER}"
   password: "${DB_PASSWORD}"
   dbname: "${DB_NAME}"
+  # Retry policy for transient database errors (connection lost, deadlock, etc.).
+  # The background worker will automatically retry DB operations on these errors.
+  retry:
+    max_attempts: 3          # Maximum attempts including the first one (1..10)
+    base_delay_sec: 1.0      # Delay before first retry in seconds
+    backoff_factor: 2.0      # Exponential backoff multiplier (>= 1.0)
+    jitter: true             # Add random ±50% jitter to prevent thundering herd
 
 # --- LOGGING SETTINGS ---
 # (Application logging only - statistics are now handled by Prometheus metrics)
@@ -77,10 +84,10 @@ providers:
       pool_list_path: "proxies/gemini-production/" # Required if mode is stealth
 
     timeouts:
-      connect: 5.0
-      read: 20.0
-      write: 10.0
-      pool: 5.0
+      connect: 15.0
+      read: 300.0
+      write: 35.0
+      pool: 35.0
 
     # Health check policy for the background worker
     worker_health_policy:
@@ -91,7 +98,7 @@ providers:
       on_other_error_hr: 1
       on_success_hr: 24
       on_rate_limit_hr: 1
-      on_no_quota_hr: 1
+      on_no_quota_hr: 6
       # Intervals in Days
       on_invalid_key_days: 10
       on_no_access_days: 10
@@ -103,12 +110,6 @@ providers:
       # If a check is performed later than its scheduled time by more than this threshold,
       # the system assumes it was due to a downtime and resets the 'failing_since' counter.
       amnesty_threshold_days: 2.0
-      # Batching Configuration
-      # NOTE: batch_size and batch_delay_sec are now INITIAL values for the
-      # adaptive batch controller. The controller adjusts them dynamically.
-      batch_size: 10
-      batch_delay_sec: 30
-      
       # Adaptive Batching Configuration
       # The controller adjusts batch size and delay based on provider response:
       # - Any RATE_LIMITED → aggressive backoff (batch_size //= 2, delay *= 2)
@@ -116,6 +117,9 @@ providers:
       # - Fatal errors (invalid key, no access) → ignored (key-specific)
       # - Success → gradual ramp-up; accelerated after recovery_threshold
       adaptive_batching:
+        # Start values — initial batch size/delay for the adaptive controller.
+        start_batch_size: 10             # Initial batch size (must be within [min, max])
+        start_batch_delay_sec: 30.0      # Initial delay in seconds
         # Boundaries: batch size never drops below min nor exceeds max
         min_batch_size: 5                # Lower bound (default: 5)
         max_batch_size: 50               # Upper bound (default: 50)
@@ -260,10 +264,10 @@ providers:
       gateway_access_token: "${ANTHROPIC_TOKEN}"
     
     timeouts:
-      connect: 5.0
-      read: 30.0
-      write: 10.0
-      pool: 5.0
+      connect: 15.0
+      read: 300.0
+      write: 35.0
+      pool: 35.0
     
     worker_health_policy:
       # Intervals in Minutes
@@ -273,7 +277,7 @@ providers:
       on_other_error_hr: 1
       on_success_hr: 24
       on_rate_limit_hr: 1
-      on_no_quota_hr: 1
+      on_no_quota_hr: 6
       # Intervals in Days
       on_invalid_key_days: 10
       on_no_access_days: 10
@@ -285,9 +289,10 @@ providers:
       # If a check is performed later than its scheduled time by more than this threshold,
       # the system assumes it was due to a downtime and resets the 'failing_since' counter.
       amnesty_threshold_days: 2.0
-      # Batching Configuration
-      batch_size: 10
-      batch_delay_sec: 30
+      # Adaptive Batching Configuration
+      adaptive_batching:
+        start_batch_size: 10
+        start_batch_delay_sec: 30.0
       task_timeout_sec: 900
       # Verification Loop Configuration
       verification_attempts: 3

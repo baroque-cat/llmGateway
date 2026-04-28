@@ -13,58 +13,40 @@ from src.core.models import CheckResult
 
 class AdaptiveBatchController:
     """
-    Synchronous, self-tuning controller for batch size and delay.
+    Синхронный контроллер с самонастройкой batch_size и batch_delay.
 
-    This controller manages the throughput for a single provider's probe
-    cycle by adjusting ``batch_size`` (how many keys are checked in parallel)
-    and ``batch_delay`` (the pause between consecutive batches) based on
-    the classification of check results in the just-completed batch.
+    Контроллер управляет пропускной способностью цикла проверки одного
+    провайдера, подстраивая ``batch_size`` (сколько ключей проверяется
+    параллельно) и ``batch_delay`` (пауза между батчами) на основе
+    классификации результатов только что завершённого батча.
 
-    The classification scheme recognises three categories:
-
-    1. **rate_limited** — ``ErrorReason.RATE_LIMITED``:
-       Immediate aggressive backoff: ``batch_size //= divisor``,
-       ``delay *= multiplier``.
-
-    2. **transient** — retryable errors that are *not* rate-limit:
-       Moderate backoff when the transient proportion of *non-fatal*
-       results exceeds ``failure_rate_threshold``:
-       ``batch_size -= step``, ``delay += step``.
-
-    3. **fatal** — ``ErrorReason.is_fatal()`` (e.g. INVALID_KEY):
-       Completely ignored — these are per-key problems, not provider issues.
-
-    After ``recovery_threshold`` consecutive successful batches the step
-    multiplier doubles, enabling faster ramp-up back to peak throughput.
-
-    .. note::
-       The controller is intentionally synchronous — it has no I/O and is
-       called sequentially for a given provider, so no locks are needed.
+    Стартовые значения читаются из ``config.start_batch_size`` и
+    ``config.start_batch_delay_sec`` (обрезаются по границам).
     """
 
     def __init__(
         self,
         config: AdaptiveBatchingConfig,
-        initial_batch_size: int,
-        initial_batch_delay: float,
     ) -> None:
         """
-        Initialise the controller.
+        Инициализация контроллера.
+
+        Начальные значения ``batch_size`` и ``batch_delay`` берутся из
+        ``config.start_batch_size`` и ``config.start_batch_delay_sec``,
+        обрезаются по границам ``[min_batch_size, max_batch_size]`` и
+        ``[min_batch_delay_sec, max_batch_delay_sec]``.
 
         Args:
-            config: Validated adaptive batching configuration.
-            initial_batch_size: Starting batch size, capped to
-                ``[min_batch_size, max_batch_size]``.
-            initial_batch_delay: Starting delay in seconds, capped to
-                ``[min_batch_delay_sec, max_batch_delay_sec]``.
+            config: Валидированная конфигурация адаптивного батчинга,
+                включающая стартовые значения и границы.
         """
         self._config = config
         self._batch_size = max(
-            config.min_batch_size, min(config.max_batch_size, initial_batch_size)
+            config.min_batch_size, min(config.max_batch_size, config.start_batch_size)
         )
         self._batch_delay = max(
             config.min_batch_delay_sec,
-            min(config.max_batch_delay_sec, initial_batch_delay),
+            min(config.max_batch_delay_sec, config.start_batch_delay_sec),
         )
         self._consecutive_successes = 0
 

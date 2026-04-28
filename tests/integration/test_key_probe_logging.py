@@ -9,6 +9,7 @@ import pytest
 
 from src.core.constants import ALL_MODELS_MARKER, ErrorReason
 from src.core.models import CheckResult
+from src.config.schemas import DatabaseConfig, DatabaseRetryConfig
 from src.services.probes.key_probe import KeyProbe
 
 
@@ -20,6 +21,9 @@ class TestWorkerLogFormat:
         """Provide a mock ConfigAccessor."""
         mock = Mock()
         mock.get_worker_concurrency.return_value = 5
+        mock.get_database_config.return_value = DatabaseConfig(
+            password="test", retry=DatabaseRetryConfig()
+        )
         return mock
 
     @pytest.fixture

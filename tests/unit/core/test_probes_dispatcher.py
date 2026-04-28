@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.config.schemas import HealthPolicyConfig
+from src.config.schemas import AdaptiveBatchingConfig, HealthPolicyConfig
 from src.core.models import CheckResult
 from src.core.probes import IResourceProbe
 
@@ -315,6 +315,35 @@ async def test_multiple_providers_mixed_dispatch_and_skipping(probe, mock_depend
 
     # Verify that new provider task cleaned up
     assert new_provider not in probe.active_tasks
+
+
+# ----------------------------------------------------------------------
+# Test: UT-H11 — HealthPolicyConfig() without batch fields works
+# ----------------------------------------------------------------------
+def test_ut_h11_health_policy_config_without_batch_fields():
+    """
+    UT-H11: Verify that HealthPolicyConfig() can be created without
+    batch_size and batch_delay_sec fields (they were moved to
+    AdaptiveBatchingConfig as start_batch_size / start_batch_delay_sec).
+
+    The default_factory for adaptive_batching should produce a valid
+    AdaptiveBatchingConfig with the expected defaults.
+    """
+    policy = HealthPolicyConfig()
+
+    # adaptive_batching is created by default_factory
+    assert policy.adaptive_batching is not None
+    assert isinstance(policy.adaptive_batching, AdaptiveBatchingConfig)
+
+    # Default start values
+    assert policy.adaptive_batching.start_batch_size == 30
+    assert policy.adaptive_batching.start_batch_delay_sec == 15.0
+
+    # Default bounds
+    assert policy.adaptive_batching.min_batch_size == 5
+    assert policy.adaptive_batching.max_batch_size == 50
+    assert policy.adaptive_batching.min_batch_delay_sec == 3.0
+    assert policy.adaptive_batching.max_batch_delay_sec == 120.0
 
 
 if __name__ == "__main__":

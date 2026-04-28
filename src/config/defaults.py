@@ -25,6 +25,13 @@ def get_default_config() -> dict[str, Any]:
             # DB_PASSWORD="your_super_secret_password"
             "password": "${DB_PASSWORD}",
             "dbname": "llmgateway",
+            # Retry policy for transient database errors
+            "retry": {
+                "max_attempts": 3,
+                "base_delay_sec": 1.0,
+                "backoff_factor": 2.0,
+                "jitter": True,
+            },
         },
         "logging": {
             "level": "INFO",
@@ -50,10 +57,10 @@ def get_default_config() -> dict[str, Any]:
                     "pool_list_path": "proxies/llm_provider_default/",
                 },
                 "timeouts": {
-                    "connect": 5.0,
-                    "read": 20.0,
-                    "write": 10.0,
-                    "pool": 5.0,
+                    "connect": 15.0,
+                    "read": 300.0,
+                    "write": 35.0,
+                    "pool": 35.0,
                 },
                 # Policy for the background worker's health checks.
                 # REFACTORED: This section now perfectly matches the updated HealthPolicyConfig schema.
@@ -65,7 +72,7 @@ def get_default_config() -> dict[str, Any]:
                     "on_other_error_hr": 1,
                     "on_success_hr": 24,
                     "on_rate_limit_hr": 1,
-                    "on_no_quota_hr": 1,
+                    "on_no_quota_hr": 6,
                     # Intervals in Days
                     "on_invalid_key_days": 10,
                     "on_no_access_days": 10,
@@ -76,15 +83,17 @@ def get_default_config() -> dict[str, Any]:
                     # Downtime Amnesty Policy
                     "amnesty_threshold_days": 2.0,
                     # Batching Configuration
-                    # NOTE: batch_size and batch_delay_sec are INITIAL values
-                    "batch_size": 10,
-                    "batch_delay_sec": 30,
                     # Adaptive Batching — self-tuning controller (all optional)
                     "adaptive_batching": {
+                        # Стартовые значения (перенесены из HealthPolicyConfig)
+                        "start_batch_size": 10,
+                        "start_batch_delay_sec": 30.0,
+                        # Границы
                         "min_batch_size": 5,
                         "max_batch_size": 50,
                         "min_batch_delay_sec": 3.0,
                         "max_batch_delay_sec": 120.0,
+                        # Шаги
                         "batch_size_step": 5,
                         "delay_step_sec": 2.0,
                         "rate_limit_divisor": 2,

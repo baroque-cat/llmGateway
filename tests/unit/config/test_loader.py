@@ -156,4 +156,4 @@ providers:
         assert provider.worker_health_policy.task_timeout_sec == 600
         # Ensure other default values are still present
         assert provider.worker_health_policy.amnesty_threshold_days == 2.0
-        assert provider.worker_health_policy.batch_size == 10
+        assert provider.worker_health_policy.adaptive_batching.start_batch_size == 10

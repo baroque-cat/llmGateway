@@ -30,9 +30,10 @@ def _make_probe(on_batch_complete=None):
     mock_accessor = MagicMock()
     mock_accessor.get_worker_concurrency.return_value = 10
     mock_accessor.get_health_policy.return_value = HealthPolicyConfig(
-        batch_size=10,
-        batch_delay_sec=15,
-        adaptive_batching=AdaptiveBatchingConfig(),
+        adaptive_batching=AdaptiveBatchingConfig(
+            start_batch_size=10,
+            start_batch_delay_sec=15.0,
+        ),
     )
     mock_db = MagicMock()
     mock_client_factory = MagicMock()
@@ -181,9 +182,10 @@ async def test_ut09_callback_after_rate_limited():
         )
 
     policy = HealthPolicyConfig(
-        batch_size=40,
-        batch_delay_sec=15,
-        adaptive_batching=AdaptiveBatchingConfig(),
+        adaptive_batching=AdaptiveBatchingConfig(
+            start_batch_size=40,
+            start_batch_delay_sec=15.0,
+        ),
     )
     mock_accessor = MagicMock()
     mock_accessor.get_worker_concurrency.return_value = 10
@@ -229,9 +231,10 @@ async def test_ut10_callback_on_every_while_iteration():
         call_count += 1
 
     policy = HealthPolicyConfig(
-        batch_size=30,
-        batch_delay_sec=15,
-        adaptive_batching=AdaptiveBatchingConfig(),
+        adaptive_batching=AdaptiveBatchingConfig(
+            start_batch_size=30,
+            start_batch_delay_sec=15.0,
+        ),
     )
     mock_accessor = MagicMock()
     mock_accessor.get_worker_concurrency.return_value = 10

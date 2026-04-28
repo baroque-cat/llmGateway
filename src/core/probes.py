@@ -167,13 +167,11 @@ class IResourceProbe(ABC):
             if controller is None:
                 controller = AdaptiveBatchController(
                     config=policy.adaptive_batching,
-                    initial_batch_size=policy.batch_size,
-                    initial_batch_delay=policy.batch_delay_sec,
                 )
                 self._batch_controllers[provider_name] = controller
                 logger.info(
                     "[AdaptiveBatch] Provider '%s': controller created. "
-                    "initial_batch_size=%d, initial_batch_delay=%.1fs, "
+                    "start_batch_size=%d, start_batch_delay=%.1fs, "
                     "bounds=[%d..%d keys, %.1f..%.1fs]",
                     provider_name,
                     controller.batch_size,

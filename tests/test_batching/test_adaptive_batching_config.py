@@ -1,34 +1,272 @@
 #!/usr/bin/env python3
 
 """
-Test suite for AdaptiveBatchingConfig Pydantic validation (UC-33..UC-42).
+Test suite for AdaptiveBatchingConfig Pydantic validation (UC-33..UC-42)
+and new start_batch_size / start_batch_delay_sec fields (UT-A01..UT-A12).
 
 These tests verify that the AdaptiveBatchingConfig schema correctly:
-- Populates all 11 fields with default values
+- Populates all 13 fields with default values
 - Enforces strict min < max bounds for batch_size and batch_delay
-- Rejects negative and zero values via gt=0 / gt=1 constraints
+- Validates start values within [min, max] bounds
+- Rejects negative and zero values via gt=0 / ge=0 constraints
 - Works as a default_factory within HealthPolicyConfig
 
-UC-39 is explicitly skipped — it is a controller-level (probe integration)
-test, not a schema-level test.
+UC-39 now tests the AdaptiveBatchController initialization with
+start values from AdaptiveBatchingConfig.
 """
 
 import pytest
 from pydantic import ValidationError
 
 from src.config.schemas import AdaptiveBatchingConfig, HealthPolicyConfig
+from src.core.batching.adaptive import AdaptiveBatchController
 
 # ---------------------------------------------------------------------------
-# UC-33: Valid config with defaults
+# UT-A01: start_batch_size and start_batch_delay_sec defaults
+# ---------------------------------------------------------------------------
+
+
+def test_ut_a01_start_defaults():
+    """
+    UT-A01: start_batch_size defaults to 30 and start_batch_delay_sec defaults to 15.0.
+    """
+    cfg = AdaptiveBatchingConfig()
+    assert cfg.start_batch_size == 30
+    assert cfg.start_batch_delay_sec == 15.0
+
+
+# ---------------------------------------------------------------------------
+# UT-A02: start_batch_size below min_batch_size raises ValueError
+# ---------------------------------------------------------------------------
+
+
+def test_ut_a02_start_batch_size_below_min_raises():
+    """
+    UT-A02: start_batch_size=3 (< min_batch_size=5) should raise ValidationError
+    from the model_validator bounds check.
+    """
+    with pytest.raises(ValidationError) as exc_info:
+        AdaptiveBatchingConfig(start_batch_size=3)
+
+    error_message = str(exc_info.value)
+    assert "start_batch_size" in error_message
+
+
+# ---------------------------------------------------------------------------
+# UT-A03: start_batch_size above max_batch_size raises ValueError
+# ---------------------------------------------------------------------------
+
+
+def test_ut_a03_start_batch_size_above_max_raises():
+    """
+    UT-A03: start_batch_size=60 (> max_batch_size=50) should raise ValidationError
+    from the model_validator bounds check.
+    """
+    with pytest.raises(ValidationError) as exc_info:
+        AdaptiveBatchingConfig(start_batch_size=60)
+
+    error_message = str(exc_info.value)
+    assert "start_batch_size" in error_message
+
+
+# ---------------------------------------------------------------------------
+# UT-A04: start_batch_delay_sec below min_batch_delay_sec raises ValueError
+# ---------------------------------------------------------------------------
+
+
+def test_ut_a04_start_batch_delay_below_min_raises():
+    """
+    UT-A04: start_batch_delay_sec=1.0 (< min_batch_delay_sec=3.0) should raise
+    ValidationError from the model_validator bounds check.
+    """
+    with pytest.raises(ValidationError) as exc_info:
+        AdaptiveBatchingConfig(start_batch_delay_sec=1.0)
+
+    error_message = str(exc_info.value)
+    assert "start_batch_delay_sec" in error_message
+
+
+# ---------------------------------------------------------------------------
+# UT-A05: start_batch_delay_sec above max_batch_delay_sec raises ValueError
+# ---------------------------------------------------------------------------
+
+
+def test_ut_a05_start_batch_delay_above_max_raises():
+    """
+    UT-A05: start_batch_delay_sec=200.0 (> max_batch_delay_sec=120.0) should raise
+    ValidationError from the model_validator bounds check.
+    """
+    with pytest.raises(ValidationError) as exc_info:
+        AdaptiveBatchingConfig(start_batch_delay_sec=200.0)
+
+    error_message = str(exc_info.value)
+    assert "start_batch_delay_sec" in error_message
+
+
+# ---------------------------------------------------------------------------
+# UT-A06: start_batch_size within [min, max] is valid
+# ---------------------------------------------------------------------------
+
+
+def test_ut_a06_start_batch_size_within_bounds_valid():
+    """
+    UT-A06: start_batch_size=30 within [5, 50] is valid.
+    """
+    cfg = AdaptiveBatchingConfig(start_batch_size=30)
+    assert cfg.start_batch_size == 30
+
+
+# ---------------------------------------------------------------------------
+# UT-A07: start_batch_delay_sec within [min, max] is valid
+# ---------------------------------------------------------------------------
+
+
+def test_ut_a07_start_batch_delay_within_bounds_valid():
+    """
+    UT-A07: start_batch_delay_sec=15.0 within [3.0, 120.0] is valid.
+    """
+    cfg = AdaptiveBatchingConfig(start_batch_delay_sec=15.0)
+    assert cfg.start_batch_delay_sec == 15.0
+
+
+# ---------------------------------------------------------------------------
+# UT-A08: start_batch_size at min boundary is valid
+# ---------------------------------------------------------------------------
+
+
+def test_ut_a08_start_batch_size_at_min_valid():
+    """
+    UT-A08: start_batch_size=5 (== min_batch_size) is valid.
+    The model_validator allows start in [min, max] inclusive.
+    """
+    cfg = AdaptiveBatchingConfig(start_batch_size=5)
+    assert cfg.start_batch_size == 5
+
+
+# ---------------------------------------------------------------------------
+# UT-A09: start_batch_size at max boundary is valid
+# ---------------------------------------------------------------------------
+
+
+def test_ut_a09_start_batch_size_at_max_valid():
+    """
+    UT-A09: start_batch_size=50 (== max_batch_size) is valid.
+    The model_validator allows start in [min, max] inclusive.
+    """
+    cfg = AdaptiveBatchingConfig(start_batch_size=50)
+    assert cfg.start_batch_size == 50
+
+
+# ---------------------------------------------------------------------------
+# UT-A10: start_batch_delay_sec = 0 is valid per ge=0 field constraint
+# ---------------------------------------------------------------------------
+
+
+def test_ut_a10_start_batch_delay_sec_zero_ge0_valid():
+    """
+    UT-A10: start_batch_delay_sec=0 is valid per the ge=0 field constraint.
+
+    DESIGN NOTE: With default min_batch_delay_sec=3.0 (gt=0 constraint),
+    setting start_batch_delay_sec=0 fails the model_validator bounds check
+    (0 < 3.0). To make the full config valid, min_batch_delay_sec must be
+    <= 0, but min_batch_delay_sec has gt=0 which rejects 0.
+
+    This test verifies that start_batch_delay_sec=0 does NOT trigger a
+    ge=0 field-level error — the only validation failure comes from the
+    model_validator bounds check, proving that the ge=0 constraint
+    correctly allows 0 as a field value.
+
+    If min_batch_delay_sec's constraint were changed from gt=0 to ge=0
+    in src/config/schemas.py, then start_batch_delay_sec=0 could be
+    used in a fully valid config.
+    """
+    # Attempt with start_batch_delay_sec=0 and default min_batch_delay_sec=3.0
+    with pytest.raises(ValidationError) as exc_info:
+        AdaptiveBatchingConfig(start_batch_delay_sec=0)
+
+    errors = exc_info.value.errors()
+    # Verify that there is NO field-level ge=0 error for start_batch_delay_sec
+    start_delay_field_errors = [
+        e for e in errors if e["loc"] == ("start_batch_delay_sec",)
+    ]
+    assert (
+        len(start_delay_field_errors) == 0
+    ), "start_batch_delay_sec=0 should NOT produce a ge=0 field-level error"
+    # The error should be from the model_validator bounds check
+    assert any("start_batch_delay_sec" in str(e.get("msg", "")) for e in errors)
+
+
+# ---------------------------------------------------------------------------
+# UT-A11: start_batch_delay_sec < 0 is invalid
+# ---------------------------------------------------------------------------
+
+
+def test_ut_a11_start_batch_delay_sec_negative_raises():
+    """
+    UT-A11: start_batch_delay_sec=-1.0 should raise ValidationError
+    due to the ge=0 field constraint.
+    """
+    with pytest.raises(ValidationError) as exc_info:
+        AdaptiveBatchingConfig(start_batch_delay_sec=-1.0)
+
+    errors = exc_info.value.errors()
+    # Verify there IS a field-level ge=0 error for start_batch_delay_sec
+    start_delay_field_errors = [
+        e for e in errors if e["loc"] == ("start_batch_delay_sec",)
+    ]
+    assert len(start_delay_field_errors) > 0
+    assert start_delay_field_errors[0]["type"] == "greater_than_equal"
+
+
+# ---------------------------------------------------------------------------
+# UT-A12: Full AdaptiveBatchingConfig schema has 13 fields
+# ---------------------------------------------------------------------------
+
+
+def test_ut_a12_schema_has_13_fields():
+    """
+    UT-A12: AdaptiveBatchingConfig should have exactly 13 fields,
+    including the new start_batch_size and start_batch_delay_sec.
+    """
+    field_names = list(AdaptiveBatchingConfig.model_fields.keys())
+    assert len(field_names) == 13
+
+    expected_fields = {
+        "start_batch_size",
+        "start_batch_delay_sec",
+        "min_batch_size",
+        "max_batch_size",
+        "min_batch_delay_sec",
+        "max_batch_delay_sec",
+        "batch_size_step",
+        "delay_step_sec",
+        "rate_limit_divisor",
+        "rate_limit_delay_multiplier",
+        "recovery_threshold",
+        "recovery_step_multiplier",
+        "failure_rate_threshold",
+    }
+    assert set(field_names) == expected_fields
+
+
+# ---------------------------------------------------------------------------
+# UC-33: Valid config with defaults (updated with UT-H03)
 # ---------------------------------------------------------------------------
 
 
 def test_uc33_valid_config_with_defaults():
     """
-    Creating AdaptiveBatchingConfig() without args should populate all 11
+    Creating AdaptiveBatchingConfig() without args should populate all 13
     fields with their documented default values.
+
+    UT-H03: Added checks for start_batch_size == 30 and
+    start_batch_delay_sec == 15.0.
     """
     cfg = AdaptiveBatchingConfig()
+
+    # Start values (UT-H03)
+    assert cfg.start_batch_size == 30
+    assert cfg.start_batch_delay_sec == 15.0
 
     # Boundaries — batch size
     assert cfg.min_batch_size == 5
@@ -124,6 +362,7 @@ def test_uc37_min_batch_delay_equals_max_raises():
 
 # ---------------------------------------------------------------------------
 # UC-38: default_factory populated when user doesn't specify adaptive_batching
+#         (updated with UT-H04)
 # ---------------------------------------------------------------------------
 
 
@@ -131,11 +370,18 @@ def test_uc38_default_factory_populated_in_health_policy():
     """
     Creating HealthPolicyConfig() without specifying adaptive_batching should
     populate it via default_factory with all default AdaptiveBatchingConfig values.
+
+    UT-H04: Added checks for start_batch_size == 30 and
+    start_batch_delay_sec == 15.0.
     """
     policy = HealthPolicyConfig()
 
     # Verify that adaptive_batching exists and is an AdaptiveBatchingConfig instance
     assert isinstance(policy.adaptive_batching, AdaptiveBatchingConfig)
+
+    # Start values (UT-H04)
+    assert policy.adaptive_batching.start_batch_size == 30
+    assert policy.adaptive_batching.start_batch_delay_sec == 15.0
 
     # Verify all default values are populated
     assert policy.adaptive_batching.min_batch_size == 5
@@ -152,24 +398,23 @@ def test_uc38_default_factory_populated_in_health_policy():
 
 
 # ---------------------------------------------------------------------------
-# UC-39: SKIPPED — controller-level test, not schema-level
+# UC-39: Controller initialization with start values (UT-H05)
 # ---------------------------------------------------------------------------
 
 
-def test_uc39_skipped_controller_level_test():
+def test_uc39_controller_initialization_with_start_values():
     """
-    UC-39 (existing batch_size/batch_delay_sec as initial values) is a
-    controller-level test — it belongs to probes integration tests, not
-    to the Pydantic config schema test suite. This scenario is explicitly
-    skipped here.
+    UT-H05: AdaptiveBatchingConfig(start_batch_size=20, start_batch_delay_sec=10.0)
+    → create AdaptiveBatchController → verify batch_size=20, batch_delay=10.0.
 
-    The AdaptiveBatchingConfig schema does not have initial_batch_size /
-    initial_batch_delay fields — those are controller-level concepts that
-    receive their initial values from HealthPolicyConfig.batch_size and
-    HealthPolicyConfig.batch_delay_sec at runtime.
+    The controller now takes only config (no initial_batch_size/initial_batch_delay),
+    and reads start values from config.start_batch_size and config.start_batch_delay_sec.
     """
-    # Intentionally empty — this test documents the skip decision.
-    pass
+    cfg = AdaptiveBatchingConfig(start_batch_size=20, start_batch_delay_sec=10.0)
+    controller = AdaptiveBatchController(config=cfg)
+
+    assert controller.batch_size == 20
+    assert controller.batch_delay == 10.0
 
 
 # ---------------------------------------------------------------------------

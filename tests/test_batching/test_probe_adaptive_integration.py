@@ -82,16 +82,22 @@ def _make_probe(
 # Helper: default policy with adaptive batching
 # ----------------------------------------------------------------------
 def _default_policy(
-    batch_size: int = 30,
-    batch_delay_sec: int = 15,
+    start_batch_size: int = 30,
+    start_batch_delay_sec: float = 15.0,
     adaptive: AdaptiveBatchingConfig | None = None,
 ) -> HealthPolicyConfig:
-    """Return a HealthPolicyConfig with sensible defaults for testing."""
+    """Return a HealthPolicyConfig with sensible defaults for testing.
+
+    Initial batch values are now set via AdaptiveBatchingConfig
+    (start_batch_size / start_batch_delay_sec), not via HealthPolicyConfig
+    batch_size / batch_delay_sec (those fields were removed).
+    """
     if adaptive is None:
-        adaptive = AdaptiveBatchingConfig()
+        adaptive = AdaptiveBatchingConfig(
+            start_batch_size=start_batch_size,
+            start_batch_delay_sec=start_batch_delay_sec,
+        )
     return HealthPolicyConfig(
-        batch_size=batch_size,
-        batch_delay_sec=batch_delay_sec,
         adaptive_batching=adaptive,
     )
 
@@ -107,7 +113,7 @@ async def test_ic01_while_loop_replaces_for_loop():
     30, 30, 30, 10.  The while i < len(resources) loop advances
     correctly and the controller receives each batch's results.
     """
-    policy = _default_policy(batch_size=30, batch_delay_sec=15)
+    policy = _default_policy()
     probe = _make_probe(policy=policy)
 
     resources = _make_resources(100)
@@ -154,6 +160,8 @@ async def test_ic02_batch_size_changes_between_batches():
     """
     # Use a small max so ramp-up is visible
     adaptive = AdaptiveBatchingConfig(
+        start_batch_size=30,
+        start_batch_delay_sec=15.0,
         min_batch_size=5,
         max_batch_size=100,
         min_batch_delay_sec=1.0,
@@ -161,7 +169,7 @@ async def test_ic02_batch_size_changes_between_batches():
         batch_size_step=10,
         delay_step_sec=2.0,
     )
-    policy = _default_policy(batch_size=30, batch_delay_sec=15, adaptive=adaptive)
+    policy = _default_policy(adaptive=adaptive)
     probe = _make_probe(policy=policy)
 
     # 65 resources: first batch 30, second batch 40 (30+10), last batch 5 (65-30-40=5)
@@ -205,7 +213,7 @@ async def test_ic03_batch_delay_changes_between_batches():
     After the first successful batch, batch_delay decreases (15→13).
     asyncio.sleep between batches should use the new delay.
     """
-    policy = _default_policy(batch_size=30, batch_delay_sec=15)
+    policy = _default_policy()
     probe = _make_probe(policy=policy)
 
     # 60 resources: first batch 30, second batch 30
@@ -263,7 +271,7 @@ async def test_ic05_filtering_gather_results_isinstance_checkresult():
     After gather, None values (from exceptions) are excluded.
     Only CheckResult objects are passed to controller.report_batch_result.
     """
-    policy = _default_policy(batch_size=10, batch_delay_sec=5)
+    policy = _default_policy(start_batch_size=10, start_batch_delay_sec=5.0)
     probe = _make_probe(policy=policy)
 
     resources = _make_resources(10)
@@ -293,8 +301,6 @@ async def test_ic05_filtering_gather_results_isinstance_checkresult():
 
     controller = AdaptiveBatchController(
         config=policy.adaptive_batching,
-        initial_batch_size=policy.batch_size,
-        initial_batch_delay=float(policy.batch_delay_sec),
     )
 
     original_report = controller.report_batch_result
@@ -326,7 +332,7 @@ async def test_ic06_classification_of_checkresult_by_error_reason():
     Probe counts fatal, transient, rate_limited from results.
     Verify correct counting of each category.
     """
-    policy = _default_policy(batch_size=10, batch_delay_sec=5)
+    policy = _default_policy(start_batch_size=10, start_batch_delay_sec=5.0)
     probe = _make_probe(policy=policy)
 
     resources = _make_resources(10)
@@ -355,8 +361,6 @@ async def test_ic06_classification_of_checkresult_by_error_reason():
 
     controller = AdaptiveBatchController(
         config=policy.adaptive_batching,
-        initial_batch_size=policy.batch_size,
-        initial_batch_delay=float(policy.batch_delay_sec),
     )
 
     original_report = controller.report_batch_result
@@ -406,7 +410,7 @@ async def test_ic07_batch_controllers_dict_per_provider():
     Controller is created on first call to _process_provider_batch,
     reused on second call, and state persists between calls.
     """
-    policy = _default_policy(batch_size=10, batch_delay_sec=5)
+    policy = _default_policy(start_batch_size=10, start_batch_delay_sec=5.0)
     probe = _make_probe(policy=policy)
 
     resources_batch1 = _make_resources(10)
@@ -449,6 +453,8 @@ async def test_ic08_full_cycle_success_rampup_rate_limited_backoff_recovery():
     Verify batch_size and batch_delay follow expected trajectory.
     """
     adaptive = AdaptiveBatchingConfig(
+        start_batch_size=30,
+        start_batch_delay_sec=15.0,
         min_batch_size=5,
         max_batch_size=50,
         min_batch_delay_sec=3.0,
@@ -458,13 +464,11 @@ async def test_ic08_full_cycle_success_rampup_rate_limited_backoff_recovery():
         rate_limit_divisor=2,
         rate_limit_delay_multiplier=2.0,
     )
-    policy = _default_policy(batch_size=30, batch_delay_sec=15, adaptive=adaptive)
+    policy = _default_policy(adaptive=adaptive)
     probe = _make_probe(policy=policy)
 
     controller = AdaptiveBatchController(
         config=adaptive,
-        initial_batch_size=30,
-        initial_batch_delay=15.0,
     )
     probe._batch_controllers["test_provider"] = controller
 
@@ -517,6 +521,8 @@ async def test_ic09_mixed_results_in_one_batch():
     aggressive backoff applied.
     """
     adaptive = AdaptiveBatchingConfig(
+        start_batch_size=30,
+        start_batch_delay_sec=15.0,
         min_batch_size=5,
         max_batch_size=50,
         min_batch_delay_sec=3.0,
@@ -524,13 +530,11 @@ async def test_ic09_mixed_results_in_one_batch():
         batch_size_step=5,
         delay_step_sec=2.0,
     )
-    policy = _default_policy(batch_size=30, batch_delay_sec=15, adaptive=adaptive)
+    policy = _default_policy(adaptive=adaptive)
     probe = _make_probe(policy=policy)
 
     controller = AdaptiveBatchController(
         config=adaptive,
-        initial_batch_size=30,
-        initial_batch_delay=15.0,
     )
 
     mixed_results: list[CheckResult] = [
@@ -586,13 +590,14 @@ async def test_ic10_no_policy_none():
 async def test_ic11_adaptive_batching_absent_uses_default_factory():
     """
     HealthPolicyConfig without explicit adaptive_batching uses default_factory.
-    Controller should be created with initial values from batch_size/batch_delay_sec.
+    Controller should be created with default initial values from AdaptiveBatchingConfig
+    (start_batch_size=30, start_batch_delay_sec=15.0).
     """
     # Create policy without specifying adaptive_batching — default_factory kicks in
-    policy = HealthPolicyConfig(batch_size=10, batch_delay_sec=30)
+    policy = HealthPolicyConfig()
     probe = _make_probe(policy=policy)
 
-    resources = _make_resources(10)
+    resources = _make_resources(30)
     probe._check_and_update_resource = AsyncMock(return_value=CheckResult.success())
 
     await probe._process_provider_batch("test_provider", resources)
@@ -600,17 +605,19 @@ async def test_ic11_adaptive_batching_absent_uses_default_factory():
     controller = probe._batch_controllers["test_provider"]
     assert controller is not None
 
-    # Controller initial values come from policy's batch_size and batch_delay_sec.
-    # AdaptiveBatchingConfig defaults: min_batch_size=5, max_batch_size=50
-    # initial_batch_size=10 is within [5, 50] → stays 10
-    # initial_batch_delay=30.0 is within [3.0, 120.0] → stays 30.0
+    # Controller initial values come from AdaptiveBatchingConfig defaults:
+    # start_batch_size=30, start_batch_delay_sec=15.0
+    # min_batch_size=5, max_batch_size=50
+    # min_batch_delay_sec=3.0, max_batch_delay_sec=120.0
+    assert policy.adaptive_batching.start_batch_size == 30
+    assert policy.adaptive_batching.start_batch_delay_sec == 15.0
     assert policy.adaptive_batching.min_batch_size == 5
     assert policy.adaptive_batching.max_batch_size == 50
 
-    # After one successful batch of 10, controller ramps up:
-    # batch_size: 10 + 5 = 15, batch_delay: 30.0 - 2.0 = 28.0
-    assert controller.batch_size == 15
-    assert controller.batch_delay == 28.0
+    # After one successful batch of 30, controller ramps up:
+    # batch_size: 30 + 5 = 35, batch_delay: 15.0 - 2.0 = 13.0
+    assert controller.batch_size == 35
+    assert controller.batch_delay == 13.0
 
 
 # ======================================================================
@@ -651,7 +658,7 @@ async def test_ic13_one_resource():
     _process_provider_batch(provider, [resource]).
     One batch, one resource. Controller receives total=1.
     """
-    policy = _default_policy(batch_size=30, batch_delay_sec=15)
+    policy = _default_policy()
     probe = _make_probe(policy=policy)
 
     resources = _make_resources(1)
@@ -661,8 +668,6 @@ async def test_ic13_one_resource():
 
     controller = AdaptiveBatchController(
         config=policy.adaptive_batching,
-        initial_batch_size=policy.batch_size,
-        initial_batch_delay=float(policy.batch_delay_sec),
     )
 
     original_report = controller.report_batch_result
@@ -694,7 +699,7 @@ async def test_ic14_semaphore_integration():
     _process_provider_batch works inside async with self.semaphore.
     Verify semaphore doesn't block while-loop between batches.
     """
-    policy = _default_policy(batch_size=30, batch_delay_sec=15)
+    policy = _default_policy()
     probe = _make_probe(policy=policy, concurrency=5)
 
     resources = _make_resources(60)
@@ -724,7 +729,7 @@ async def test_ic15_run_cycle_compatible_with_batch_controllers():
     After run_cycle(), _batch_controllers populated.
     active_tasks cleanup doesn't affect _batch_controllers.
     """
-    policy = _default_policy(batch_size=10, batch_delay_sec=5)
+    policy = _default_policy(start_batch_size=10, start_batch_delay_sec=5.0)
     probe = _make_probe(policy=policy)
 
     resources = _make_resources(10, provider_name="openai")
@@ -758,10 +763,10 @@ async def test_ic16_multiple_providers_separate_controllers():
     _batch_controllers["openai"] and _batch_controllers["gemini"]
     are independent instances with different states.
     """
-    # openai: batch_size=30, batch_delay_sec=15
-    policy_openai = _default_policy(batch_size=30, batch_delay_sec=15)
-    # gemini: batch_size=10, batch_delay_sec=30
-    policy_gemini = _default_policy(batch_size=10, batch_delay_sec=30)
+    # openai: start_batch_size=30, start_batch_delay_sec=15.0
+    policy_openai = _default_policy(start_batch_size=30, start_batch_delay_sec=15.0)
+    # gemini: start_batch_size=10, start_batch_delay_sec=30.0
+    policy_gemini = _default_policy(start_batch_size=10, start_batch_delay_sec=30.0)
 
     mock_accessor = MagicMock()
     mock_accessor.get_worker_concurrency.return_value = 10
@@ -820,8 +825,10 @@ async def test_ic17_timeout_wrapper_partial_batch_not_reported_on_timeout():
     # First batch of 30 resources completes quickly.
     # Then asyncio.sleep(batch_delay) between batches triggers the timeout.
     policy = HealthPolicyConfig(
-        batch_size=30,
-        batch_delay_sec=15,
+        adaptive_batching=AdaptiveBatchingConfig(
+            start_batch_size=30,
+            start_batch_delay_sec=15.0,
+        ),
         task_timeout_sec=2,  # 2 seconds — enough for first batch, not for sleep+second
     )
     probe = _make_probe(policy=policy)

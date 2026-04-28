@@ -139,6 +139,8 @@ The ``worker_health_policy.adaptive_batching`` section supports the following fi
 
 | Parameter | Default | Description |
 |---|---|---|
+| ``start_batch_size`` | 30 | Initial batch size for the adaptive controller |
+| ``start_batch_delay_sec`` | 15.0 | Initial delay in seconds between batches |
 | ``min_batch_size`` | 5 | Lower bound — never drops below this |
 | ``max_batch_size`` | 50 | Upper bound — never exceeds this |
 | ``min_batch_delay_sec`` | 3.0 | Lower bound — never less pause than this |
@@ -151,7 +153,16 @@ The ``worker_health_policy.adaptive_batching`` section supports the following fi
 | ``recovery_step_multiplier`` | 2.0 | Step multiplier during accelerated recovery |
 | ``failure_rate_threshold`` | 0.3 | Transient error proportion that triggers moderate backoff |
 
-Existing ``batch_size`` and ``batch_delay_sec`` fields (under ``worker_health_policy``) now serve as **initial** values for the adaptive controller.
+### Database Retry Configuration
+
+The ``database.retry`` section configures automatic retry for transient database errors (connection lost, interface errors, deadlocks, pool exhaustion):
+
+| Parameter | Default | Description |
+|---|---|---|
+| ``max_attempts`` | 3 | Maximum attempts including first one (1..10) |
+| ``base_delay_sec`` | 1.0 | Delay before first retry in seconds |
+| ``backoff_factor`` | 2.0 | Exponential backoff multiplier (≥ 1.0) |
+| ``jitter`` | true | Add random jitter to prevent thundering herd |
 
 ## Project Status
 

@@ -130,6 +130,11 @@ class AdaptiveBatchingConfig(BaseModel):
        doubles for faster recovery.
     """
 
+    # Стартовые значения для адаптивного контроллера (перенесены из HealthPolicyConfig).
+    # Контроллер начинает с этих значений и подстраивает их в границах [min, max].
+    start_batch_size: int = Field(default=30, gt=0)
+    start_batch_delay_sec: float = Field(default=15.0, ge=0)
+
     # Boundaries — batch size
     min_batch_size: int = Field(default=5, gt=0)
     max_batch_size: int = Field(default=50, gt=0)
@@ -155,7 +160,8 @@ class AdaptiveBatchingConfig(BaseModel):
 
     @model_validator(mode="after")
     def check_bounds(self) -> "AdaptiveBatchingConfig":
-        """Validate that min bounds are strictly less than max bounds."""
+        """Validate that min bounds are strictly less than max bounds,
+        and that start values are within [min, max]."""
         if self.min_batch_size >= self.max_batch_size:
             raise ValueError(
                 f"min_batch_size ({self.min_batch_size}) must be < "
@@ -166,6 +172,20 @@ class AdaptiveBatchingConfig(BaseModel):
                 f"min_batch_delay_sec ({self.min_batch_delay_sec}) must be < "
                 f"max_batch_delay_sec ({self.max_batch_delay_sec})"
             )
+        if not (self.min_batch_size <= self.start_batch_size <= self.max_batch_size):
+            raise ValueError(
+                f"start_batch_size ({self.start_batch_size}) must be in "
+                f"[{self.min_batch_size}, {self.max_batch_size}]"
+            )
+        if not (
+            self.min_batch_delay_sec
+            <= self.start_batch_delay_sec
+            <= self.max_batch_delay_sec
+        ):
+            raise ValueError(
+                f"start_batch_delay_sec ({self.start_batch_delay_sec}) must be in "
+                f"[{self.min_batch_delay_sec}, {self.max_batch_delay_sec}]"
+            )
         return self
 
 
@@ -173,21 +193,19 @@ class HealthPolicyConfig(BaseModel):
     """
     Defines the policy for the background worker's health checks.
     The fields are ordered by the magnitude of their time units for clarity.
-
-    The ``batch_size`` and ``batch_delay_sec`` fields now serve as **initial**
-    values for the adaptive batch controller, which adjusts them dynamically
-    based on batch results.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     # --- Intervals in Minutes (for short-term, recoverable errors) ---
     on_server_error_min: int = Field(default=30, gt=0)
-    on_overload_min: int = Field(default=60, gt=0)
+    on_overload_min: int = Field(default=30, gt=0)
 
     # --- Intervals in Hours (for medium-term issues) ---
     on_other_error_hr: int = Field(default=1, gt=0)
-    on_success_hr: int = Field(default=1, gt=0)
-    on_rate_limit_hr: int = Field(default=4, gt=0)
-    on_no_quota_hr: int = Field(default=4, gt=0)
+    on_success_hr: int = Field(default=24, gt=0)
+    on_rate_limit_hr: int = Field(default=1, gt=0)
+    on_no_quota_hr: int = Field(default=6, gt=0)
 
     # --- Intervals in Days (for long-term, persistent errors) ---
     on_invalid_key_days: int = Field(default=10, gt=0)
@@ -207,12 +225,10 @@ class HealthPolicyConfig(BaseModel):
     amnesty_threshold_days: float = Field(default=2.0, gt=0)
 
     # --- Batching Configuration (for controlling check request throughput) ---
-    # How many keys to check in a single batch for this provider.
-    batch_size: int = Field(default=30, gt=0)
-    # Delay in seconds between batches to avoid overwhelming the API.
-    batch_delay_sec: int = Field(default=15, ge=0)
     # Adaptive batch controller configuration. Uses default_factory to ensure
     # a valid config always exists even if the user omits the section.
+    # Стартовые значения batch_size и batch_delay теперь находятся внутри
+    # AdaptiveBatchingConfig (start_batch_size, start_batch_delay_sec).
     adaptive_batching: AdaptiveBatchingConfig = Field(
         default_factory=AdaptiveBatchingConfig
     )
@@ -276,13 +292,13 @@ class TimeoutConfig(BaseModel):
     """
 
     # Timeout for establishing a connection.
-    connect: float = Field(default=5.0, gt=0)
+    connect: float = Field(default=15.0, gt=0)
     # Timeout for waiting for a chunk of the response.
-    read: float = Field(default=20.0, gt=0)
+    read: float = Field(default=300.0, gt=0)
     # Timeout for sending a chunk of the request.
-    write: float = Field(default=10.0, gt=0)
+    write: float = Field(default=35.0, gt=0)
     # Timeout for acquiring a connection from the connection pool.
-    pool: float = Field(default=5.0, gt=0)
+    pool: float = Field(default=35.0, gt=0)
 
 
 class ErrorParsingRule(BaseModel):
@@ -401,6 +417,27 @@ class ProviderConfig(BaseModel):
 # that are not specific to any single provider.
 
 
+class DatabaseRetryConfig(BaseModel):
+    """
+    Настройки retry для transient-ошибок базы данных.
+
+    Определяет политику повторных попыток при временных сбоях соединения с БД
+    (разрыв соединения, ошибка протокола, исчерпание пула, deadlock).
+    """
+
+    # Максимальное число попыток (включая первую). Ограничено 10 для предотвращения
+    # бесконечного retry.
+    max_attempts: int = Field(default=3, gt=0, le=10)
+    # Базовая задержка перед первой повторной попыткой (секунды).
+    base_delay_sec: float = Field(default=1.0, gt=0)
+    # Множитель для экспоненциального backoff: delay = base * factor^(attempt).
+    # Значение 1.0 даёт линейный backoff.
+    backoff_factor: float = Field(default=2.0, ge=1.0)
+    # Добавляет случайный множитель [0.5, 1.5] к задержке для предотвращения
+    # thundering herd при одновременном восстановлении нескольких операций.
+    jitter: bool = True
+
+
 class DatabaseConfig(BaseModel):
     """
     Configuration for the PostgreSQL database connection.
@@ -412,6 +449,8 @@ class DatabaseConfig(BaseModel):
     # This should be loaded from an environment variable, e.g., "${DB_PASSWORD}".
     password: str = ""
     dbname: str = "llmgateway"
+    # Настройки retry для transient-ошибок БД.
+    retry: DatabaseRetryConfig = Field(default_factory=DatabaseRetryConfig)
 
     def to_dsn(self) -> str:
         """

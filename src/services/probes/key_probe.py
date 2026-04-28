@@ -12,6 +12,7 @@ from src.config.schemas import HealthPolicyConfig
 from src.core.constants import ALL_MODELS_MARKER, ErrorReason
 from src.core.models import CheckResult
 from src.core.probes import IResourceProbe
+from src.core.retry import AsyncRetrier
 from src.db.database import KeyToCheck
 from src.providers import get_provider
 
@@ -25,14 +26,34 @@ class KeyProbe(IResourceProbe):
     based on the key's failure history.
     """
 
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        """
+        Инициализация KeyProbe с retry-механизмом для transient-ошибок БД.
+
+        ``AsyncRetrier`` создаётся из конфигурации ``database.retry``,
+        доступной через ``accessor.get_database_config().retry``.
+        """
+        super().__init__(*args, **kwargs)
+        db_config = self.accessor.get_database_config()
+        self._db_retrier = AsyncRetrier(
+            max_attempts=db_config.retry.max_attempts,
+            base_delay_sec=db_config.retry.base_delay_sec,
+            backoff_factor=db_config.retry.backoff_factor,
+            jitter=db_config.retry.jitter,
+        )
+
     async def _get_resources_to_check(self) -> list[KeyToCheck]:
         """
         Fetches key-model pairs due for a health check from the database.
         This method relies on the repository to return the `failing_since` timestamp
         for each resource that has previously failed.
+
+        Вызов БД обёрнут в ``self._db_retrier.execute`` для защиты от transient-ошибок.
         """
         enabled_providers = list(self.accessor.get_enabled_providers().keys())
-        return await self.db_manager.keys.get_keys_to_check(enabled_providers)
+        return await self._db_retrier.execute(
+            lambda: self.db_manager.keys.get_keys_to_check(enabled_providers)
+        )
 
     async def _check_resource(self, resource: dict[str, Any]) -> CheckResult:
         """
@@ -184,12 +205,14 @@ class KeyProbe(IResourceProbe):
             logger.warning(
                 f"Applying fallback update for key ID {key_id}: next_check_time = {fallback_next_check}"
             )
-            await self.db_manager.keys.update_status(
-                key_id=key_id,
-                model_name=model_name,
-                provider_name=provider_name,
-                result=result,
-                next_check_time=fallback_next_check,
+            await self._db_retrier.execute(
+                lambda: self.db_manager.keys.update_status(
+                    key_id=key_id,
+                    model_name=model_name,
+                    provider_name=provider_name,
+                    result=result,
+                    next_check_time=fallback_next_check,
+                )
             )
             return
 
@@ -226,13 +249,15 @@ class KeyProbe(IResourceProbe):
         # Format the model name for logging
         formatted_model = "shared" if model_name == ALL_MODELS_MARKER else model_name
 
-        # Update the database first
-        await self.db_manager.keys.update_status(
-            key_id=key_id,
-            model_name=model_name,  # Use original model_name (could be ALL_MODELS_MARKER)
-            provider_name=provider_name,
-            result=result,
-            next_check_time=next_check_time,
+        # Update the database first (wrapped in retry for transient DB errors)
+        await self._db_retrier.execute(
+            lambda: self.db_manager.keys.update_status(
+                key_id=key_id,
+                model_name=model_name,  # Use original model_name (could be ALL_MODELS_MARKER)
+                provider_name=provider_name,
+                result=result,
+                next_check_time=next_check_time,
+            )
         )
 
         # Log after a successful DB update to ensure consistency

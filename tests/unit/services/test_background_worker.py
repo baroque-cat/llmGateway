@@ -2,7 +2,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.config.schemas import HealthPolicyConfig, ProviderConfig
+from src.config.schemas import (
+    DatabaseConfig,
+    DatabaseRetryConfig,
+    HealthPolicyConfig,
+    ProviderConfig,
+)
 from src.core.constants import ErrorReason
 from src.core.models import CheckResult
 from src.services.probes.key_probe import KeyProbe
@@ -30,6 +35,15 @@ def mock_accessor():
     )
     # Mock worker concurrency for semaphore init
     accessor.get_worker_concurrency.return_value = 10
+    # KeyProbe.__init__ now calls accessor.get_database_config().retry
+    accessor.get_database_config.return_value = DatabaseConfig(
+        retry=DatabaseRetryConfig(
+            max_attempts=3,
+            base_delay_sec=0.01,
+            backoff_factor=1.0,
+            jitter=False,
+        )
+    )
     return accessor
 
 
