@@ -115,17 +115,26 @@ CREATE INDEX IF NOT EXISTS idx_key_status_gateway_lookup ON key_model_status(sta
 # --- Component 1: Connection Management ---
 
 
-async def init_db_pool(dsn: str) -> None:
+async def init_db_pool(dsn: str, min_size: int = 1, max_size: int = 15) -> None:
     """
-    Initializes the asynchronous connection pool to the PostgreSQL database.
-    This should be called once when the application starts.
+    Initializes an async connection pool to PostgreSQL.
+
+    Args:
+        dsn: Database connection string.
+        min_size: Minimum pool size (default 1).
+        max_size: Maximum pool size (default 15).
+
+    Raises:
+        Exception: If pool initialization fails.
     """
     global _db_pool
     if _db_pool:
         logger.warning("Database pool already initialized.")
         return
     try:
-        _db_pool = await asyncpg.create_pool(dsn=dsn, min_size=5, max_size=20)
+        _db_pool = await asyncpg.create_pool(
+            dsn=dsn, min_size=min_size, max_size=max_size
+        )
         logger.info("Database connection pool initialized successfully.")
     except Exception as e:
         logger.critical(

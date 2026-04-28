@@ -28,10 +28,10 @@ class KeyProbe(IResourceProbe):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         """
-        Инициализация KeyProbe с retry-механизмом для transient-ошибок БД.
+        Initialize KeyProbe with retry mechanism for transient DB errors.
 
-        ``AsyncRetrier`` создаётся из конфигурации ``database.retry``,
-        доступной через ``accessor.get_database_config().retry``.
+        ``AsyncRetrier`` is created from ``database.retry`` config,
+        accessible via ``accessor.get_database_config().retry``.
         """
         super().__init__(*args, **kwargs)
         db_config = self.accessor.get_database_config()
@@ -48,7 +48,7 @@ class KeyProbe(IResourceProbe):
         This method relies on the repository to return the `failing_since` timestamp
         for each resource that has previously failed.
 
-        Вызов БД обёрнут в ``self._db_retrier.execute`` для защиты от transient-ошибок.
+        The DB call is wrapped in ``self._db_retrier.execute`` for protection against transient errors.
         """
         enabled_providers = list(self.accessor.get_enabled_providers().keys())
         return await self._db_retrier.execute(

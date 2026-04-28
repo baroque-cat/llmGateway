@@ -49,7 +49,7 @@ def _make_non_retryable_db_exc(msg: str = "invalid password"):
 
 
 class TestUTE01:
-    """UT-E01: Операция успешна на первой попытке — результат возвращён без retry."""
+    """UT-E01: Operation succeeds on first attempt — result returned without retry."""
 
     @pytest.mark.asyncio
     async def test_success_on_first_attempt(self):
@@ -69,7 +69,7 @@ class TestUTE01:
 
 
 class TestUTE02:
-    """UT-E02: Операция успешна после transient-ошибки (1 retry)."""
+    """UT-E02: Operation succeeds after transient error (1 retry)."""
 
     @pytest.mark.asyncio
     async def test_success_after_one_transient_error(self):
@@ -91,7 +91,7 @@ class TestUTE02:
 
 
 class TestUTE03:
-    """UT-E03: Все попытки исчерпаны — последний exception re-raised."""
+    """UT-E03: All attempts exhausted — last exception re-raised."""
 
     @pytest.mark.asyncio
     async def test_all_attempts_exhausted(self):
@@ -115,7 +115,7 @@ class TestUTE03:
 
 
 class TestUTE04:
-    """UT-E04: Non-retryable exception не ретраится — сразу re-raised."""
+    """UT-E04: Non-retryable exception is not retried — immediately re-raised."""
 
     @pytest.mark.asyncio
     async def test_non_retryable_not_retried(self):
@@ -135,7 +135,7 @@ class TestUTE04:
 
 
 class TestUTE05:
-    """UT-E05: InvalidPasswordError не ретраится."""
+    """UT-E05: InvalidPasswordError is not retried."""
 
     @pytest.mark.asyncio
     async def test_invalid_password_not_retried(self):
@@ -156,7 +156,7 @@ class TestUTE05:
 
 
 class TestUTE06:
-    """UT-E06: Exponential backoff без jitter — точные задержки."""
+    """UT-E06: Exponential backoff without jitter — exact delays."""
 
     @pytest.mark.asyncio
     async def test_exact_delays_without_jitter(self):
@@ -190,7 +190,7 @@ class TestUTE06:
 
 
 class TestUTE07:
-    """UT-E07: Jitter умножает задержку на random(0.5, 1.5)."""
+    """UT-E07: Jitter multiplies delay by random(0.5, 1.5)."""
 
     @pytest.mark.asyncio
     async def test_jitter_applies_random_multiplier(self):
@@ -227,7 +227,7 @@ class TestUTE07:
 
 
 class TestUTE08:
-    """UT-E08: max_attempts=1 — retry не происходит."""
+    """UT-E08: max_attempts=1 — retry does not happen."""
 
     @pytest.mark.asyncio
     async def test_no_retry_with_single_attempt(self):
@@ -248,7 +248,7 @@ class TestUTE08:
 
 
 class TestUTE09:
-    """UT-E09: Coroutine factory пересоздаётся на каждой попытке."""
+    """UT-E09: Coroutine factory is recreated on each attempt."""
 
     @pytest.mark.asyncio
     async def test_operation_called_multiple_times(self):
@@ -271,7 +271,7 @@ class TestUTE09:
 
 
 class TestUTE10:
-    """UT-E10: DB_RETRYABLE tuple содержит ровно 4 класса asyncpg."""
+    """UT-E10: DB_RETRYABLE tuple contains exactly 4 asyncpg classes."""
 
     def test_db_retryable_has_four_entries(self):
         """DB_RETRYABLE must contain exactly 4 exception classes."""
@@ -298,7 +298,7 @@ class TestUTE10:
 
 
 class TestUTF01:
-    """UT-F01: DatabaseRetryConfig дефолты."""
+    """UT-F01: DatabaseRetryConfig defaults."""
 
     def test_default_values(self):
         """Default DatabaseRetryConfig has expected values."""
@@ -315,7 +315,7 @@ class TestUTF01:
 
 
 class TestUTF02:
-    """UT-F02: max_attempts > 10 вызывает ValidationError."""
+    """UT-F02: max_attempts > 10 raises ValidationError."""
 
     def test_max_attempts_11_raises_validation_error(self):
         """max_attempts=11 exceeds le=10 constraint."""
@@ -334,7 +334,7 @@ class TestUTF02:
 
 
 class TestUTF03:
-    """UT-F03: max_attempts = 0 вызывает ValidationError."""
+    """UT-F03: max_attempts = 0 raises ValidationError."""
 
     def test_max_attempts_zero_raises_validation_error(self):
         """max_attempts=0 violates gt=0 constraint."""
@@ -353,7 +353,7 @@ class TestUTF03:
 
 
 class TestUTF04:
-    """UT-F04: base_delay_sec ≤ 0 вызывает ValidationError."""
+    """UT-F04: base_delay_sec ≤ 0 raises ValidationError."""
 
     def test_base_delay_sec_zero_raises_validation_error(self):
         """base_delay_sec=0 violates gt=0."""
@@ -372,7 +372,7 @@ class TestUTF04:
 
 
 class TestUTF05:
-    """UT-F05: backoff_factor < 1.0 вызывает ValidationError."""
+    """UT-F05: backoff_factor < 1.0 raises ValidationError."""
 
     def test_backoff_factor_0_5_raises_validation_error(self):
         """backoff_factor=0.5 violates ge=1.0."""
@@ -391,7 +391,7 @@ class TestUTF05:
 
 
 class TestUTF06:
-    """UT-F06: backoff_factor = 1.0 — валидно."""
+    """UT-F06: backoff_factor = 1.0 — valid."""
 
     def test_backoff_factor_one_is_valid(self):
         """backoff_factor=1.0 satisfies ge=1.0 constraint."""
@@ -405,7 +405,7 @@ class TestUTF06:
 
 
 class TestUTF07:
-    """UT-F07: DatabaseConfig.retry populated через default_factory."""
+    """UT-F07: DatabaseConfig.retry populated via default_factory."""
 
     def test_database_config_retry_is_retry_config_instance(self):
         """DatabaseConfig() automatically populates retry with DatabaseRetryConfig."""
@@ -434,7 +434,7 @@ class TestUTF07:
 
 
 class TestUTF08:
-    """UT-F08: YAML с database.retry.max_attempts: 5 — парсинг."""
+    """UT-F08: YAML with database.retry.max_attempts: 5 — parsing."""
 
     def test_yaml_parsing_max_attempts_5(self):
         """Config.model_validate parses nested database.retry.max_attempts: 5."""
@@ -457,7 +457,7 @@ class TestUTF08:
 
 
 class TestSEC01:
-    """SEC-01: AsyncRetrier не ретраит non-transient DB-ошибки."""
+    """SEC-01: AsyncRetrier does not retry non-transient DB errors."""
 
     @pytest.mark.asyncio
     async def test_postgres_error_not_retried(self):
@@ -490,7 +490,7 @@ class TestSEC01:
 
 
 class TestSEC02:
-    """SEC-02: max_attempts=10 — задержка не вызывает DoS."""
+    """SEC-02: max_attempts=10 — delay does not cause DoS."""
 
     def test_max_delay_is_bounded(self):
         """Even with max_attempts=10, the maximum delay stays bounded."""
@@ -526,7 +526,7 @@ class TestSEC02:
 
 
 class TestSEC03:
-    """SEC-03: DB_RETRYABLE — фиксированный, не конфигурируемый через YAML."""
+    """SEC-03: DB_RETRYABLE — fixed, not configurable via YAML."""
 
     def test_db_retryable_not_in_schema(self):
         """DatabaseRetryConfig does not have a 'retryable' field."""
@@ -552,7 +552,7 @@ class TestSEC03:
 
 
 class TestSEC05:
-    """SEC-05: DatabaseRetryConfig.max_attempts ограничен le=10."""
+    """SEC-05: DatabaseRetryConfig.max_attempts limited to le=10."""
 
     def test_field_constraint_le_10(self):
         """The max_attempts Field has le=10 constraint."""
@@ -589,7 +589,7 @@ class TestSEC05:
 
 
 class TestSEC07:
-    """SEC-07: Логирование retry на WARNING, исчерпание на ERROR."""
+    """SEC-07: Retry logged at WARNING, exhaustion at ERROR."""
 
     @pytest.mark.asyncio
     async def test_retry_logs_warning(self, caplog):
@@ -649,7 +649,7 @@ class TestSEC07:
 
 
 class TestSEC08:
-    """SEC-08: src/core/retry.py не импортирует из src.services."""
+    """SEC-08: src/core/retry.py does not import from src.services."""
 
     def test_no_services_import(self):
         """The retry module must not import anything from src.services."""

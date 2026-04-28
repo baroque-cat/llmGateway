@@ -10,12 +10,23 @@ def get_default_config() -> dict[str, Any]:
     The structure is updated to reflect the new multimodal model configuration.
     """
     return {
-        # --- GLOBAL SETTINGS ---
+        # --- LOGGING SETTINGS ---
+        "logging": {
+            "level": "INFO",
+        },
+        # The metrics accessor key belongs here in the future when added.
+        # --- GATEWAY SETTINGS ---
+        "gateway": {
+            "host": "0.0.0.0",
+            "port": 55300,
+            "workers": 4,
+        },
         # --- WORKER SETTINGS ---
         "worker": {
             # Concurrency limit for the background worker's probes.
             "max_concurrent_providers": 10,
         },
+        # --- DATABASE SETTINGS ---
         "database": {
             "host": "localhost",
             "port": 5432,
@@ -25,6 +36,11 @@ def get_default_config() -> dict[str, Any]:
             # DB_PASSWORD="your_super_secret_password"
             "password": "${DB_PASSWORD}",
             "dbname": "llmgateway",
+            # Connection pool settings for asyncpg.
+            "pool": {
+                "min_size": 1,
+                "max_size": 15,
+            },
             # Retry policy for transient database errors
             "retry": {
                 "max_attempts": 3,
@@ -32,9 +48,6 @@ def get_default_config() -> dict[str, Any]:
                 "backoff_factor": 2.0,
                 "jitter": True,
             },
-        },
-        "logging": {
-            "level": "INFO",
         },
         # --- PROVIDER-SPECIFIC SETTINGS ---
         # This section serves as a generic template for any new provider instance.
@@ -85,15 +98,15 @@ def get_default_config() -> dict[str, Any]:
                     # Batching Configuration
                     # Adaptive Batching — self-tuning controller (all optional)
                     "adaptive_batching": {
-                        # Стартовые значения (перенесены из HealthPolicyConfig)
+                        # Start values (moved from HealthPolicyConfig)
                         "start_batch_size": 10,
                         "start_batch_delay_sec": 30.0,
-                        # Границы
+                        # Boundaries
                         "min_batch_size": 5,
                         "max_batch_size": 50,
                         "min_batch_delay_sec": 3.0,
                         "max_batch_delay_sec": 120.0,
-                        # Шаги
+                        # Steps
                         "batch_size_step": 5,
                         "delay_step_sec": 2.0,
                         "rate_limit_divisor": 2,

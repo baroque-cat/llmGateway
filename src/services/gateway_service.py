@@ -758,7 +758,7 @@ async def _handle_buffered_request(
         try:
             response_body = await upstream_response.aread()
         except Exception:
-            # Поток закрыт оптимизатором провайдера (StreamClosed)
+            # Stream closed by provider optimizer (StreamClosed)
             response_body = f'{{"error": "Upstream error: {check_result.message or check_result.error_reason.value}"}}'.encode()
         finally:
             await upstream_response.aclose()
@@ -1175,7 +1175,10 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
             logger.info("[Gateway Startup] Analysis complete.")
 
             dsn = accessor.get_database_dsn()
-            await database.init_db_pool(dsn)
+            pool_cfg = accessor.get_pool_config()
+            await database.init_db_pool(
+                dsn, min_size=pool_cfg.min_size, max_size=pool_cfg.max_size
+            )
 
             # Wait for the Worker to finish initializing the database schema.
             db_manager_for_wait = DatabaseManager(accessor)

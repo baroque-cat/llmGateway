@@ -18,35 +18,35 @@ logger = logging.getLogger(__name__)
 
 # --- Adaptive batch controller metrics (module-level, updated by probes) ---
 
-# Gauge — текущий размер батча на провайдер
+# Gauge — current batch size per provider
 _adaptive_batch_size_gauge = Gauge(
     "llm_gateway_adaptive_batch_size",
     "Current adaptive batch size per provider",
     labelnames=["provider"],
 )
 
-# Gauge — текущая задержка между батчами на провайдер
+# Gauge — current delay between batches per provider
 _adaptive_batch_delay_gauge = Gauge(
     "llm_gateway_adaptive_batch_delay",
     "Current adaptive batch delay in seconds per provider",
     labelnames=["provider"],
 )
 
-# Gauge — срабатываний агрессивного отката (rate-limit detection)
+# Gauge — aggressive backoff events (rate-limit detection)
 _adaptive_rate_limit_gauge = Gauge(
     "llm_gateway_adaptive_rate_limit_events_total",
     "Total number of aggressive (rate-limit) backoff events per provider",
     labelnames=["provider"],
 )
 
-# Gauge — срабатываний умеренного отката (transient > threshold)
+# Gauge — moderate backoff events (transient > threshold)
 _adaptive_backoff_gauge = Gauge(
     "llm_gateway_adaptive_backoff_events_total",
     "Total number of moderate (transient-threshold) backoff events per provider",
     labelnames=["provider"],
 )
 
-# Gauge — срабатываний ramp-up (recovery events)
+# Gauge — ramp-up events (recovery events)
 _adaptive_recovery_gauge = Gauge(
     "llm_gateway_adaptive_recovery_events_total",
     "Total number of recovery (ramp-up) events per provider",

@@ -10,7 +10,7 @@ RUN uv sync --frozen --no-dev --no-install-project
 
 ENV PATH="/app/.venv/bin:$PATH"
 
-# 5. Копируем исходники
+# 5. Copy source code
 COPY src/ ./src/
 COPY main.py .
 

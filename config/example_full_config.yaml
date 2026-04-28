@@ -2,6 +2,29 @@
 # This configuration file is a comprehensive reference showing all available settings.
 # Copy this file to 'config/providers.yaml' and edit it to suit your needs.
 
+# --- LOGGING SETTINGS ---
+# (Application logging only - statistics are now handled by Prometheus metrics)
+logging:
+  # The global log level for the application. Can be "DEBUG", "INFO", "WARNING", "ERROR".
+  level: "INFO"
+
+# --- METRICS SETTINGS ---
+metrics:
+  # Enable or disable the /metrics endpoint for Prometheus
+  enabled: true
+  # Bearer token required to access the /metrics endpoint
+  # Set to empty string to disable metrics endpoint even if enabled=true
+  access_token: "${METRICS_ACCESS_TOKEN}"
+
+# --- GATEWAY SETTINGS ---
+gateway:
+  # Host to bind the API Gateway server to.
+  host: "0.0.0.0"
+  # Port to bind the API Gateway server to.
+  port: 55300
+  # Number of Uvicorn worker processes.
+  workers: 4
+
 # --- WORKER SETTINGS ---
 worker:
   # Concurrency limit for the background worker's probes.
@@ -16,6 +39,10 @@ database:
   user: "${DB_USER}"
   password: "${DB_PASSWORD}"
   dbname: "${DB_NAME}"
+  # Connection pool settings for asyncpg.
+  pool:
+    min_size: 1          # Minimum connections in the pool
+    max_size: 15         # Maximum connections in the pool
   # Retry policy for transient database errors (connection lost, deadlock, etc.).
   # The background worker will automatically retry DB operations on these errors.
   retry:
@@ -23,20 +50,6 @@ database:
     base_delay_sec: 1.0      # Delay before first retry in seconds
     backoff_factor: 2.0      # Exponential backoff multiplier (>= 1.0)
     jitter: true             # Add random ±50% jitter to prevent thundering herd
-
-# --- LOGGING SETTINGS ---
-# (Application logging only - statistics are now handled by Prometheus metrics)
-logging:
-  # The global log level for the application. Can be "DEBUG", "INFO", "WARNING", "ERROR".
-  level: "INFO"
-
-# --- METRICS SETTINGS ---
-metrics:
-  # Enable or disable the /metrics endpoint for Prometheus
-  enabled: true
-  # Bearer token required to access the /metrics endpoint
-  # Set to empty string to disable metrics endpoint even if enabled=true
-  access_token: "${METRICS_ACCESS_TOKEN}"
 
 # --- PROVIDER SETTINGS ---
 providers:

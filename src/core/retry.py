@@ -1,12 +1,11 @@
 """
-Утилита для повторных попыток выполнения операций с базой данных.
+Utility for retrying database operations.
 
-Предоставляет класс ``AsyncRetrier``, который оборачивает асинхронные
-DB-операции и автоматически повторяет их при transient-ошибках соединения
-(разрыв соединения, ошибка протокола, исчерпание пула, deadlock).
+Provides the ``AsyncRetrier`` class, which wraps async DB operations and
+automatically retries them on transient connection errors (connection drop,
+protocol error, pool exhaustion, deadlock).
 
-Использует экспоненциальный backoff с опциональным jitter для предотвращения
-thundering herd.
+Uses exponential backoff with optional jitter to prevent thundering herd.
 """
 
 import asyncio
@@ -28,9 +27,9 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 if _has_asyncpg:
-    # Набор transient-исключений asyncpg, которые имеет смысл ретраить.
-    # Фиксированный tuple — не конфигурируется через YAML, чтобы пользователь
-    # не зависел от знания внутренних классов драйвера.
+    # Set of transient asyncpg exceptions worth retrying.
+    # Fixed tuple — not configurable via YAML so users don't need
+    # to know about internal driver classes.
     _db_retryable = (
         asyncpg.exceptions.ConnectionDoesNotExistError,  # type: ignore[union-attr]
         asyncpg.exceptions.InterfaceError,  # type: ignore[union-attr]
@@ -44,11 +43,11 @@ DB_RETRYABLE: tuple[type[Exception], ...] = _db_retryable
 
 
 def _safe_exc_str(exc: Exception) -> str:
-    """Безопасное строковое представление исключения.
+    """Safe string representation of an exception.
 
-    Некоторые исключения asyncpg могут не иметь ``args[0]``,
-    и вызов ``str(exc)`` или форматирование через ``%s`` упадёт
-    с ``IndexError``.
+    Some asyncpg exceptions may not have ``args[0]``,
+    and calling ``str(exc)`` or formatting via ``%s`` will fail
+    with ``IndexError``.
     """
     try:
         return str(exc)
@@ -58,13 +57,13 @@ def _safe_exc_str(exc: Exception) -> str:
 
 class AsyncRetrier:
     """
-    Асинхронный retry-механизм для операций с базой данных.
+    Async retry mechanism for database operations.
 
-    Создаётся с конфигурацией из ``DatabaseRetryConfig`` и внедряется
-    в ``KeyProbe`` через конструктор (Dependency Injection).
+    Created with configuration from ``DatabaseRetryConfig`` and injected
+    into ``KeyProbe`` via constructor (Dependency Injection).
 
-    Каждая повторная попытка логируется на уровне WARNING; при исчерпании
-    всех попыток — ERROR.
+    Each retry attempt is logged at WARNING level; when all attempts
+    are exhausted — ERROR.
     """
 
     def __init__(
@@ -76,17 +75,17 @@ class AsyncRetrier:
         retryable: tuple[type[Exception], ...] = DB_RETRYABLE,
     ) -> None:
         """
-        Инициализация retry-механизма.
+        Initialize the retry mechanism.
 
         Args:
-            max_attempts: Максимальное число попыток (включая первую).
-                Ограничено schema-валидацией (1..10).
-            base_delay_sec: Базовая задержка перед первой повторной попыткой (сек).
-            backoff_factor: Множитель экспоненциального backoff.
+            max_attempts: Maximum number of attempts (including the first).
+                Limited by schema validation (1..10).
+            base_delay_sec: Base delay before the first retry (seconds).
+            backoff_factor: Multiplier for exponential backoff.
                 ``delay = base * factor^(attempt)``.
-            jitter: Добавлять ли случайный множитель [0.5, 1.5] к задержке.
-            retryable: Кортеж классов исключений, которые следует ретраить.
-                По умолчанию — ``DB_RETRYABLE`` (4 transient-класса asyncpg).
+            jitter: Whether to add a random multiplier [0.5, 1.5] to the delay.
+            retryable: Tuple of exception classes that should be retried.
+                Default is ``DB_RETRYABLE`` (4 transient asyncpg classes).
         """
         self._max_attempts = max_attempts
         self._base_delay_sec = base_delay_sec
@@ -96,19 +95,19 @@ class AsyncRetrier:
 
     async def execute(self, operation: Callable[[], Awaitable[T]]) -> T:
         """
-        Выполнить операцию с автоматическими повторными попытками.
+        Execute an operation with automatic retries.
 
         Args:
-            operation: Фабрика корутин (``Callable[[], Awaitable[T]]``).
-                Вызывается заново на каждой попытке, так как asyncio coroutine
-                может быть awaited только один раз.
+            operation: Coroutine factory (``Callable[[], Awaitable[T]]``).
+                Called anew on each attempt, since an asyncio coroutine
+                can only be awaited once.
 
         Returns:
-            Результат выполнения операции (тип T).
+            Result of the operation (type T).
 
         Raises:
-            Последнее исключение после исчерпания всех попыток.
-            Non-retryable исключения пробрасываются сразу без retry.
+            The last exception after all attempts are exhausted.
+            Non-retryable exceptions are re-raised immediately without retry.
         """
         last_exception: Exception | None = None
 
@@ -118,7 +117,7 @@ class AsyncRetrier:
             except Exception as exc:
                 last_exception = exc
 
-                # Non-retryable исключения пробрасываем сразу
+                # Non-retryable exceptions are re-raised immediately
                 if not isinstance(exc, self._retryable):
                     logger.error(
                         "DB operation failed with non-retryable error: %s(%s)",
@@ -147,24 +146,24 @@ class AsyncRetrier:
                 )
                 await asyncio.sleep(delay)
 
-        # Unreachable, но для mypy
+        # Unreachable, but keeps mypy happy
         if last_exception is not None:
             raise last_exception
         raise RuntimeError("AsyncRetrier.execute: unreachable state")
 
     def _compute_delay(self, attempt: int) -> float:
         """
-        Вычислить задержку перед следующей попыткой.
+        Compute the delay before the next attempt.
 
-        Формула: ``base_delay_sec * backoff_factor^(attempt-1)``.
-        Если ``jitter=True``, результат умножается на случайный коэффициент
-        в диапазоне [0.5, 1.5].
+        Formula: ``base_delay_sec * backoff_factor^(attempt-1)``.
+        If ``jitter=True``, the result is multiplied by a random factor
+        in range [0.5, 1.5].
 
         Args:
-            attempt: Номер текущей (неудачной) попытки (1-based).
+            attempt: Current (failed) attempt number (1-based).
 
         Returns:
-            Задержка в секундах (float).
+            Delay in seconds (float).
         """
         delay = self._base_delay_sec * (self._backoff_factor ** (attempt - 1))
         if self._jitter:

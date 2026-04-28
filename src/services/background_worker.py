@@ -179,7 +179,10 @@ async def run_worker() -> None:
 
         # Step 4: Initialize and Verify Database Connection.
         dsn = accessor.get_database_dsn()
-        await database.init_db_pool(dsn)
+        pool_cfg = accessor.get_pool_config()
+        await database.init_db_pool(
+            dsn, min_size=pool_cfg.min_size, max_size=pool_cfg.max_size
+        )
         db_manager = DatabaseManager(accessor)
         await db_manager.initialize_schema()
 

@@ -33,8 +33,8 @@ class CheckResult:
     """
     Represents the outcome of an API health check or a proxied request attempt.
 
-    This structured object is used by both the background worker ("Хранитель") for
-    health probing and the API gateway ("Проводник") for evaluating the result of
+    This structured object is used by both the background worker ("Keeper") for
+    health probing and the API gateway ("Conductor") for evaluating the result of
     a live request. It provides detailed context, including success status,
     error information, and performance metrics, replacing simple boolean returns.
     """

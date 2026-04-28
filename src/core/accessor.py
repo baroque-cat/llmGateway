@@ -7,6 +7,8 @@
 from src.config.schemas import (
     Config,
     DatabaseConfig,
+    DatabasePoolConfig,
+    GatewayConfig,
     HealthPolicyConfig,
     LoggingConfig,
     MetricsConfig,
@@ -205,3 +207,27 @@ class ConfigAccessor:
         if provider and provider.default_model:
             return provider.models.get(provider.default_model)
         return None
+
+    # --- Step 5: Gateway and Pool Configuration Accessors ---
+    # These methods provide access to the new GatewayConfig and DatabasePoolConfig
+    # sections introduced in the gateway-pool-config change.
+
+    def get_gateway_config(self) -> GatewayConfig:
+        """Returns the full gateway configuration (host, port, workers)."""
+        return self._config.gateway
+
+    def get_gateway_host(self) -> str:
+        """Returns the host the gateway listens on."""
+        return self._config.gateway.host
+
+    def get_gateway_port(self) -> int:
+        """Returns the port the gateway listens on."""
+        return self._config.gateway.port
+
+    def get_gateway_workers(self) -> int:
+        """Returns the number of uvicorn worker processes."""
+        return self._config.gateway.workers
+
+    def get_pool_config(self) -> DatabasePoolConfig:
+        """Returns the PostgreSQL connection pool config (min_size, max_size)."""
+        return self._config.database.pool

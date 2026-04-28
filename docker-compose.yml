@@ -28,12 +28,6 @@ services:
         "python",
         "main.py",
         "gateway",
-        "--host",
-        "0.0.0.0",
-        "--port",
-        "55300",
-        "--workers",
-        "1",
       ]
     restart: unless-stopped
     ports:

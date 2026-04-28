@@ -13,15 +13,15 @@ from src.core.models import CheckResult
 
 class AdaptiveBatchController:
     """
-    Синхронный контроллер с самонастройкой batch_size и batch_delay.
+    Synchronous self-tuning controller for batch_size and batch_delay.
 
-    Контроллер управляет пропускной способностью цикла проверки одного
-    провайдера, подстраивая ``batch_size`` (сколько ключей проверяется
-    параллельно) и ``batch_delay`` (пауза между батчами) на основе
-    классификации результатов только что завершённого батча.
+    The controller manages the throughput of a single provider's check cycle,
+    adjusting ``batch_size`` (how many keys are checked in parallel) and
+    ``batch_delay`` (pause between batches) based on classification results
+    of the just-completed batch.
 
-    Стартовые значения читаются из ``config.start_batch_size`` и
-    ``config.start_batch_delay_sec`` (обрезаются по границам).
+    Start values are read from ``config.start_batch_size`` and
+    ``config.start_batch_delay_sec`` (clamped to boundary limits).
     """
 
     def __init__(
@@ -29,16 +29,16 @@ class AdaptiveBatchController:
         config: AdaptiveBatchingConfig,
     ) -> None:
         """
-        Инициализация контроллера.
+        Initialize the controller.
 
-        Начальные значения ``batch_size`` и ``batch_delay`` берутся из
-        ``config.start_batch_size`` и ``config.start_batch_delay_sec``,
-        обрезаются по границам ``[min_batch_size, max_batch_size]`` и
+        Initial values for ``batch_size`` and ``batch_delay`` are taken from
+        ``config.start_batch_size`` and ``config.start_batch_delay_sec``,
+        clamped to boundaries ``[min_batch_size, max_batch_size]`` and
         ``[min_batch_delay_sec, max_batch_delay_sec]``.
 
         Args:
-            config: Валидированная конфигурация адаптивного батчинга,
-                включающая стартовые значения и границы.
+            config: Validated adaptive batching configuration,
+                including start values and boundaries.
         """
         self._config = config
         self._batch_size = max(

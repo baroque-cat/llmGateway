@@ -130,8 +130,8 @@ class AdaptiveBatchingConfig(BaseModel):
        doubles for faster recovery.
     """
 
-    # Стартовые значения для адаптивного контроллера (перенесены из HealthPolicyConfig).
-    # Контроллер начинает с этих значений и подстраивает их в границах [min, max].
+    # Start values for the adaptive controller (moved from HealthPolicyConfig).
+    # The controller begins with these values and adjusts them within [min, max] bounds.
     start_batch_size: int = Field(default=30, gt=0)
     start_batch_delay_sec: float = Field(default=15.0, ge=0)
 
@@ -227,7 +227,7 @@ class HealthPolicyConfig(BaseModel):
     # --- Batching Configuration (for controlling check request throughput) ---
     # Adaptive batch controller configuration. Uses default_factory to ensure
     # a valid config always exists even if the user omits the section.
-    # Стартовые значения batch_size и batch_delay теперь находятся внутри
+    # Start values for batch_size and batch_delay now live inside
     # AdaptiveBatchingConfig (start_batch_size, start_batch_delay_sec).
     adaptive_batching: AdaptiveBatchingConfig = Field(
         default_factory=AdaptiveBatchingConfig
@@ -419,23 +419,46 @@ class ProviderConfig(BaseModel):
 
 class DatabaseRetryConfig(BaseModel):
     """
-    Настройки retry для transient-ошибок базы данных.
+    Retry settings for transient database errors.
 
-    Определяет политику повторных попыток при временных сбоях соединения с БД
-    (разрыв соединения, ошибка протокола, исчерпание пула, deadlock).
+    Defines the retry policy for temporary DB connection failures
+    (connection drop, protocol error, pool exhaustion, deadlock).
     """
 
-    # Максимальное число попыток (включая первую). Ограничено 10 для предотвращения
-    # бесконечного retry.
+    # Maximum number of attempts (including the first). Capped at 10 to prevent
+    # infinite retry.
     max_attempts: int = Field(default=3, gt=0, le=10)
-    # Базовая задержка перед первой повторной попыткой (секунды).
+    # Base delay before the first retry attempt (seconds).
     base_delay_sec: float = Field(default=1.0, gt=0)
-    # Множитель для экспоненциального backoff: delay = base * factor^(attempt).
-    # Значение 1.0 даёт линейный backoff.
+    # Multiplier for exponential backoff: delay = base * factor^(attempt).
+    # A value of 1.0 yields linear backoff.
     backoff_factor: float = Field(default=2.0, ge=1.0)
-    # Добавляет случайный множитель [0.5, 1.5] к задержке для предотвращения
-    # thundering herd при одновременном восстановлении нескольких операций.
+    # Adds a random multiplier [0.5, 1.5] to the delay to prevent
+    # thundering herd when multiple operations recover simultaneously.
     jitter: bool = True
+
+
+class DatabasePoolConfig(BaseModel):
+    """
+    PostgreSQL connection pool settings.
+
+    Defines the minimum and maximum size of the async connection pool
+    used by ``asyncpg.create_pool()``.
+    """
+
+    # Minimum number of connections in the pool.
+    min_size: int = Field(default=1, gt=0)
+    # Maximum number of connections in the pool.
+    max_size: int = Field(default=15, gt=0)
+
+    @model_validator(mode="after")
+    def check_bounds(self) -> "DatabasePoolConfig":
+        """Validate: minimum pool size must not exceed maximum."""
+        if self.min_size > self.max_size:
+            raise ValueError(
+                f"min_size ({self.min_size}) must be <= max_size ({self.max_size})"
+            )
+        return self
 
 
 class DatabaseConfig(BaseModel):
@@ -449,8 +472,10 @@ class DatabaseConfig(BaseModel):
     # This should be loaded from an environment variable, e.g., "${DB_PASSWORD}".
     password: str = ""
     dbname: str = "llmgateway"
-    # Настройки retry для transient-ошибок БД.
+    # Retry settings for transient DB errors.
     retry: DatabaseRetryConfig = Field(default_factory=DatabaseRetryConfig)
+    # PostgreSQL connection pool settings.
+    pool: DatabasePoolConfig = Field(default_factory=DatabasePoolConfig)
 
     def to_dsn(self) -> str:
         """
@@ -478,6 +503,25 @@ class LoggingConfig(BaseModel):
     level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
 
+class GatewayConfig(BaseModel):
+    """
+    API Gateway (Conductor) settings.
+
+    Defines the host, port, and number of uvicorn workers for the FastAPI application.
+    CLI arguments ``--host``, ``--port``, ``--workers`` override these values
+    if explicitly passed at startup.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Host the gateway listens on.
+    host: str = "0.0.0.0"
+    # Port the gateway listens on.
+    port: int = Field(default=55300, gt=0, lt=65536)
+    # Number of uvicorn worker processes.
+    workers: int = Field(default=4, gt=0, le=64)
+
+
 # ==============================================================================
 # 4. ROOT CONFIGURATION OBJECT
 # ==============================================================================
@@ -497,6 +541,7 @@ class Config(BaseModel):
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     worker: WorkerConfig = Field(default_factory=WorkerConfig)
     metrics: MetricsConfig = Field(default_factory=MetricsConfig)
+    gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     # A dictionary mapping the unique instance name to its full configuration.
     providers: dict[str, ProviderConfig] = Field(default_factory=dict)
 
