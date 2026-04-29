@@ -6,9 +6,8 @@ fixed ``batch_size`` / ``batch_delay_sec`` with a controller that adjusts
 throughput based on the results of each completed batch.
 """
 
-from src.config.schemas import AdaptiveBatchingConfig
 from src.core.constants import ErrorReason
-from src.core.models import CheckResult
+from src.core.models import AdaptiveBatchingParams, CheckResult
 
 
 class AdaptiveBatchController:
@@ -20,33 +19,33 @@ class AdaptiveBatchController:
     ``batch_delay`` (pause between batches) based on classification results
     of the just-completed batch.
 
-    Start values are read from ``config.start_batch_size`` and
-    ``config.start_batch_delay_sec`` (clamped to boundary limits).
+    Start values are read from ``params.start_batch_size`` and
+    ``params.start_batch_delay_sec`` (clamped to boundary limits).
     """
 
     def __init__(
         self,
-        config: AdaptiveBatchingConfig,
+        params: AdaptiveBatchingParams,
     ) -> None:
         """
         Initialize the controller.
 
         Initial values for ``batch_size`` and ``batch_delay`` are taken from
-        ``config.start_batch_size`` and ``config.start_batch_delay_sec``,
+        ``params.start_batch_size`` and ``params.start_batch_delay_sec``,
         clamped to boundaries ``[min_batch_size, max_batch_size]`` and
         ``[min_batch_delay_sec, max_batch_delay_sec]``.
 
         Args:
-            config: Validated adaptive batching configuration,
+            params: Pure dataclass with adaptive batching parameters,
                 including start values and boundaries.
         """
-        self._config = config
+        self._params = params
         self._batch_size = max(
-            config.min_batch_size, min(config.max_batch_size, config.start_batch_size)
+            params.min_batch_size, min(params.max_batch_size, params.start_batch_size)
         )
         self._batch_delay = max(
-            config.min_batch_delay_sec,
-            min(config.max_batch_delay_sec, config.start_batch_delay_sec),
+            params.min_batch_delay_sec,
+            min(params.max_batch_delay_sec, params.start_batch_delay_sec),
         )
         self._consecutive_successes = 0
 
@@ -109,12 +108,12 @@ class AdaptiveBatchController:
         # --- Priority 1: Rate-limited → aggressive backoff ---
         if rate_limited > 0:
             self._batch_size = max(
-                self._config.min_batch_size,
-                self._batch_size // self._config.rate_limit_divisor,
+                self._params.min_batch_size,
+                self._batch_size // self._params.rate_limit_divisor,
             )
             self._batch_delay = min(
-                self._config.max_batch_delay_sec,
-                self._batch_delay * self._config.rate_limit_delay_multiplier,
+                self._params.max_batch_delay_sec,
+                self._batch_delay * self._params.rate_limit_delay_multiplier,
             )
             self._consecutive_successes = 0
             self.rate_limit_events += 1
@@ -123,14 +122,14 @@ class AdaptiveBatchController:
         # --- Priority 2: Transient-error proportion > threshold → moderate backoff ---
         transient_rate = transient / non_fatal_total if non_fatal_total > 0 else 0.0
 
-        if transient_rate > self._config.failure_rate_threshold:
+        if transient_rate > self._params.failure_rate_threshold:
             self._batch_size = max(
-                self._config.min_batch_size,
-                self._batch_size - self._config.batch_size_step,
+                self._params.min_batch_size,
+                self._batch_size - self._params.batch_size_step,
             )
             self._batch_delay = min(
-                self._config.max_batch_delay_sec,
-                self._batch_delay + self._config.delay_step_sec,
+                self._params.max_batch_delay_sec,
+                self._batch_delay + self._params.delay_step_sec,
             )
             self._consecutive_successes = 0
             self.backoff_events += 1
@@ -139,17 +138,17 @@ class AdaptiveBatchController:
         # --- Priority 3: Success → ramp-up ---
         self._consecutive_successes += 1
         step_mult = (
-            self._config.recovery_step_multiplier
-            if self._consecutive_successes >= self._config.recovery_threshold
+            self._params.recovery_step_multiplier
+            if self._consecutive_successes >= self._params.recovery_threshold
             else 1.0
         )
 
         self._batch_size = min(
-            self._config.max_batch_size,
-            self._batch_size + int(self._config.batch_size_step * step_mult),
+            self._params.max_batch_size,
+            self._batch_size + int(self._params.batch_size_step * step_mult),
         )
         self._batch_delay = max(
-            self._config.min_batch_delay_sec,
-            self._batch_delay - self._config.delay_step_sec * step_mult,
+            self._params.min_batch_delay_sec,
+            self._batch_delay - self._params.delay_step_sec * step_mult,
         )
         self.recovery_events += 1

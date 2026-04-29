@@ -100,3 +100,42 @@ class CheckResult:
             "response_time": self.response_time,
             "status_code": self.status_code,
         }
+
+
+@dataclass(frozen=True)
+class AdaptiveBatchingParams:
+    """Pure data container for ``AdaptiveBatchController`` — no Pydantic dependency.
+
+    Contains all 13 fields needed by the adaptive batching algorithm.
+    Conversion from the Pydantic-based ``AdaptiveBatchingConfig`` happens at the
+    boundary via ``AdaptiveBatchingConfig.to_params()``.
+
+    Fields:
+        start_batch_size: Initial batch size when the controller is first created.
+        start_batch_delay_sec: Initial delay in seconds between batches.
+        min_batch_size: Minimum allowable batch size (hard floor).
+        max_batch_size: Maximum allowable batch size (hard ceiling).
+        min_batch_delay_sec: Minimum allowable delay in seconds.
+        max_batch_delay_sec: Maximum allowable delay in seconds.
+        batch_size_step: Additive step for batch size adjustments.
+        delay_step_sec: Additive step for delay adjustments (seconds).
+        rate_limit_divisor: Divisor applied to batch size on rate-limit backoff.
+        rate_limit_delay_multiplier: Multiplier applied to delay on rate-limit.
+        recovery_threshold: Consecutive successes needed for accelerated recovery.
+        recovery_step_multiplier: Step multiplier during accelerated recovery.
+        failure_rate_threshold: Transient-error rate triggering moderate backoff.
+    """
+
+    start_batch_size: int
+    start_batch_delay_sec: float
+    min_batch_size: int
+    max_batch_size: int
+    min_batch_delay_sec: float
+    max_batch_delay_sec: float
+    batch_size_step: int
+    delay_step_sec: float
+    rate_limit_divisor: int
+    rate_limit_delay_multiplier: float
+    recovery_threshold: int
+    recovery_step_multiplier: float
+    failure_rate_threshold: float

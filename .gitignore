@@ -17,10 +17,10 @@ poetry.toml
 
 #tmp
 logs/*
-data/*
 
-keys/*
-!keys/.gitkeep
+
+data/*
+!data/.gitkeep
 config/*
 !config/example_minimal_config.yaml
 !config/example_full_config.yaml

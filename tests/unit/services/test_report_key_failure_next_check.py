@@ -29,26 +29,22 @@ from src.core.policy_utils import compute_next_check_time
 class TestComputeNextCheckTime:
     """Verify that compute_next_check_time returns the correct timedelta for each ErrorReason."""
 
-    def _make_policy(self, **overrides: int) -> HealthPolicyConfig:
-        """Create a HealthPolicyConfig with optional field overrides."""
-        defaults = {
-            "on_server_error_min": 30,
-            "on_overload_min": 30,
-            "on_other_error_hr": 1,
-            "on_success_hr": 24,
-            "on_rate_limit_hr": 1,
-            "on_no_quota_hr": 6,
-            "on_invalid_key_days": 10,
-            "on_no_access_days": 10,
-        }
-        defaults.update(overrides)
-        return HealthPolicyConfig(**defaults)
+    # Default keyword arguments for compute_next_check_time (used across all SVC tests)
+    _kw = {
+        "on_no_quota_hr": 6,
+        "on_rate_limit_hr": 1,
+        "on_invalid_key_days": 10,
+        "on_no_access_days": 10,
+        "on_server_error_min": 30,
+        "on_overload_min": 30,
+        "on_other_error_hr": 1,
+    }
 
     # SVC-1: NO_QUOTA → now + on_no_quota_hr hours
     def test_compute_next_check_time_no_quota(self) -> None:
-        policy = self._make_policy(on_no_quota_hr=6)
+        kw = {**self._kw, "on_no_quota_hr": 6}
         before = datetime.now(UTC)
-        result = compute_next_check_time(policy, ErrorReason.NO_QUOTA)
+        result = compute_next_check_time(ErrorReason.NO_QUOTA, **kw)
         after = datetime.now(UTC)
         expected_min = before + timedelta(hours=6)
         expected_max = after + timedelta(hours=6)
@@ -56,9 +52,9 @@ class TestComputeNextCheckTime:
 
     # SVC-2: RATE_LIMITED → now + on_rate_limit_hr hours
     def test_compute_next_check_time_rate_limited(self) -> None:
-        policy = self._make_policy(on_rate_limit_hr=1)
+        kw = {**self._kw, "on_rate_limit_hr": 1}
         before = datetime.now(UTC)
-        result = compute_next_check_time(policy, ErrorReason.RATE_LIMITED)
+        result = compute_next_check_time(ErrorReason.RATE_LIMITED, **kw)
         after = datetime.now(UTC)
         expected_min = before + timedelta(hours=1)
         expected_max = after + timedelta(hours=1)
@@ -66,9 +62,9 @@ class TestComputeNextCheckTime:
 
     # SVC-3: INVALID_KEY → now + on_invalid_key_days days
     def test_compute_next_check_time_invalid_key(self) -> None:
-        policy = self._make_policy(on_invalid_key_days=10)
+        kw = {**self._kw, "on_invalid_key_days": 10}
         before = datetime.now(UTC)
-        result = compute_next_check_time(policy, ErrorReason.INVALID_KEY)
+        result = compute_next_check_time(ErrorReason.INVALID_KEY, **kw)
         after = datetime.now(UTC)
         expected_min = before + timedelta(days=10)
         expected_max = after + timedelta(days=10)
@@ -76,9 +72,9 @@ class TestComputeNextCheckTime:
 
     # SVC-4: SERVER_ERROR → now + on_server_error_min minutes
     def test_compute_next_check_time_server_error(self) -> None:
-        policy = self._make_policy(on_server_error_min=30)
+        kw = {**self._kw, "on_server_error_min": 30}
         before = datetime.now(UTC)
-        result = compute_next_check_time(policy, ErrorReason.SERVER_ERROR)
+        result = compute_next_check_time(ErrorReason.SERVER_ERROR, **kw)
         after = datetime.now(UTC)
         expected_min = before + timedelta(minutes=30)
         expected_max = after + timedelta(minutes=30)
@@ -86,9 +82,9 @@ class TestComputeNextCheckTime:
 
     # SVC-5: OVERLOADED → now + on_overload_min minutes
     def test_compute_next_check_time_overloaded(self) -> None:
-        policy = self._make_policy(on_overload_min=30)
+        kw = {**self._kw, "on_overload_min": 30}
         before = datetime.now(UTC)
-        result = compute_next_check_time(policy, ErrorReason.OVERLOADED)
+        result = compute_next_check_time(ErrorReason.OVERLOADED, **kw)
         after = datetime.now(UTC)
         expected_min = before + timedelta(minutes=30)
         expected_max = after + timedelta(minutes=30)
@@ -96,9 +92,9 @@ class TestComputeNextCheckTime:
 
     # SVC-6: UNKNOWN → now + on_other_error_hr hours
     def test_compute_next_check_time_unknown(self) -> None:
-        policy = self._make_policy(on_other_error_hr=1)
+        kw = {**self._kw, "on_other_error_hr": 1}
         before = datetime.now(UTC)
-        result = compute_next_check_time(policy, ErrorReason.UNKNOWN)
+        result = compute_next_check_time(ErrorReason.UNKNOWN, **kw)
         after = datetime.now(UTC)
         expected_min = before + timedelta(hours=1)
         expected_max = after + timedelta(hours=1)
@@ -158,10 +154,16 @@ class TestReportKeyFailureNextCheck:
                 accessor=accessor,
             )
 
-            # Verify compute_next_check_time was called with the correct args
+            # Verify compute_next_check_time was called with unpacked keyword args
             mock_compute.assert_called_once_with(
-                provider_config.worker_health_policy,
                 ErrorReason.NO_QUOTA,
+                on_no_quota_hr=6,
+                on_rate_limit_hr=2,
+                on_server_error_min=15,
+                on_overload_min=10,
+                on_other_error_hr=3,
+                on_invalid_key_days=7,
+                on_no_access_days=7,
             )
 
         # Verify update_status was called with a computed next_check_time

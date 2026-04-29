@@ -561,8 +561,8 @@ async def test_int03_adaptive_batching_new_api():
     assert policy.adaptive_batching.start_batch_size == 10
     assert policy.adaptive_batching.start_batch_delay_sec == 30.0
 
-    # Create controller from config (new API: only config parameter)
-    controller = AdaptiveBatchController(config=adaptive_config)
+    # Create controller from config (new API: params parameter)
+    controller = AdaptiveBatchController(params=adaptive_config.to_params())
     assert controller.batch_size == 10
     assert controller.batch_delay == 30.0
 
@@ -615,7 +615,7 @@ async def test_int06_retry_and_adaptive_batching_no_conflict(
 
     # Verify adaptive batch controller works independently of retry
     adaptive_config = health_policy.adaptive_batching
-    controller = AdaptiveBatchController(config=adaptive_config)
+    controller = AdaptiveBatchController(params=adaptive_config.to_params())
     initial_batch_size = controller.batch_size
 
     # Report a successful batch to trigger ramp-up

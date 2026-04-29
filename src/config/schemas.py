@@ -15,6 +15,7 @@ from src.core.constants import (
     ProxyMode,
     StreamingMode,
 )
+from src.core.models import AdaptiveBatchingParams
 
 # ==============================================================================
 # 1. ATOMIC AND NESTED CONFIGURATION CLASSES
@@ -220,6 +221,30 @@ class AdaptiveBatchingConfig(BaseModel):
                 f"[{self.min_batch_delay_sec}, {self.max_batch_delay_sec}]"
             )
         return self
+
+    def to_params(self) -> AdaptiveBatchingParams:
+        """Convert this Pydantic model to a pure ``AdaptiveBatchingParams`` dataclass.
+
+        Returns:
+            A frozen dataclass with the same 13 field values, suitable for
+            passing into ``AdaptiveBatchController`` without dragging the
+            Pydantic dependency into the core layer.
+        """
+        return AdaptiveBatchingParams(
+            start_batch_size=self.start_batch_size,
+            start_batch_delay_sec=self.start_batch_delay_sec,
+            min_batch_size=self.min_batch_size,
+            max_batch_size=self.max_batch_size,
+            min_batch_delay_sec=self.min_batch_delay_sec,
+            max_batch_delay_sec=self.max_batch_delay_sec,
+            batch_size_step=self.batch_size_step,
+            delay_step_sec=self.delay_step_sec,
+            rate_limit_divisor=self.rate_limit_divisor,
+            rate_limit_delay_multiplier=self.rate_limit_delay_multiplier,
+            recovery_threshold=self.recovery_threshold,
+            recovery_step_multiplier=self.recovery_step_multiplier,
+            failure_rate_threshold=self.failure_rate_threshold,
+        )
 
 
 class HealthPolicyConfig(BaseModel):

@@ -8,16 +8,20 @@ the fundamental contracts for different components within the system,
 ensuring a modular and extensible architecture.
 """
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
-from typing import Any, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict
 
 import httpx
 
 # Import the necessary data models and dependencies for type hints.
 from src.core.accessor import ConfigAccessor
 from src.core.models import CheckResult, RequestDetails
-from src.db.database import DatabaseManager
+
+if TYPE_CHECKING:
+    from src.db.database import DatabaseManager
 
 # --- TypedDicts for Background Worker's Synchronization State ---
 # These structures provide type safety for the data collected during the

@@ -1,18 +1,22 @@
 # src/core/probes.py
 
+from __future__ import annotations
+
 import asyncio
 import logging
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.core.accessor import ConfigAccessor
 from src.core.batching import AdaptiveBatchController
 from src.core.constants import ErrorReason
 from src.core.http_client_factory import HttpClientFactory
 from src.core.models import CheckResult
-from src.db.database import DatabaseManager
+
+if TYPE_CHECKING:
+    from src.db.database import DatabaseManager
 
 BatchCallback = Callable[[str, int, float, int, int, int], None]
 """Callback signature for batch-completion notifications.
@@ -166,7 +170,7 @@ class IResourceProbe(ABC):
             controller = self._batch_controllers.get(provider_name)
             if controller is None:
                 controller = AdaptiveBatchController(
-                    config=policy.adaptive_batching,
+                    params=policy.adaptive_batching.to_params(),
                 )
                 self._batch_controllers[provider_name] = controller
                 logger.info(

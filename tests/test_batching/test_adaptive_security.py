@@ -65,7 +65,7 @@ def _make_controller(
             start_batch_size=start_batch_size,
             start_batch_delay_sec=start_batch_delay_sec,
         )
-    return AdaptiveBatchController(config=config)
+    return AdaptiveBatchController(params=config.to_params())
 
 
 def _success_results(count: int) -> list[CheckResult]:
@@ -762,7 +762,6 @@ def test_sec02_callback_is_private_attribute() -> None:
 
     from src.core.accessor import ConfigAccessor
     from src.core.probes import IResourceProbe
-    from src.db.database import DatabaseManager
 
     callback = lambda *args: None  # noqa: E731
 
@@ -782,7 +781,7 @@ def test_sec02_callback_is_private_attribute() -> None:
 
     accessor = MagicMock(spec=ConfigAccessor)
     accessor.get_worker_concurrency.return_value = 5
-    db_manager = MagicMock(spec=DatabaseManager)
+    db_manager = MagicMock()
     client_factory = MagicMock()
 
     probe = StubProbe(

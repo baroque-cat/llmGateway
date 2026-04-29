@@ -411,7 +411,7 @@ def test_uc39_controller_initialization_with_start_values():
     and reads start values from config.start_batch_size and config.start_batch_delay_sec.
     """
     cfg = AdaptiveBatchingConfig(start_batch_size=20, start_batch_delay_sec=10.0)
-    controller = AdaptiveBatchController(config=cfg)
+    controller = AdaptiveBatchController(params=cfg.to_params())
 
     assert controller.batch_size == 20
     assert controller.batch_delay == 10.0

@@ -452,7 +452,17 @@ async def _report_key_failure(
     try:
         provider_config = accessor.get_provider_or_raise(provider_name)
         health_policy = provider_config.worker_health_policy
-        next_check = compute_next_check_time(health_policy, result.error_reason)
+        hp = health_policy
+        next_check = compute_next_check_time(
+            result.error_reason,
+            on_no_quota_hr=hp.on_no_quota_hr,
+            on_rate_limit_hr=hp.on_rate_limit_hr,
+            on_invalid_key_days=hp.on_invalid_key_days,
+            on_no_access_days=hp.on_no_access_days,
+            on_server_error_min=hp.on_server_error_min,
+            on_overload_min=hp.on_overload_min,
+            on_other_error_hr=hp.on_other_error_hr,
+        )
         await db_manager.keys.update_status(
             key_id=key_id,
             model_name=model_name,

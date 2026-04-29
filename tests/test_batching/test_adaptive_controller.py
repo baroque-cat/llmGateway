@@ -57,7 +57,7 @@ def _make_controller(
         start_batch_delay_sec=start_batch_delay_sec,
         **config_kwargs,
     )
-    return AdaptiveBatchController(config=config)
+    return AdaptiveBatchController(params=config.to_params())
 
 
 # ===========================================================================
@@ -97,11 +97,11 @@ def test_uc02_initialization_with_user_bounds() -> None:
     assert controller.batch_delay == 15.0
     assert controller.consecutive_successes == 0
 
-    # Verify bounds are stored in config
-    assert controller._config.min_batch_size == 5
-    assert controller._config.max_batch_size == 50
-    assert controller._config.min_batch_delay_sec == 3.0
-    assert controller._config.max_batch_delay_sec == 60.0
+    # Verify bounds are stored in params
+    assert controller._params.min_batch_size == 5
+    assert controller._params.max_batch_size == 50
+    assert controller._params.min_batch_delay_sec == 3.0
+    assert controller._params.max_batch_delay_sec == 60.0
 
 
 def test_uc03_start_batch_size_exceeds_max_rejected() -> None:
@@ -729,7 +729,7 @@ def test_ut_d01_controller_initializes_from_config_start_batch_size() -> None:
     config.start_batch_size, not from a separate constructor parameter.
     """
     config = AdaptiveBatchingConfig(start_batch_size=25)
-    controller = AdaptiveBatchController(config=config)
+    controller = AdaptiveBatchController(params=config.to_params())
     assert controller.batch_size == 25
 
 
@@ -739,7 +739,7 @@ def test_ut_d02_start_batch_size_capped_at_max_boundary() -> None:
     batch_size capped at max. Valid boundary values are accepted by Pydantic.
     """
     config = AdaptiveBatchingConfig(start_batch_size=50, max_batch_size=50)
-    controller = AdaptiveBatchController(config=config)
+    controller = AdaptiveBatchController(params=config.to_params())
     assert controller.batch_size == 50
 
 
@@ -759,7 +759,7 @@ def test_ut_d03_start_batch_delay_capped_at_min_boundary() -> None:
     in batch_delay capped at min. Valid boundary values are accepted.
     """
     config = AdaptiveBatchingConfig(start_batch_delay_sec=3.0, min_batch_delay_sec=3.0)
-    controller = AdaptiveBatchController(config=config)
+    controller = AdaptiveBatchController(params=config.to_params())
     assert controller.batch_delay == 3.0
 
 
@@ -783,7 +783,7 @@ def test_ut_d04_constructor_rejects_initial_batch_size() -> None:
     """
     config = AdaptiveBatchingConfig()
     with pytest.raises(TypeError):
-        AdaptiveBatchController(config=config, initial_batch_size=30)
+        AdaptiveBatchController(params=config.to_params(), initial_batch_size=30)
 
 
 def test_ut_d04_constructor_rejects_initial_batch_delay() -> None:
@@ -793,7 +793,7 @@ def test_ut_d04_constructor_rejects_initial_batch_delay() -> None:
     """
     config = AdaptiveBatchingConfig()
     with pytest.raises(TypeError):
-        AdaptiveBatchController(config=config, initial_batch_delay=15.0)
+        AdaptiveBatchController(params=config.to_params(), initial_batch_delay=15.0)
 
 
 def test_ut_d05_default_config_gives_batch_size_30_delay_15() -> None:
@@ -803,7 +803,7 @@ def test_ut_d05_default_config_gives_batch_size_30_delay_15() -> None:
     has batch_size=30, batch_delay=15.0.
     """
     config = AdaptiveBatchingConfig()
-    controller = AdaptiveBatchController(config=config)
+    controller = AdaptiveBatchController(params=config.to_params())
     assert controller.batch_size == 30
     assert controller.batch_delay == 15.0
 

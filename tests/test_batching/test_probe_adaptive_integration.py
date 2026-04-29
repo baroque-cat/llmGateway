@@ -300,7 +300,7 @@ async def test_ic05_filtering_gather_results_isinstance_checkresult():
     reported_results: list[CheckResult] = []
 
     controller = AdaptiveBatchController(
-        config=policy.adaptive_batching,
+        params=policy.adaptive_batching.to_params(),
     )
 
     original_report = controller.report_batch_result
@@ -360,7 +360,7 @@ async def test_ic06_classification_of_checkresult_by_error_reason():
     reported_results: list[CheckResult] = []
 
     controller = AdaptiveBatchController(
-        config=policy.adaptive_batching,
+        params=policy.adaptive_batching.to_params(),
     )
 
     original_report = controller.report_batch_result
@@ -468,7 +468,7 @@ async def test_ic08_full_cycle_success_rampup_rate_limited_backoff_recovery():
     probe = _make_probe(policy=policy)
 
     controller = AdaptiveBatchController(
-        config=adaptive,
+        params=adaptive.to_params(),
     )
     probe._batch_controllers["test_provider"] = controller
 
@@ -534,7 +534,7 @@ async def test_ic09_mixed_results_in_one_batch():
     probe = _make_probe(policy=policy)
 
     controller = AdaptiveBatchController(
-        config=adaptive,
+        params=adaptive.to_params(),
     )
 
     mixed_results: list[CheckResult] = [
@@ -667,7 +667,7 @@ async def test_ic13_one_resource():
     reported_results: list[CheckResult] = []
 
     controller = AdaptiveBatchController(
-        config=policy.adaptive_batching,
+        params=policy.adaptive_batching.to_params(),
     )
 
     original_report = controller.report_batch_result
