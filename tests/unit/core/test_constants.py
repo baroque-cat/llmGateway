@@ -1,4 +1,10 @@
-from src.core.constants import ErrorReason
+from src.core.constants import (
+    CircuitBreakerMode,
+    ErrorReason,
+    ProviderType,
+    ProxyMode,
+)
+from src.providers import _PROVIDER_CLASSES
 
 
 class TestErrorReasonLogic:
@@ -161,3 +167,83 @@ class TestStreamDisconnect:
         assert (
             ErrorReason.STREAM_DISCONNECT.is_client_error() is False
         ), "STREAM_DISCONNECT should NOT be a client error"
+
+
+# ==============================================================================
+# Harden-config-validation: Enum existence and synchronization tests
+# Reference: openspec/changes/harden-config-validation/test-plan.md, lines 131-136
+# ==============================================================================
+
+
+class TestProviderTypeEnumExistence:
+    """
+    Tests for ProviderType enum existence, members, and synchronization
+    with _PROVIDER_CLASSES registry.
+    """
+
+    def test_provider_type_enum_exists_and_has_correct_members(self):
+        """
+        Verify that ProviderType is defined in src.core.constants and contains
+        the expected members: ANTHROPIC, OPENAI_LIKE, GEMINI.
+        """
+        assert hasattr(
+            ProviderType, "ANTHROPIC"
+        ), "ProviderType should have ANTHROPIC member"
+        assert hasattr(
+            ProviderType, "OPENAI_LIKE"
+        ), "ProviderType should have OPENAI_LIKE member"
+        assert hasattr(ProviderType, "GEMINI"), "ProviderType should have GEMINI member"
+        assert ProviderType.ANTHROPIC.value == "anthropic"
+        assert ProviderType.OPENAI_LIKE.value == "openai_like"
+        assert ProviderType.GEMINI.value == "gemini"
+
+    def test_provider_type_values_match_provider_classes_keys(self):
+        """
+        Verify that the set of ProviderType enum values exactly matches
+        the set of keys in _PROVIDER_CLASSES. This ensures the enum and
+        the provider registry stay in sync.
+        """
+        enum_values = {p.value for p in ProviderType}
+        registry_keys = set(_PROVIDER_CLASSES.keys())
+        assert enum_values == registry_keys, (
+            f"ProviderType values {enum_values} do not match "
+            f"_PROVIDER_CLASSES keys {registry_keys}"
+        )
+
+
+class TestProxyModeEnumExistence:
+    """
+    Tests for ProxyMode enum existence and members.
+    """
+
+    def test_proxy_mode_enum_exists(self):
+        """
+        Verify that ProxyMode is defined in src.core.constants and contains
+        the expected members: NONE, STATIC, STEALTH.
+        """
+        assert hasattr(ProxyMode, "NONE"), "ProxyMode should have NONE member"
+        assert hasattr(ProxyMode, "STATIC"), "ProxyMode should have STATIC member"
+        assert hasattr(ProxyMode, "STEALTH"), "ProxyMode should have STEALTH member"
+        assert ProxyMode.NONE.value == "none"
+        assert ProxyMode.STATIC.value == "static"
+        assert ProxyMode.STEALTH.value == "stealth"
+
+
+class TestCircuitBreakerModeEnumExistence:
+    """
+    Tests for CircuitBreakerMode enum existence and members.
+    """
+
+    def test_circuit_breaker_mode_enum_exists(self):
+        """
+        Verify that CircuitBreakerMode is defined in src.core.constants and contains
+        the expected members: AUTO_RECOVERY, MANUAL_RESET.
+        """
+        assert hasattr(
+            CircuitBreakerMode, "AUTO_RECOVERY"
+        ), "CircuitBreakerMode should have AUTO_RECOVERY member"
+        assert hasattr(
+            CircuitBreakerMode, "MANUAL_RESET"
+        ), "CircuitBreakerMode should have MANUAL_RESET member"
+        assert CircuitBreakerMode.AUTO_RECOVERY.value == "auto_recovery"
+        assert CircuitBreakerMode.MANUAL_RESET.value == "manual_reset"

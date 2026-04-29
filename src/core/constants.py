@@ -149,7 +149,7 @@ class Status(StrEnum):
 
 
 @unique
-class DebugMode(Enum):
+class DebugMode(StrEnum):
     """
     Defines the allowed debug logging modes for a provider instance.
 
@@ -167,7 +167,7 @@ class DebugMode(Enum):
 
 
 @unique
-class StreamingMode(Enum):
+class StreamingMode(StrEnum):
     """
     Defines the allowed streaming modes for a provider instance.
     """
@@ -177,7 +177,7 @@ class StreamingMode(Enum):
 
 
 @unique
-class ProxyMode(Enum):
+class ProxyMode(StrEnum):
     """
     Defines the allowed proxy modes for a provider instance.
     """
@@ -188,10 +188,27 @@ class ProxyMode(Enum):
 
 
 @unique
-class CircuitBreakerMode(Enum):
+class CircuitBreakerMode(StrEnum):
     """
     Defines the allowed circuit breaker modes for a provider instance.
     """
 
     AUTO_RECOVERY = "auto_recovery"
     MANUAL_RESET = "manual_reset"
+
+
+@unique
+class ProviderType(StrEnum):
+    """
+    Defines the supported LLM provider types.
+
+    Must stay in sync with ``_PROVIDER_CLASSES`` in ``src/providers/__init__.py``.
+    Members:
+        ``ANTHROPIC`` — Anthropic (Claude) API.
+        ``OPENAI_LIKE`` — OpenAI-compatible APIs (e.g., OpenAI, DeepSeek, Groq).
+        ``GEMINI`` — Google Gemini API.
+    """
+
+    ANTHROPIC = "anthropic"
+    OPENAI_LIKE = "openai_like"
+    GEMINI = "gemini"

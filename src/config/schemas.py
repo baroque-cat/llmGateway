@@ -1,11 +1,20 @@
 #!/usr/bin/env python3
 
+import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # Import core enums for type hints and validation in schemas.
 # Pydantic will automatically validate enum values at runtime.
+from src.core.constants import (
+    CircuitBreakerMode,
+    DebugMode,
+    ErrorReason,
+    ProviderType,
+    ProxyMode,
+    StreamingMode,
+)
 
 # ==============================================================================
 # 1. ATOMIC AND NESTED CONFIGURATION CLASSES
@@ -44,11 +53,11 @@ class RetryOnErrorConfig(BaseModel):
     """Defines retry behavior for a specific error category (e.g., server errors)."""
 
     # Number of retry attempts for this error type. 0 means no retries.
-    attempts: int = 0
+    attempts: int = Field(default=0, ge=0)
     # Initial delay in seconds before the first retry.
-    backoff_sec: float = 0.1
+    backoff_sec: float = Field(default=0.1, ge=0)
     # Multiplier for the delay for subsequent retries (e.g., 2.0 for exponential backoff).
-    backoff_factor: float = 1.5
+    backoff_factor: float = Field(default=1.5, ge=1.0)
 
 
 class RetryPolicyConfig(BaseModel):
@@ -60,16 +69,40 @@ class RetryPolicyConfig(BaseModel):
     # Specific retry settings for 5xx server-side errors.
     on_server_error: RetryOnErrorConfig = Field(default_factory=RetryOnErrorConfig)
 
+    @model_validator(mode="after")
+    def check_retry_meaningful(self) -> "RetryPolicyConfig":
+        """If retry is enabled, at least one error category must have attempts >= 1."""
+        if (
+            self.enabled
+            and self.on_key_error.attempts < 1
+            and self.on_server_error.attempts < 1
+        ):
+            raise ValueError(
+                "retry.enabled is True but both on_key_error.attempts and "
+                "on_server_error.attempts are 0. At least one must be >= 1."
+            )
+        return self
+
 
 class BackoffConfig(BaseModel):
     """Configuration for the exponential backoff strategy of the circuit breaker."""
 
     # The initial duration in seconds to wait after the circuit opens.
-    base_duration_sec: int = 30
+    base_duration_sec: int = Field(default=30, gt=0)
     # The maximum duration the backoff can reach.
-    max_duration_sec: int = 1800
+    max_duration_sec: int = Field(default=1800, gt=0)
     # The factor by which the duration increases after each failed check.
-    factor: float = 2.0
+    factor: float = Field(default=2.0, ge=1.0)
+
+    @model_validator(mode="after")
+    def check_bounds(self) -> "BackoffConfig":
+        """Validate base_duration_sec <= max_duration_sec."""
+        if self.base_duration_sec > self.max_duration_sec:
+            raise ValueError(
+                f"base_duration_sec ({self.base_duration_sec}) must be <= "
+                f"max_duration_sec ({self.max_duration_sec})"
+            )
+        return self
 
 
 class CircuitBreakerConfig(BaseModel):
@@ -80,13 +113,13 @@ class CircuitBreakerConfig(BaseModel):
     enabled: bool = False
     # 'auto_recovery' will periodically re-test the endpoint.
     # 'manual_reset' requires external intervention to close the circuit.
-    mode: str = "auto_recovery"
+    mode: CircuitBreakerMode = CircuitBreakerMode.AUTO_RECOVERY
     # The number of consecutive failures required to open the circuit.
-    failure_threshold: int = 10
+    failure_threshold: int = Field(default=10, gt=0)
     # Configuration for the backoff strategy when the circuit is open.
     backoff: BackoffConfig = Field(default_factory=BackoffConfig)
     # A random delay added to backoff to prevent thundering herd problems.
-    jitter_sec: int = 5
+    jitter_sec: int = Field(default=5, ge=0)
 
 
 class MetricsConfig(BaseModel):
@@ -246,10 +279,21 @@ class HealthPolicyConfig(BaseModel):
     # Mapping of HTTP status codes to ErrorReason strings for fast, body-less error handling.
     # When a status code matches an entry here, the worker will IMMEDIATELY fail the check
     # with the mapped reason without reading the response body.
-    fast_status_mapping: dict[int, str] = Field(
+    fast_status_mapping: dict[int, ErrorReason] = Field(
         default_factory=dict,
         description="Mapping of HTTP status codes to ErrorReason strings",
     )
+
+    @model_validator(mode="after")
+    def check_fast_status_mapping_keys(self) -> "HealthPolicyConfig":
+        """Validate that all keys in fast_status_mapping are valid HTTP status codes (100–599)."""
+        for status_code in self.fast_status_mapping:
+            if not (100 <= status_code < 600):
+                raise ValueError(
+                    f"Invalid HTTP status code {status_code} in fast_status_mapping. "
+                    "Keys must be in range 100–599."
+                )
+        return self
 
     @model_validator(mode="after")
     def check_quarantine_logic(self) -> "HealthPolicyConfig":
@@ -258,6 +302,29 @@ class HealthPolicyConfig(BaseModel):
             raise ValueError(
                 f"quarantine_after_days ({self.quarantine_after_days}) cannot be greater than "
                 f"stop_checking_after_days ({self.stop_checking_after_days})"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def check_verification_timeout(self) -> "HealthPolicyConfig":
+        """Validate task_timeout_sec is sufficient for verification loop to complete."""
+        required_time = self.verification_attempts * self.verification_delay_sec * 2
+        if self.task_timeout_sec < required_time:
+            raise ValueError(
+                f"task_timeout_sec ({self.task_timeout_sec}) is too low for "
+                f"verification_attempts ({self.verification_attempts}) × "
+                f"verification_delay_sec ({self.verification_delay_sec}) × 2 = {required_time}. "
+                "Increase task_timeout_sec or reduce verification attempts / delay."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def check_quarantine_recheck(self) -> "HealthPolicyConfig":
+        """Validate quarantine_recheck_interval_days < stop_checking_after_days."""
+        if self.quarantine_recheck_interval_days >= self.stop_checking_after_days:
+            raise ValueError(
+                f"quarantine_recheck_interval_days ({self.quarantine_recheck_interval_days}) "
+                f"must be less than stop_checking_after_days ({self.stop_checking_after_days})"
             )
         return self
 
@@ -270,7 +337,7 @@ class ProxyConfig(BaseModel):
     # 'none': Direct connection.
     # 'static': Use a single, fixed proxy URL.
     # 'stealth': Use a rotating pool of proxies from a file/directory.
-    mode: str = "none"
+    mode: ProxyMode = ProxyMode.NONE
     # The URL for the proxy if mode is 'static' (e.g., "http://user:pass@host:port").
     static_url: str | None = None
     # Path to the directory containing proxy list files if mode is 'stealth'.
@@ -320,13 +387,25 @@ class ErrorParsingRule(BaseModel):
     match_pattern: str
 
     # ErrorReason value to map to when this rule matches (e.g., "invalid_key", "no_quota")
-    map_to: str
+    map_to: ErrorReason
 
     # Priority for rule matching (higher priority rules are checked first)
     priority: int = Field(default=0, ge=0)
 
     # Human-readable description of what this rule detects
     description: str = ""
+
+    @field_validator("match_pattern")
+    @classmethod
+    def validate_match_pattern(cls, v: str) -> str:
+        """Validate that match_pattern is a compilable regex."""
+        try:
+            re.compile(v)
+        except re.error as e:
+            raise ValueError(
+                f"match_pattern '{v}' is not a valid regular expression: {e}"
+            ) from e
+        return v
 
 
 class ErrorParsingConfig(BaseModel):
@@ -344,17 +423,32 @@ class ErrorParsingConfig(BaseModel):
     # List of error parsing rules to apply
     rules: list[ErrorParsingRule] = Field(default_factory=list)
 
+    @model_validator(mode="after")
+    def check_unique_priorities(self) -> "ErrorParsingConfig":
+        """Validate that priorities are unique within each status_code group."""
+        status_priorities: dict[int, set[int]] = {}
+        for rule in self.rules:
+            status_priorities.setdefault(rule.status_code, set())
+            if rule.priority in status_priorities[rule.status_code]:
+                raise ValueError(
+                    f"Duplicate priority {rule.priority} for status_code "
+                    f"{rule.status_code} in error parsing rules. "
+                    "Each rule within the same status_code must have a unique priority."
+                )
+            status_priorities[rule.status_code].add(rule.priority)
+        return self
+
 
 class GatewayPolicyConfig(BaseModel):
     """Groups all policies applied by the API Gateway during live request processing."""
 
     # Controls whether streaming is enabled for this provider instance.
     # See src.core.constants.StreamingMode for allowed values.
-    streaming_mode: Literal["auto", "disabled"] = "auto"
+    streaming_mode: StreamingMode = StreamingMode.AUTO
 
     # Controls the debug logging mode for this provider instance.
     # See src.core.constants.DebugMode for allowed values.
-    debug_mode: Literal["disabled", "no_content", "full_body"] = "disabled"
+    debug_mode: DebugMode = DebugMode.DISABLED
 
     # Configuration for parsing error responses to refine error classification
     # This enables distinguishing between different error types with the same HTTP status code
@@ -369,7 +463,18 @@ class GatewayPolicyConfig(BaseModel):
     # When a status code matches an entry here, the gateway will IMMEDIATELY fail the request
     # with the mapped reason without reading the response body.
     # WARNING: This prevents forwarding specific upstream error messages to the client.
-    fast_status_mapping: dict[int, str] = Field(default_factory=dict)
+    fast_status_mapping: dict[int, ErrorReason] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def check_fast_status_mapping_keys(self) -> "GatewayPolicyConfig":
+        """Validate that all keys in fast_status_mapping are valid HTTP status codes (100–599)."""
+        for status_code in self.fast_status_mapping:
+            if not (100 <= status_code < 600):
+                raise ValueError(
+                    f"Invalid HTTP status code {status_code} in fast_status_mapping. "
+                    "Keys must be in range 100–599."
+                )
+        return self
 
 
 class ProviderConfig(BaseModel):
@@ -381,7 +486,7 @@ class ProviderConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     # The type of the provider, used to look up templates (e.g., 'gemini', 'deepseek').
-    provider_type: str
+    provider_type: ProviderType
     # A flag to enable or disable this entire provider instance.
     enabled: bool = True
     # Path to the directory containing API key files for this instance.
@@ -473,7 +578,7 @@ class DatabaseConfig(BaseModel):
     """
 
     host: str = "localhost"
-    port: int = Field(default=5432, gt=0)
+    port: int = Field(default=5432, gt=0, lt=65536)
     user: str = "llm_gateway"
     # This should be loaded from an environment variable, e.g., "${DB_PASSWORD}".
     password: str = ""

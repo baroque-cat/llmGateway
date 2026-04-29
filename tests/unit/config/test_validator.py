@@ -8,9 +8,11 @@ values at the model_validate() boundary. With the migration from dataclasses +
 ConfigValidator to Pydantic v2 BaseModel, validation is now performed inline
 during model construction rather than in a separate post-load validation step.
 
+Group G1 tests: Updated for enum-based validation (harden-config-validation).
 Group G2 tests: UT-B01..UT-B10, UT-C01..UT-C04, UT-H12, UT-H13
 Covering: HealthPolicyConfig batch-field removal & default updates,
           TimeoutConfig default updates, YAML legacy/new format validation.
+Integration/E2E and Security tests for enum validation.
 """
 
 from unittest.mock import mock_open, patch
@@ -21,26 +23,41 @@ from pydantic import ValidationError
 from src.config.loader import ConfigLoader
 from src.config.schemas import (
     AdaptiveBatchingConfig,
+    DatabaseConfig,
+    ErrorParsingRule,
     GatewayPolicyConfig,
     HealthPolicyConfig,
     ProviderConfig,
+    ProxyConfig,
+    RetryOnErrorConfig,
     TimeoutConfig,
+)
+from src.core.constants import (
+    CircuitBreakerMode,
+    DebugMode,
+    ErrorReason,
+    ProviderType,
+    ProxyMode,
+    StreamingMode,
 )
 
 # ==============================================================================
-# Existing tests (preserved from original file)
+# G1: Updated existing tests for enum-based validation
 # ==============================================================================
 
 
 def test_invalid_debug_mode_should_fail_validation():
     """
     Test that a typo in debug_mode (e.g., 'diabled') causes Pydantic
-    ValidationError during config loading.
+    ValidationError during config loading via YAML.
+
+    After replacing Literal with DebugMode enum, the validation error message
+    should list the valid enum member values.
     """
     mock_yaml_content = """providers:
   test_provider:
     enabled: true
-    provider_type: "test"
+    provider_type: "openai_like"
     keys_path: "keys/test/"
     api_base_url: "https://api.test.com/v1"
     access_control:
@@ -63,25 +80,35 @@ def test_invalid_debug_mode_should_fail_validation():
 def test_invalid_debug_mode_direct_schema_validation():
     """
     Test that GatewayPolicyConfig directly rejects invalid debug_mode values
-    via Pydantic Literal type validation.
+    via Pydantic DebugMode enum validation.
+
+    After replacing Literal with DebugMode enum, the error message should
+    contain the valid enum member values (disabled, no_content, full_body).
     """
     with pytest.raises(ValidationError) as exc_info:
         GatewayPolicyConfig(debug_mode="diabled")
 
     error_message = str(exc_info.value)
-    # Pydantic should report that "diabled" is not a valid literal value
+    # With enum validation, Pydantic lists the valid enum member values
     assert "diabled" in error_message
+    # Verify that the error message references the valid DebugMode enum members
+    assert "disabled" in error_message
+    assert "no_content" in error_message
+    assert "full_body" in error_message
 
 
 def test_invalid_streaming_mode_should_fail_validation():
     """
     Test that an invalid streaming_mode value causes Pydantic ValidationError
-    during config loading.
+    during config loading via YAML.
+
+    After replacing Literal with StreamingMode enum, the validation error
+    message should list the valid enum member values.
     """
     mock_yaml_content = """providers:
   test_provider:
     enabled: true
-    provider_type: "test"
+    provider_type: "openai_like"
     keys_path: "keys/test/"
     api_base_url: "https://api.test.com/v1"
     access_control:
@@ -101,42 +128,49 @@ def test_invalid_streaming_mode_should_fail_validation():
 
 def test_invalid_streaming_mode_direct_schema_validation():
     """
-    Test that GatewayPolicyConfig directly rejects invalid streaming_mode values.
+    Test that GatewayPolicyConfig directly rejects invalid streaming_mode values
+    via Pydantic StreamingMode enum validation.
+
+    After replacing Literal with StreamingMode enum, the error message should
+    contain the valid enum member values (auto, disabled).
     """
     with pytest.raises(ValidationError) as exc_info:
         GatewayPolicyConfig(streaming_mode="full_stream")
 
     error_message = str(exc_info.value)
     assert "full_stream" in error_message
+    # Verify that the error message references the valid StreamingMode enum members
+    assert "auto" in error_message
+    assert "disabled" in error_message
 
 
 def test_invalid_fast_mapping_value_should_fail():
     """
     Test that an invalid ErrorReason in fast_status_mapping causes validation failure.
 
-    Note: With Pydantic v2, fast_status_mapping is typed as dict[int, str],
-    so any string value is accepted at the schema level. The ErrorReason validation
-    was previously done by ConfigValidator. This test now verifies that the schema
-    accepts valid string values (the old ConfigValidator-level check for valid
-    ErrorReason enum values is no longer enforced at the Pydantic schema level).
+    INVERTED: Previously, fast_status_mapping was typed as dict[int, str], so any
+    string value was accepted at the schema level. After changing to dict[int, ErrorReason],
+    invalid ErrorReason values are now rejected by Pydantic enum validation.
     """
-    # With Pydantic dict[int, str], any string value is valid at schema level
-    # The old ConfigValidator checked for valid ErrorReason enum values, but
-    # that validation is no longer part of the Pydantic schema.
-    # This test verifies the schema accepts arbitrary string values.
-    policy = GatewayPolicyConfig(fast_status_mapping={400: "invalid_typo_reason"})
-    assert policy.fast_status_mapping[400] == "invalid_typo_reason"
+    with pytest.raises(ValidationError) as exc_info:
+        GatewayPolicyConfig(fast_status_mapping={400: "invalid_typo_reason"})
+
+    error_message = str(exc_info.value)
+    # Verify that the error message mentions the invalid value
+    assert "invalid_typo_reason" in error_message
+    # Verify that the error message lists valid ErrorReason enum members
+    assert "bad_request" in error_message
 
 
 def test_valid_config_should_pass_validation():
     """
     Ensure that a completely valid configuration passes Pydantic validation
-    during config loading.
+    during config loading, with all enum fields properly coerced.
     """
     mock_yaml_content = """providers:
   test_provider:
     enabled: true
-    provider_type: "test"
+    provider_type: "openai_like"
     keys_path: "keys/test/"
     api_base_url: "https://api.test.com/v1"
     access_control:
@@ -155,11 +189,46 @@ def test_valid_config_should_pass_validation():
         loader = ConfigLoader(path="dummy_path.yaml")
         config = loader.load()
 
-        # Verify the config loaded correctly
+        # Verify the config loaded correctly with enum comparisons
         provider = config.providers["test_provider"]
-        assert provider.gateway_policy.debug_mode == "disabled"
-        assert provider.gateway_policy.streaming_mode == "auto"
-        assert provider.gateway_policy.fast_status_mapping[400] == "bad_request"
+        assert provider.gateway_policy.debug_mode == DebugMode.DISABLED
+        assert provider.gateway_policy.streaming_mode == StreamingMode.AUTO
+        assert (
+            provider.gateway_policy.fast_status_mapping[400] == ErrorReason.BAD_REQUEST
+        )
+
+
+def test_proxy_config_static_mode_requires_url():
+    """
+    Test that ProxyConfig model_validator requires static_url when mode is 'static'.
+
+    After replacing with ProxyMode enum, string "static" is coerced to ProxyMode.STATIC
+    and the validate_proxy_requirements validator works with the enum value.
+    """
+    with pytest.raises(ValidationError) as exc_info:
+        ProxyConfig(mode="static")
+
+    error_message = str(exc_info.value)
+    assert "static_url" in error_message
+
+
+def test_proxy_config_stealth_mode_requires_pool_path():
+    """
+    Test that ProxyConfig model_validator requires pool_list_path when mode is 'stealth'.
+
+    After replacing with ProxyMode enum, string "stealth" is coerced to ProxyMode.STEALTH
+    and the validate_proxy_requirements validator works with the enum value.
+    """
+    with pytest.raises(ValidationError) as exc_info:
+        ProxyConfig(mode="stealth")
+
+    error_message = str(exc_info.value)
+    assert "pool_list_path" in error_message
+
+
+# ==============================================================================
+# Preserved tests (not in G1 scope but need provider_type fix)
+# ==============================================================================
 
 
 def test_provider_config_extra_fields_forbidden():
@@ -169,7 +238,7 @@ def test_provider_config_extra_fields_forbidden():
     """
     with pytest.raises(ValidationError) as exc_info:
         ProviderConfig(
-            provider_type="test",
+            provider_type="openai_like",
             keys_path="keys/test/",
             unknown_field="should_be_rejected",
         )
@@ -212,32 +281,6 @@ def test_health_policy_quarantine_logic():
     assert "quarantine_after_days" in error_message
 
 
-def test_proxy_config_static_mode_requires_url():
-    """
-    Test that ProxyConfig model_validator requires static_url when mode is 'static'.
-    """
-    from src.config.schemas import ProxyConfig
-
-    with pytest.raises(ValidationError) as exc_info:
-        ProxyConfig(mode="static")
-
-    error_message = str(exc_info.value)
-    assert "static_url" in error_message
-
-
-def test_proxy_config_stealth_mode_requires_pool_path():
-    """
-    Test that ProxyConfig model_validator requires pool_list_path when mode is 'stealth'.
-    """
-    from src.config.schemas import ProxyConfig
-
-    with pytest.raises(ValidationError) as exc_info:
-        ProxyConfig(mode="stealth")
-
-    error_message = str(exc_info.value)
-    assert "pool_list_path" in error_message
-
-
 def test_duplicate_gateway_tokens_rejected():
     """
     Test that Config model_validator rejects duplicate gateway_access_token
@@ -250,13 +293,13 @@ def test_duplicate_gateway_tokens_rejected():
             {
                 "providers": {
                     "provider_a": {
-                        "provider_type": "test",
+                        "provider_type": "openai_like",
                         "keys_path": "keys/a/",
                         "enabled": True,
                         "access_control": {"gateway_access_token": "same_token"},
                     },
                     "provider_b": {
-                        "provider_type": "test",
+                        "provider_type": "openai_like",
                         "keys_path": "keys/b/",
                         "enabled": True,
                         "access_control": {"gateway_access_token": "same_token"},
@@ -322,7 +365,7 @@ def test_ut_b03_yaml_batch_size_under_worker_health_policy_causes_error():
     mock_yaml_content = """providers:
   test_provider:
     enabled: true
-    provider_type: "test"
+    provider_type: "openai_like"
     keys_path: "keys/test/"
     api_base_url: "https://api.test.com/v1"
     access_control:
@@ -458,7 +501,7 @@ def test_ut_h12_legacy_batch_size_in_yaml_causes_validation_error():
     mock_yaml_content = """providers:
   test_provider:
     enabled: true
-    provider_type: "test"
+    provider_type: "openai_like"
     keys_path: "keys/test/"
     api_base_url: "https://api.test.com/v1"
     access_control:
@@ -487,7 +530,7 @@ def test_ut_h13_new_format_yaml_with_start_batch_size_is_valid():
     mock_yaml_content = """providers:
   test_provider:
     enabled: true
-    provider_type: "test"
+    provider_type: "openai_like"
     keys_path: "keys/test/"
     api_base_url: "https://api.test.com/v1"
     access_control:
@@ -525,7 +568,7 @@ def test_g2_1_1_dedicated_http_client_default_is_false():
     G2-1.1: ProviderConfig.dedicated_http_client defaults to False when the
     field is not explicitly provided.
     """
-    provider = ProviderConfig(provider_type="test", keys_path="keys/test/")
+    provider = ProviderConfig(provider_type="openai_like", keys_path="keys/test/")
     assert provider.dedicated_http_client is False
 
 
@@ -534,7 +577,7 @@ def test_g2_1_2_dedicated_http_client_explicit_true():
     G2-1.2: ProviderConfig.dedicated_http_client can be explicitly set to True.
     """
     provider = ProviderConfig(
-        provider_type="test", keys_path="keys/test/", dedicated_http_client=True
+        provider_type="openai_like", keys_path="keys/test/", dedicated_http_client=True
     )
     assert provider.dedicated_http_client is True
 
@@ -551,7 +594,9 @@ def test_g2_1_3_dedicated_http_client_invalid_type_raises_validation_error():
     """
     with pytest.raises(ValidationError) as exc_info:
         ProviderConfig(
-            provider_type="test", keys_path="keys/test/", dedicated_http_client=["yes"]
+            provider_type="openai_like",
+            keys_path="keys/test/",
+            dedicated_http_client=["yes"],
         )
 
     error_message = str(exc_info.value)
@@ -566,7 +611,7 @@ def test_g2_1_4_yaml_dedicated_http_client_true():
     mock_yaml_content = """providers:
   test_provider:
     enabled: true
-    provider_type: "test"
+    provider_type: "openai_like"
     keys_path: "keys/test/"
     api_base_url: "https://api.test.com/v1"
     access_control:
@@ -593,7 +638,7 @@ def test_g2_1_5_yaml_dedicated_http_client_absent_defaults_to_false():
     mock_yaml_content = """providers:
   test_provider:
     enabled: true
-    provider_type: "test"
+    provider_type: "openai_like"
     keys_path: "keys/test/"
     api_base_url: "https://api.test.com/v1"
     access_control:
@@ -609,3 +654,346 @@ def test_g2_1_5_yaml_dedicated_http_client_absent_defaults_to_false():
 
         provider = config.providers["test_provider"]
         assert provider.dedicated_http_client is False
+
+
+# ==============================================================================
+# Integration / E2E Tests (from test-plan, not fitting in other group files)
+# ==============================================================================
+
+
+def test_full_valid_config_with_all_enums_loads_via_yaml():
+    """
+    Integration: Full YAML config with all enum fields loads successfully,
+    and all values are properly coerced to their enum types.
+    """
+    mock_yaml_content = """providers:
+  gemini_provider:
+    enabled: true
+    provider_type: "gemini"
+    keys_path: "keys/gemini/"
+    api_base_url: "https://generativelanguage.googleapis.com/v1beta"
+    access_control:
+      gateway_access_token: "gemini_token"
+    proxy_config:
+      mode: "none"
+    gateway_policy:
+      debug_mode: "no_content"
+      streaming_mode: "auto"
+      fast_status_mapping:
+        400: "bad_request"
+        429: "rate_limited"
+        500: "server_error"
+      circuit_breaker:
+        mode: "auto_recovery"
+      retry:
+        enabled: false
+"""
+
+    with (
+        patch("os.path.exists", return_value=True),
+        patch("builtins.open", mock_open(read_data=mock_yaml_content)),
+    ):
+        loader = ConfigLoader(path="dummy_path.yaml")
+        config = loader.load()
+
+        provider = config.providers["gemini_provider"]
+        # Verify all enum fields are properly coerced
+        assert provider.provider_type == ProviderType.GEMINI
+        assert provider.gateway_policy.debug_mode == DebugMode.NO_CONTENT
+        assert provider.gateway_policy.streaming_mode == StreamingMode.AUTO
+        assert (
+            provider.gateway_policy.fast_status_mapping[400] == ErrorReason.BAD_REQUEST
+        )
+        assert (
+            provider.gateway_policy.fast_status_mapping[429] == ErrorReason.RATE_LIMITED
+        )
+        assert (
+            provider.gateway_policy.fast_status_mapping[500] == ErrorReason.SERVER_ERROR
+        )
+        assert provider.proxy_config.mode == ProxyMode.NONE
+        assert (
+            provider.gateway_policy.circuit_breaker.mode
+            == CircuitBreakerMode.AUTO_RECOVERY
+        )
+
+
+def test_yaml_with_typo_in_provider_type_causes_system_exit_with_formatted_error():
+    """
+    Integration: YAML with a typo in provider_type causes SystemExit.
+    The error_formatter produces a readable message with line number info.
+    """
+    mock_yaml_content = """providers:
+  deepseek_provider:
+    enabled: true
+    provider_type: "deepseek"
+    keys_path: "keys/deepseek/"
+    api_base_url: "https://api.deepseek.com/v1"
+    access_control:
+      gateway_access_token: "ds_token"
+"""
+
+    with (
+        patch("os.path.exists", return_value=True),
+        patch("builtins.open", mock_open(read_data=mock_yaml_content)),
+    ):
+        loader = ConfigLoader(path="dummy_path.yaml")
+        with pytest.raises(SystemExit):
+            loader.load()
+
+
+def test_yaml_with_invalid_fast_status_mapping_key_causes_system_exit():
+    """
+    Integration: YAML with fast_status_mapping key outside 100-599 range
+    causes SystemExit via model_validator.
+    """
+    mock_yaml_content = """providers:
+  test_provider:
+    enabled: true
+    provider_type: "openai_like"
+    keys_path: "keys/test/"
+    api_base_url: "https://api.test.com/v1"
+    access_control:
+      gateway_access_token: "test_token"
+    gateway_policy:
+      fast_status_mapping:
+        999: "server_error"
+"""
+
+    with (
+        patch("os.path.exists", return_value=True),
+        patch("builtins.open", mock_open(read_data=mock_yaml_content)),
+    ):
+        loader = ConfigLoader(path="dummy_path.yaml")
+        with pytest.raises(SystemExit):
+            loader.load()
+
+
+def test_yaml_with_invalid_error_parsing_map_to_causes_system_exit():
+    """
+    Integration: YAML with invalid ErrorReason in error_parsing.rules[0].map_to
+    causes SystemExit.
+    """
+    mock_yaml_content = """providers:
+  test_provider:
+    enabled: true
+    provider_type: "openai_like"
+    keys_path: "keys/test/"
+    api_base_url: "https://api.test.com/v1"
+    access_control:
+      gateway_access_token: "test_token"
+    gateway_policy:
+      error_parsing:
+        enabled: true
+        rules:
+          - status_code: 400
+            error_path: "error.type"
+            match_pattern: "INVALID_KEY"
+            map_to: "garbage"
+"""
+
+    with (
+        patch("os.path.exists", return_value=True),
+        patch("builtins.open", mock_open(read_data=mock_yaml_content)),
+    ):
+        loader = ConfigLoader(path="dummy_path.yaml")
+        with pytest.raises(SystemExit):
+            loader.load()
+
+
+def test_yaml_with_invalid_regex_in_error_parsing_causes_system_exit():
+    """
+    Integration: YAML with invalid regex in error_parsing.rules[0].match_pattern
+    causes SystemExit via field_validator.
+    """
+    mock_yaml_content = """providers:
+  test_provider:
+    enabled: true
+    provider_type: "openai_like"
+    keys_path: "keys/test/"
+    api_base_url: "https://api.test.com/v1"
+    access_control:
+      gateway_access_token: "test_token"
+    gateway_policy:
+      error_parsing:
+        enabled: true
+        rules:
+          - status_code: 400
+            error_path: "error.type"
+            match_pattern: "(unclosed"
+            map_to: "invalid_key"
+"""
+
+    with (
+        patch("os.path.exists", return_value=True),
+        patch("builtins.open", mock_open(read_data=mock_yaml_content)),
+    ):
+        loader = ConfigLoader(path="dummy_path.yaml")
+        with pytest.raises(SystemExit):
+            loader.load()
+
+
+def test_yaml_with_retry_enabled_no_attempts_causes_system_exit():
+    """
+    Integration: YAML with retry.enabled=true but no retry attempts
+    causes SystemExit via model_validator check_retry_meaningful.
+
+    Note: The default config has on_key_error.attempts=3 and
+    on_server_error.attempts=5, so we must explicitly set both to 0
+    to trigger the validation error after deepmerge.
+    """
+    mock_yaml_content = """providers:
+  test_provider:
+    enabled: true
+    provider_type: "openai_like"
+    keys_path: "keys/test/"
+    api_base_url: "https://api.test.com/v1"
+    access_control:
+      gateway_access_token: "test_token"
+    gateway_policy:
+      retry:
+        enabled: true
+        on_key_error:
+          attempts: 0
+        on_server_error:
+          attempts: 0
+"""
+
+    with (
+        patch("os.path.exists", return_value=True),
+        patch("builtins.open", mock_open(read_data=mock_yaml_content)),
+    ):
+        loader = ConfigLoader(path="dummy_path.yaml")
+        with pytest.raises(SystemExit):
+            loader.load()
+
+
+def test_yaml_with_backoff_base_exceeding_max_causes_system_exit():
+    """
+    Integration: YAML with circuit_breaker.backoff base_duration_sec exceeding
+    max_duration_sec causes SystemExit via model_validator check_bounds.
+    """
+    mock_yaml_content = """providers:
+  test_provider:
+    enabled: true
+    provider_type: "openai_like"
+    keys_path: "keys/test/"
+    api_base_url: "https://api.test.com/v1"
+    access_control:
+      gateway_access_token: "test_token"
+    gateway_policy:
+      circuit_breaker:
+        enabled: true
+        backoff:
+          base_duration_sec: 100
+          max_duration_sec: 30
+"""
+
+    with (
+        patch("os.path.exists", return_value=True),
+        patch("builtins.open", mock_open(read_data=mock_yaml_content)),
+    ):
+        loader = ConfigLoader(path="dummy_path.yaml")
+        with pytest.raises(SystemExit):
+            loader.load()
+
+
+# ==============================================================================
+# Security Tests (from test-plan, not fitting in other group files)
+# ==============================================================================
+
+
+def test_provider_type_injection_rejected():
+    """
+    Security: ProviderConfig rejects SQL injection-style provider_type values.
+    """
+    with pytest.raises(ValidationError) as exc_info:
+        ProviderConfig(provider_type="; DROP TABLE keys;", keys_path="k/")
+
+    error_message = str(exc_info.value)
+    # The error should list valid ProviderType enum members
+    assert (
+        "anthropic" in error_message
+        or "openai_like" in error_message
+        or "gemini" in error_message
+    )
+
+
+def test_proxy_mode_injection_rejected():
+    """
+    Security: ProxyConfig rejects shell injection-style mode values.
+    """
+    with pytest.raises(ValidationError) as exc_info:
+        ProxyConfig(mode="none; rm -rf /")
+
+    error_message = str(exc_info.value)
+    # The error should list valid ProxyMode enum members
+    assert (
+        "none" in error_message
+        or "static" in error_message
+        or "stealth" in error_message
+    )
+
+
+def test_error_reason_injection_in_fast_status_mapping_rejected():
+    """
+    Security: GatewayPolicyConfig rejects SQL injection-style ErrorReason
+    values in fast_status_mapping.
+    """
+    with pytest.raises(ValidationError) as exc_info:
+        GatewayPolicyConfig(fast_status_mapping={400: "'; DROP TABLE"})
+
+    error_message = str(exc_info.value)
+    # The error should indicate the value is not a valid ErrorReason
+    assert "DROP TABLE" in error_message or "enum" in error_message.lower()
+
+
+def test_error_reason_injection_in_map_to_rejected():
+    """
+    Security: ErrorParsingRule rejects code injection-style map_to values.
+    """
+    with pytest.raises(ValidationError) as exc_info:
+        ErrorParsingRule(
+            status_code=400, error_path="e", match_pattern="x", map_to="'; exec"
+        )
+
+    error_message = str(exc_info.value)
+    # The error should indicate the value is not a valid ErrorReason
+    assert "exec" in error_message or "enum" in error_message.lower()
+
+
+def test_database_port_overflow_rejected():
+    """
+    Security: DatabaseConfig rejects extremely large port values (lt=65536).
+    """
+    with pytest.raises(ValidationError) as exc_info:
+        DatabaseConfig(port=2147483647)
+
+    error_message = str(exc_info.value)
+    assert "port" in error_message
+
+
+def test_negative_retry_attempts_rejected():
+    """
+    Security: RetryOnErrorConfig rejects large negative attempts values (ge=0).
+    """
+    with pytest.raises(ValidationError) as exc_info:
+        RetryOnErrorConfig(attempts=-999)
+
+    error_message = str(exc_info.value)
+    assert "attempts" in error_message
+
+
+def test_regex_dos_pattern_compiles_but_documented():
+    """
+    Security: ErrorParsingRule accepts a potentially dangerous regex pattern
+    (ReDoS-vulnerable). The field_validator only checks compilability, not
+    security. Protection against ReDoS requires re.compile(pattern, timeout=...)
+    (Python 3.13+). This test documents the current behavior.
+    """
+    # This pattern is a classic ReDoS-vulnerable regex, but it compiles fine
+    rule = ErrorParsingRule(
+        status_code=400, error_path="e", match_pattern="(a+)+$", map_to="invalid_key"
+    )
+    assert rule.match_pattern == "(a+)+$"
+    # NOTE: This test documents that the validator only checks compilability,
+    # not ReDoS safety. A timeout-based re.compile would be needed for full protection.

@@ -54,7 +54,7 @@ def get_default_config() -> dict[str, Any]:
         "providers": {
             "llm_provider_default": {
                 # This will be overridden by the template (e.g., 'gemini', 'deepseek').
-                "provider_type": "placeholder_type",
+                "provider_type": "gemini",
                 "enabled": True,
                 # This path is customized by the config manager.
                 "keys_path": "keys/llm_provider_default/",

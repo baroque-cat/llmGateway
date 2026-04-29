@@ -144,13 +144,7 @@ class AIBaseProvider(IProvider):
         # Select the highest priority matched rule
         if matched_rules:
             best_rule = max(matched_rules, key=lambda x: x.priority)
-            try:
-                return ErrorReason(best_rule.map_to)
-            except ValueError:
-                logger.warning(
-                    f"Invalid map_to value '{best_rule.map_to}' in error parsing rule "
-                    f"for provider '{self.name}'. Using default reason."
-                )
+            return best_rule.map_to
 
         return default_reason
 
@@ -190,15 +184,7 @@ class AIBaseProvider(IProvider):
         health_policy = self.config.worker_health_policy
 
         if status_code in health_policy.fast_status_mapping:
-            reason_str = health_policy.fast_status_mapping[status_code]
-            try:
-                reason = ErrorReason(reason_str)
-            except ValueError:
-                logger.warning(
-                    f"Invalid ErrorReason '{reason_str}' in worker_health_policy.fast_status_mapping "
-                    f"for provider '{self.name}'. Fallback to UNKNOWN."
-                )
-                reason = ErrorReason.UNKNOWN
+            reason = health_policy.fast_status_mapping[status_code]
 
             # Log the fast fail event
             logger.debug(
@@ -257,15 +243,7 @@ class AIBaseProvider(IProvider):
 
                 # 1. Fast Status Mapping (Highest Priority - Fast Fail)
                 if status_code in gateway_policy.fast_status_mapping:
-                    reason_str = gateway_policy.fast_status_mapping[status_code]
-                    try:
-                        reason = ErrorReason(reason_str)
-                    except ValueError:
-                        logger.warning(
-                            f"Invalid ErrorReason '{reason_str}' in unsafe_status_mapping for '{self.name}'. "
-                            f"Fallback to UNKNOWN."
-                        )
-                        reason = ErrorReason.UNKNOWN
+                    reason = gateway_policy.fast_status_mapping[status_code]
 
                     # STOP: Close stream without reading body
                     await upstream_response.aclose()

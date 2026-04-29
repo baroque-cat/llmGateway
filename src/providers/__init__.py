@@ -15,8 +15,9 @@ logger = logging.getLogger(__name__)
 
 # A registry to map provider type names from the config to their classes.
 # This makes the system easily extensible. To add a new provider, just
-
 # add its class here.
+
+# Must stay in sync with ProviderType enum in src.core.constants
 _PROVIDER_CLASSES: dict[str, type[AIBaseProvider]] = {
     "anthropic": AnthropicProvider,
     "openai_like": OpenAILikeProvider,
