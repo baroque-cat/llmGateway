@@ -37,7 +37,7 @@ services:
       - .env
     volumes:
       - ./config:/app/config:ro
-      - ./keys:/app/keys:rw
+      - ./data:/app/data:rw
     depends_on:
       database:
         condition: service_healthy
@@ -56,7 +56,7 @@ services:
       - .env
     volumes:
       - ./config:/app/config:ro
-      - ./keys:/app/keys:rw
+      - ./data:/app/data:rw
     userns_mode: keep-id
     depends_on:
       database:

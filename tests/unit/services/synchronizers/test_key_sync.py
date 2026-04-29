@@ -6,8 +6,6 @@ Unit tests for key synchronization functionality.
 
 import builtins
 import logging
-import os
-import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

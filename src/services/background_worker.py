@@ -7,6 +7,7 @@ from typing import Any
 
 import asyncpg
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.interval import IntervalTrigger
 
 # Import the new centralized package entry point and key components.
 from src.config import load_config
@@ -17,6 +18,7 @@ from src.core.interfaces import IResourceSyncer, ProviderKeyState, ProviderProxy
 from src.db import database
 from src.db.database import DatabaseManager
 from src.services import maintenance
+from src.services.inventory_exporter import KeyInventoryExporter
 from src.services.metrics_exporter import update_adaptive_controller_state
 from src.services.probes import get_all_probes
 from src.services.synchronizers import get_all_syncers
@@ -75,6 +77,32 @@ def _setup_directories(accessor: ConfigAccessor) -> None:
                         )
 
         logger.info("Directory setup complete.")
+
+        # --- Startup cleanup: remove leftover .trash/ directories ---
+        # After a crash, raw key files may have been moved to .trash/ but not
+        # yet unlinked. Clean those up now so they don't accumulate.
+        for provider_name, provider in accessor.get_all_providers().items():
+            if not provider.enabled:
+                continue
+            trash_dir = os.path.join("data", provider_name, "raw", ".trash")
+            if os.path.isdir(trash_dir):
+                try:
+                    for entry in os.listdir(trash_dir):
+                        entry_path = os.path.join(trash_dir, entry)
+                        if os.path.isfile(entry_path) or os.path.islink(entry_path):
+                            os.unlink(entry_path)
+                    os.rmdir(trash_dir)
+                    logger.info(
+                        "Startup cleanup: removed leftover .trash/ for '%s'",
+                        provider_name,
+                    )
+                except OSError as e:
+                    logger.warning(
+                        "Startup cleanup: could not fully clean .trash/ for '%s': %s",
+                        provider_name,
+                        e,
+                    )
+
     except PermissionError as e:
         logger.critical(
             f"Permission denied while creating directory: {e}. Please check file system permissions."
@@ -113,11 +141,12 @@ async def run_sync_cycle(
         for provider_name, provider_config in enabled_providers.items():
             # For KeySyncer (always runs for enabled providers)
             key_path = os.path.join("data", provider_name, "raw")
-            keys_from_file = read_keys_from_directory(key_path)
+            keys_from_file, file_map = read_keys_from_directory(key_path)
             models_from_config = list(provider_config.models.keys())
             key_state: ProviderKeyState = {
                 "keys_from_files": keys_from_file,
                 "models_from_config": models_from_config,
+                "file_map": file_map,
             }
             desired_state["keys"][provider_name] = key_state
 
@@ -253,6 +282,37 @@ async def run_worker() -> None:
             minute=0,
             args=[db_manager],
         )
+
+        # --- Register key export jobs (snapshot + inventory) ---
+        exporter = KeyInventoryExporter()
+        for provider_name, provider_config in accessor.get_all_providers().items():
+            if not provider_config.enabled:
+                continue
+
+            key_export = provider_config.key_export
+
+            # Master switch: if disabled, skip all export jobs for this provider.
+            if not key_export.enabled:
+                continue
+
+            # Snapshot job
+            if key_export.snapshot_interval_hours > 0:
+                scheduler.add_job(  # type: ignore
+                    exporter.export_snapshot,
+                    trigger=IntervalTrigger(hours=key_export.snapshot_interval_hours),
+                    id=f"snapshot_{provider_name}",
+                    args=[provider_name, db_manager],
+                )
+
+            # Inventory job
+            inventory = key_export.inventory
+            if inventory.enabled and inventory.statuses:
+                scheduler.add_job(  # type: ignore
+                    exporter.export_inventory,
+                    trigger=IntervalTrigger(minutes=inventory.interval_minutes),
+                    id=f"inventory_{provider_name}",
+                    args=[provider_name, db_manager, inventory.statuses],
+                )
 
         logger.info("Scheduler configured. List of jobs:")
         scheduler.print_jobs()  # type: ignore

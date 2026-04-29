@@ -20,7 +20,7 @@ from src.config.schemas import (
     ProviderConfig,
 )
 from src.core.constants import ErrorReason
-from src.core.models import CheckResult, RequestDetails
+from src.core.models import RequestDetails
 from src.providers.impl.anthropic import AnthropicProvider
 
 

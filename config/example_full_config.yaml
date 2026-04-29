@@ -41,15 +41,15 @@ database:
   dbname: "${DB_NAME}"
   # Connection pool settings for asyncpg.
   pool:
-    min_size: 1          # Minimum connections in the pool
-    max_size: 15         # Maximum connections in the pool
+    min_size: 1 # Minimum connections in the pool
+    max_size: 15 # Maximum connections in the pool
   # Retry policy for transient database errors (connection lost, deadlock, etc.).
   # The background worker will automatically retry DB operations on these errors.
   retry:
-    max_attempts: 3          # Maximum attempts including the first one (1..10)
-    base_delay_sec: 1.0      # Delay before first retry in seconds
-    backoff_factor: 2.0      # Exponential backoff multiplier (>= 1.0)
-    jitter: true             # Add random ±50% jitter to prevent thundering herd
+    max_attempts: 3 # Maximum attempts including the first one (1..10)
+    base_delay_sec: 1.0 # Delay before first retry in seconds
+    backoff_factor: 2.0 # Exponential backoff multiplier (>= 1.0)
+    jitter: true # Add random ±50% jitter to prevent thundering herd
 
 # --- PROVIDER SETTINGS ---
 providers:
@@ -57,7 +57,7 @@ providers:
   gemini-production:
     provider_type: "gemini"
     enabled: true
-    
+
     api_base_url: "https://generativelanguage.googleapis.com"
     default_model: "gemini-2.5-flash"
     shared_key_status: false
@@ -72,14 +72,14 @@ providers:
           contents:
             - parts:
                 - text: "Hello"
-      
+
       gemini-2.5-pro:
         endpoint_suffix: ":generateContent"
         test_payload:
           contents:
             - parts:
                 - text: "Hello"
-      
+
       imagen-3.0-generate-002:
         endpoint_suffix: ":predict"
         test_payload:
@@ -131,25 +131,25 @@ providers:
       # - Success → gradual ramp-up; accelerated after recovery_threshold
       adaptive_batching:
         # Start values — initial batch size/delay for the adaptive controller.
-        start_batch_size: 10             # Initial batch size (must be within [min, max])
-        start_batch_delay_sec: 30.0      # Initial delay in seconds
+        start_batch_size: 10 # Initial batch size (must be within [min, max])
+        start_batch_delay_sec: 30.0 # Initial delay in seconds
         # Boundaries: batch size never drops below min nor exceeds max
-        min_batch_size: 5                # Lower bound (default: 5)
-        max_batch_size: 50               # Upper bound (default: 50)
+        min_batch_size: 5 # Lower bound (default: 5)
+        max_batch_size: 50 # Upper bound (default: 50)
         # Boundaries: delay never goes below min nor above max (seconds)
-        min_batch_delay_sec: 3.0         # Minimum pause between batches (default: 3.0)
-        max_batch_delay_sec: 120.0       # Maximum pause under heavy throttling (default: 120.0)
+        min_batch_delay_sec: 3.0 # Minimum pause between batches (default: 3.0)
+        max_batch_delay_sec: 120.0 # Maximum pause under heavy throttling (default: 120.0)
         # Step sizes: how fast the controller adjusts
-        batch_size_step: 5               # Keys added/removed per step (default: 5)
-        delay_step_sec: 2.0              # Seconds added/removed per step (default: 2.0)
+        batch_size_step: 5 # Keys added/removed per step (default: 5)
+        delay_step_sec: 2.0 # Seconds added/removed per step (default: 2.0)
         # Rate-limit reaction (multipliers — aggressive)
-        rate_limit_divisor: 2            # batch_size //= divisor (default: 2)
+        rate_limit_divisor: 2 # batch_size //= divisor (default: 2)
         rate_limit_delay_multiplier: 2.0 # delay *= multiplier (default: 2.0)
         # Recovery: after N consecutive successes, step size doubles
-        recovery_threshold: 5            # Consecutive successes for fast recovery (default: 5)
-        recovery_step_multiplier: 2.0    # Step multiplier during recovery (default: 2.0)
+        recovery_threshold: 5 # Consecutive successes for fast recovery (default: 5)
+        recovery_step_multiplier: 2.0 # Step multiplier during recovery (default: 2.0)
         # Moderate backoff threshold: transient > this fraction → slow down
-        failure_rate_threshold: 0.3      # 30% transient errors in non-fatal results (default: 0.3)
+        failure_rate_threshold: 0.3 # 30% transient errors in non-fatal results (default: 0.3)
       # Maximum time in seconds a single probe task is allowed to run before being force-cancelled.
       # This prevents "zombie" tasks from hanging indefinitely and blocking the dispatcher.
       task_timeout_sec: 900
@@ -158,13 +158,25 @@ providers:
       verification_attempts: 3
       verification_delay_sec: 65
 
+    # --- Key Export Configuration ---
+    # Export current key state to NDJSON files.
+    # Everything is disabled by default.
+    key_export:
+      enabled: false # Master switch: false — no export operations run
+      clean_raw_after_sync: true # Delete raw files after successful DB sync
+      snapshot_interval_hours: 0 # Full snapshot interval (0 = disabled)
+      inventory:
+        enabled: false # Enable status-based inventory export
+        interval_minutes: 1440 # Interval between inventory cycles (minutes)
+        statuses: [valid] # Statuses to export: valid, no_quota, rate_limited, ...
+
     # Configuration for parsing error responses to refine error classification.
     # This enables distinguishing between different error types with the same HTTP status code.
     # Supports two matching modes:
     #   - Dot-path mode: error_path like "error.status" extracts a JSON field.
     #   - Fulltext mode: error_path "$" applies regex to the entire raw response body.
     error_parsing:
-      enabled: false  # Default is false to maintain Zero-Overhead behavior
+      enabled: false # Default is false to maintain Zero-Overhead behavior
       rules:
         - status_code: 400
           error_path: "error.status"
@@ -180,7 +192,7 @@ providers:
     gateway_policy:
       streaming_mode: "auto" # "auto" or "disabled"
       debug_mode: "disabled" # "disabled", "no_content", "full_body"
-      
+
       retry:
         enabled: true
         on_key_error:
@@ -193,7 +205,7 @@ providers:
           attempts: 5
           backoff_sec: 0.5
           backoff_factor: 2.0
-      
+
       circuit_breaker:
         enabled: true
         mode: "auto_recovery"
@@ -208,11 +220,11 @@ providers:
   deepseek-main:
     provider_type: "openai_like"
     enabled: true
-    
+
     api_base_url: "https://api.deepseek.com/v1"
     default_model: "deepseek-chat"
     dedicated_http_client: false
-    
+
     models:
       deepseek-chat:
         endpoint_suffix: "/chat/completions"
@@ -221,10 +233,10 @@ providers:
             - role: "user"
               content: "Hi"
           max_tokens: 1
-    
+
     access_control:
       gateway_access_token: "${DEEPSEEK_TOKEN}"
-    
+
     # Using default health and gateway policies by omitting them
     proxy_config:
       mode: "none"
@@ -233,7 +245,7 @@ providers:
   anthropic-production:
     provider_type: "anthropic"
     enabled: true
-    
+
     api_base_url: "https://api.anthropic.com"
     default_model: "claude-sonnet-4-20250514"
     dedicated_http_client: false
@@ -247,7 +259,7 @@ providers:
             - role: "user"
               content: "Hi"
           max_tokens: 1
-      
+
       claude-opus-4-20250514:
         endpoint_suffix: "/v1/messages"
         test_payload:
@@ -256,16 +268,16 @@ providers:
             - role: "user"
               content: "Hi"
           max_tokens: 1
-    
+
     access_control:
       gateway_access_token: "${ANTHROPIC_TOKEN}"
-    
+
     timeouts:
       connect: 15.0
       read: 300.0
       write: 35.0
       pool: 35.0
-    
+
     worker_health_policy:
       # Intervals in Minutes
       on_server_error_min: 30
@@ -294,11 +306,11 @@ providers:
       # Verification Loop Configuration
       verification_attempts: 3
       verification_delay_sec: 65
-    
+
     gateway_policy:
       streaming_mode: "auto"
       debug_mode: "disabled"
-      
+
       retry:
         enabled: true
         on_key_error:
@@ -309,7 +321,7 @@ providers:
           attempts: 5
           backoff_sec: 0.5
           backoff_factor: 2.0
-      
+
       circuit_breaker:
         enabled: true
         mode: "auto_recovery"
@@ -319,6 +331,6 @@ providers:
           base_duration_sec: 60
           max_duration_sec: 3600
           factor: 2.0
-    
+
     proxy_config:
       mode: "none"

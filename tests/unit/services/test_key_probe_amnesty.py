@@ -6,9 +6,9 @@ Unit and integration tests for KeyProbe:
 - DB retry integration via AsyncRetrier (UT-G01..UT-G07, INT-01..INT-07)
 """
 
+import inspect
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
-import inspect
 
 import pytest
 from asyncpg.exceptions import (
@@ -28,7 +28,7 @@ from src.core.batching import AdaptiveBatchController
 from src.core.constants import ErrorReason
 from src.core.models import CheckResult
 from src.core.probes import IResourceProbe
-from src.core.retry import AsyncRetrier, DB_RETRYABLE
+from src.core.retry import AsyncRetrier
 from src.services.probes.key_probe import KeyProbe
 
 # ── Shared fixtures ──────────────────────────────────────────────────────────

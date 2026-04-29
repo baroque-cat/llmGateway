@@ -8,9 +8,9 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
+from src.config.schemas import DatabaseConfig, DatabaseRetryConfig
 from src.core.constants import ALL_MODELS_MARKER, ErrorReason
 from src.core.models import CheckResult
-from src.config.schemas import DatabaseConfig, DatabaseRetryConfig
 from src.services.probes.key_probe import KeyProbe
 
 

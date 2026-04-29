@@ -19,8 +19,6 @@ import asyncio
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 import main
 from src.config.schemas import Config
 

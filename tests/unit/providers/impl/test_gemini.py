@@ -564,7 +564,6 @@ class TestGeminiProxyRequest:
 
         from src.config.schemas import (
             ErrorParsingConfig,
-            GatewayPolicyConfig,
             ProviderConfig,
         )
 

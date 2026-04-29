@@ -4,7 +4,9 @@ import json
 import logging
 import os
 import re
+import time as _time
 from typing import Any
+from uuid import uuid4
 
 from src.core.accessor import ConfigAccessor
 
@@ -15,10 +17,10 @@ from src.db.database import DatabaseManager
 logger = logging.getLogger(__name__)
 
 
-def read_keys_from_directory(path: str) -> set[str]:
+def read_keys_from_directory(path: str) -> tuple[set[str], dict[str, float]]:
     """
     Reads all API key files (.txt and .ndjson) from a directory and returns
-    a deduplicated set of keys.
+    a deduplicated set of keys along with a file modification time map.
 
     Supported formats:
       - ``.txt``: plain text files; content is split on whitespace and commas.
@@ -40,16 +42,19 @@ def read_keys_from_directory(path: str) -> set[str]:
         path: Path to the directory containing key files.
 
     Returns:
-        A ``set[str]`` of unique API keys, or an empty set if the directory
+        A tuple of ``(keys: set[str], file_map: dict[str, float])`` where
+        ``file_map`` maps absolute file paths to their ``st_mtime`` as captured
+        *before* the file was read.  Returns ``(set(), {})`` if the directory
         does not exist or contains no valid key files.
     """
     if not os.path.exists(path) or not os.path.isdir(path):
         logger.warning(
             f"Key directory not found or is not a directory: '{path}'. Skipping."
         )
-        return set()
+        return set(), {}
 
     all_keys: set[str] = set()
+    file_map: dict[str, float] = {}
     try:
         for filename in os.listdir(path):
             filepath = os.path.join(path, filename)
@@ -60,6 +65,13 @@ def read_keys_from_directory(path: str) -> set[str]:
             if ext not in (".txt", ".ndjson"):
                 logger.debug(f"Skipping non-key file: '{filename}'")
                 continue
+
+            # Capture mtime BEFORE reading to detect modifications during sync.
+            try:
+                stat = os.stat(filepath)
+            except FileNotFoundError:
+                continue  # Race: file deleted between listdir and stat
+            file_map[os.path.abspath(filepath)] = stat.st_mtime
 
             try:
                 if ext == ".txt":
@@ -74,7 +86,7 @@ def read_keys_from_directory(path: str) -> set[str]:
     except Exception as e:
         logger.error(f"Failed to list files in directory '{path}': {e}", exc_info=True)
 
-    return all_keys
+    return all_keys, file_map
 
 
 def _read_txt_file(filepath: str, all_keys: set[str]) -> None:
@@ -204,6 +216,40 @@ class KeySyncer(IResourceSyncer):
                     keys_from_file=keys_from_file,
                     provider_models=models_from_config,
                 )
+
+                # --- Raw file cleanup after successful sync ---
+                provider_config = self.accessor.get_provider(provider_name)
+                if provider_config and provider_config.key_export.clean_raw_after_sync:
+                    file_map = state.get("file_map", {})
+                    if file_map:
+                        raw_dir = os.path.join("data", provider_name, "raw")
+                        for filepath, recorded_mtime in file_map.items():
+                            try:
+                                current_stat = os.stat(filepath)
+                            except FileNotFoundError:
+                                logger.debug(
+                                    "Cleanup: file already gone, skipping: %s", filepath
+                                )
+                                continue
+
+                            if current_stat.st_mtime != recorded_mtime:
+                                logger.warning(
+                                    "Cleanup: file modified since read, skipping: %s",
+                                    filepath,
+                                )
+                                continue
+
+                            timestamp = int(_time.time())
+                            uuid_hex = uuid4().hex[:8]
+                            basename = os.path.basename(filepath)
+                            trash_dir = os.path.join(raw_dir, ".trash")
+                            os.makedirs(trash_dir, exist_ok=True)
+                            trash_name = f"{timestamp}_{uuid_hex}_{basename}"
+                            trash_path = os.path.join(trash_dir, trash_name)
+
+                            os.rename(filepath, trash_path)
+                            os.unlink(trash_path)
+                            logger.debug("Cleaned up raw file: %s", filepath)
             except Exception as e:
                 # Isolate failures to prevent one provider from halting the entire sync process.
                 logger.error(

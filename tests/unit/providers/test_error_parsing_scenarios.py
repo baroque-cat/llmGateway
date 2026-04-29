@@ -17,7 +17,6 @@ import pytest
 from src.config.schemas import (
     ErrorParsingConfig,
     ErrorParsingRule,
-    GatewayPolicyConfig,
     ProviderConfig,
 )
 from src.core.constants import ErrorReason

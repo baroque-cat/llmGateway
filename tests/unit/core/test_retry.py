@@ -7,10 +7,8 @@ Covers test-plan scenarios:
   SEC-01..SEC-08  — Security / architectural constraints
 """
 
-import asyncio
 import importlib
 import logging
-import random
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import asyncpg.exceptions
@@ -18,7 +16,7 @@ import pytest
 from pydantic import ValidationError
 
 from src.config.schemas import Config, DatabaseConfig, DatabaseRetryConfig
-from src.core.retry import AsyncRetrier, DB_RETRYABLE
+from src.core.retry import DB_RETRYABLE, AsyncRetrier
 
 # ==============================================================================
 # Helpers
@@ -285,7 +283,7 @@ class TestUTE10:
             asyncpg.exceptions.TooManyConnectionsError,
             asyncpg.exceptions.DeadlockDetectedError,
         )
-        assert DB_RETRYABLE == expected
+        assert expected == DB_RETRYABLE
 
     def test_db_retryable_is_tuple(self):
         """DB_RETRYABLE must be a tuple (immutable)."""
@@ -654,7 +652,6 @@ class TestSEC08:
     def test_no_services_import(self):
         """The retry module must not import anything from src.services."""
         # Re-import the module to inspect its source
-        import src.core.retry as retry_module
 
         source = importlib.util.find_spec("src.core.retry")
         assert source is not None

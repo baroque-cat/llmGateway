@@ -13,6 +13,7 @@ from src.core.constants import (
     ErrorReason,
     ProviderType,
     ProxyMode,
+    Status,
     StreamingMode,
 )
 from src.core.models import AdaptiveBatchingParams
@@ -465,6 +466,45 @@ class GatewayPolicyConfig(BaseModel):
     circuit_breaker: CircuitBreakerConfig = Field(default_factory=CircuitBreakerConfig)
 
 
+class KeyInventoryConfig(BaseModel):
+    """
+    Configuration for periodic key inventory export by status.
+
+    Controls exporting keys grouped by their status into separate NDJSON files.
+    Each status in ``statuses`` produces a subdirectory with keys of that status.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Whether inventory export is enabled for this provider.
+    enabled: bool = False
+    # Interval in minutes between inventory export cycles. Must be > 0.
+    interval_minutes: int = Field(default=1440, gt=0)
+    # List of statuses to export as separate inventory groups.
+    statuses: list[Status] = []
+
+
+class KeyExportConfig(BaseModel):
+    """
+    Configuration for key export features: snapshots, inventory, and raw cleanup.
+
+    Controls all key export operations for a single provider instance, including
+    periodic full snapshots, status-based inventory exports, and safe cleanup of
+    raw key files after successful synchronization.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Master switch: if False, no export operations run for this provider.
+    enabled: bool = False
+    # If True, raw key files are safely removed after successful DB sync.
+    clean_raw_after_sync: bool = True
+    # Interval in hours between full snapshot exports. 0 disables snapshots.
+    snapshot_interval_hours: int = Field(default=0, ge=0)
+    # Inventory export configuration (status-based grouping).
+    inventory: KeyInventoryConfig = Field(default_factory=KeyInventoryConfig)
+
+
 class ProviderConfig(BaseModel):
     """
     Configuration for a single, named LLM provider instance.
@@ -505,6 +545,7 @@ class ProviderConfig(BaseModel):
     timeouts: TimeoutConfig = Field(default_factory=TimeoutConfig)
     error_parsing: ErrorParsingConfig = Field(default_factory=ErrorParsingConfig)
     worker_health_policy: HealthPolicyConfig = Field(default_factory=HealthPolicyConfig)
+    key_export: KeyExportConfig = Field(default_factory=KeyExportConfig)
     gateway_policy: GatewayPolicyConfig = Field(default_factory=GatewayPolicyConfig)
 
 

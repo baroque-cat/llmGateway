@@ -1,6 +1,5 @@
 """Tests for _setup_directories in background_worker.py."""
 
-import os
 from unittest.mock import MagicMock, patch
 
 from src.services.background_worker import _setup_directories

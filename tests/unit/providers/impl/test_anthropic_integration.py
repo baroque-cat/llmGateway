@@ -12,10 +12,9 @@ This module tests that:
 from unittest.mock import mock_open, patch
 
 import pytest
-
-from src.config.loader import ConfigLoader
 from pydantic import ValidationError
 
+from src.config.loader import ConfigLoader
 from src.config.schemas import ModelInfo, ProviderConfig
 from src.providers import _PROVIDER_CLASSES, get_provider
 from src.providers.impl.anthropic import AnthropicProvider

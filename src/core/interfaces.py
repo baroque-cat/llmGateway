@@ -33,6 +33,7 @@ class ProviderKeyState(TypedDict):
 
     keys_from_files: set[str]
     models_from_config: list[str]
+    file_map: dict[str, float]
 
 
 class ProviderProxyState(TypedDict):
@@ -201,3 +202,49 @@ class IResourceSyncer(ABC):
                            the complete desired state for that provider's resources.
         """
         pass
+
+
+class IKeyInventoryExporter(ABC):
+    """
+    Contract for exporting the current state of API keys to NDJSON files.
+
+    Implementations are responsible for querying the database and writing
+    NDJSON files in the ``data/<provider_name>/`` directory hierarchy.
+
+    This ABC lives in the core layer to keep the contract free of database
+    and service implementation details.  The ``db_manager`` parameter uses a
+    ``TYPE_CHECKING`` guard so the core does not import from ``src.db`` at
+    runtime.
+    """
+
+    @abstractmethod
+    async def export_snapshot(
+        self, provider_name: str, db_manager: DatabaseManager
+    ) -> None:
+        """Export all keys for a provider to ``data/<name>/all_keys.ndjson``.
+
+        Queries the database for every API key belonging to *provider_name*,
+        constructs ``KeyExportSnapshot`` records, and writes them as an
+        NDJSON file via ``write_atomic_ndjson``.
+
+        Args:
+            provider_name: The unique instance name of the provider.
+            db_manager: The database manager for executing queries.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    async def export_inventory(
+        self, provider_name: str, db_manager: DatabaseManager, statuses: list[str]
+    ) -> None:
+        """Export keys grouped by status to ``data/<name>/<status>/keys.ndjson``.
+
+        For each status in *statuses*, queries the database for keys with
+        that status and writes them to a separate NDJSON file.
+
+        Args:
+            provider_name: The unique instance name of the provider.
+            db_manager: The database manager for executing queries.
+            statuses: List of status strings to export as separate groups.
+        """
+        raise NotImplementedError

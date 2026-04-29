@@ -35,7 +35,6 @@ from src.config.schemas import (
 from src.core.constants import (
     CircuitBreakerMode,
     DebugMode,
-    ErrorReason,
     ProviderType,
     ProxyMode,
     StreamingMode,
@@ -1016,9 +1015,9 @@ def test_invalid_name_with_special_chars_rejected():
 
 def test_keys_path_in_yaml_raises_validation_error():
     """YAML with keys_path raises ValidationError (extra field forbidden)."""
-    from src.config.schemas import Config
-
     import yaml
+
+    from src.config.schemas import Config
 
     yaml_content = """
 providers:

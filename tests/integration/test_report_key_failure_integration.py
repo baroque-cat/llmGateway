@@ -8,7 +8,7 @@ from HealthPolicyConfig (not a hardcoded +1 minute).
 """
 
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 

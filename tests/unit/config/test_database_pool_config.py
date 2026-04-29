@@ -18,7 +18,7 @@ import pytest
 from pydantic import ValidationError
 
 from src.config.loader import ConfigLoader
-from src.config.schemas import Config, DatabaseConfig, DatabasePoolConfig
+from src.config.schemas import Config, DatabasePoolConfig
 
 # ==============================================================================
 # UT-P01..UT-P04: Default values and basic construction

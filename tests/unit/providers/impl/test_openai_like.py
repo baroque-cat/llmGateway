@@ -635,7 +635,6 @@ class TestOpenAILikeProxyRequest:
 
         from src.config.schemas import (
             ErrorParsingConfig,
-            GatewayPolicyConfig,
             ProviderConfig,
         )
 

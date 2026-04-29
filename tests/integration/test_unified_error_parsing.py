@@ -11,7 +11,7 @@ Tests INT-1 through INT-4:
 """
 
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
@@ -20,11 +20,8 @@ from fastapi import Request
 from src.config.schemas import (
     ErrorParsingConfig,
     ErrorParsingRule,
-    GatewayPolicyConfig,
     ModelInfo,
     ProviderConfig,
-    RetryOnErrorConfig,
-    RetryPolicyConfig,
 )
 from src.core.constants import ErrorReason
 from src.core.models import CheckResult
