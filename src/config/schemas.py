@@ -275,26 +275,6 @@ class HealthPolicyConfig(BaseModel):
     # Hard delay between verification attempts (seconds). Should be >60 seconds to survive minute-based rate limits.
     verification_delay_sec: int = Field(default=65, ge=60)
 
-    # --- Fast Status Mapping (for worker health checks) ---
-    # Mapping of HTTP status codes to ErrorReason strings for fast, body-less error handling.
-    # When a status code matches an entry here, the worker will IMMEDIATELY fail the check
-    # with the mapped reason without reading the response body.
-    fast_status_mapping: dict[int, ErrorReason] = Field(
-        default_factory=dict,
-        description="Mapping of HTTP status codes to ErrorReason strings",
-    )
-
-    @model_validator(mode="after")
-    def check_fast_status_mapping_keys(self) -> "HealthPolicyConfig":
-        """Validate that all keys in fast_status_mapping are valid HTTP status codes (100–599)."""
-        for status_code in self.fast_status_mapping:
-            if not (100 <= status_code < 600):
-                raise ValueError(
-                    f"Invalid HTTP status code {status_code} in fast_status_mapping. "
-                    "Keys must be in range 100–599."
-                )
-        return self
-
     @model_validator(mode="after")
     def check_quarantine_logic(self) -> "HealthPolicyConfig":
         """Enforce quarantine_after_days <= stop_checking_after_days."""
@@ -380,7 +360,9 @@ class ErrorParsingRule(BaseModel):
     # HTTP status code this rule applies to (e.g., 400, 429, etc.)
     status_code: int = Field(..., ge=400, lt=600)
 
-    # JSON path to the error field (e.g., "error.type", "error.code", "error.message")
+    # JSON path to the error field (e.g., "error.type", "error.code", "error.message").
+    # Special values "$" and "" enable fulltext search mode — regex is applied against
+    # the entire raw response body instead of a specific JSON field.
     error_path: str
 
     # Regular expression or exact value to match in the error field
@@ -442,6 +424,8 @@ class ErrorParsingConfig(BaseModel):
 class GatewayPolicyConfig(BaseModel):
     """Groups all policies applied by the API Gateway during live request processing."""
 
+    model_config = ConfigDict(extra="forbid")
+
     # Controls whether streaming is enabled for this provider instance.
     # See src.core.constants.StreamingMode for allowed values.
     streaming_mode: StreamingMode = StreamingMode.AUTO
@@ -450,31 +434,10 @@ class GatewayPolicyConfig(BaseModel):
     # See src.core.constants.DebugMode for allowed values.
     debug_mode: DebugMode = DebugMode.DISABLED
 
-    # Configuration for parsing error responses to refine error classification
-    # This enables distinguishing between different error types with the same HTTP status code
-    error_parsing: ErrorParsingConfig = Field(default_factory=ErrorParsingConfig)
-
     # Policy for automatically retrying failed requests.
     retry: RetryPolicyConfig = Field(default_factory=RetryPolicyConfig)
     # Policy for the circuit breaker to handle endpoint failures.
     circuit_breaker: CircuitBreakerConfig = Field(default_factory=CircuitBreakerConfig)
-
-    # Mapping of HTTP status codes to ErrorReason strings for fast, body-less error handling.
-    # When a status code matches an entry here, the gateway will IMMEDIATELY fail the request
-    # with the mapped reason without reading the response body.
-    # WARNING: This prevents forwarding specific upstream error messages to the client.
-    fast_status_mapping: dict[int, ErrorReason] = Field(default_factory=dict)
-
-    @model_validator(mode="after")
-    def check_fast_status_mapping_keys(self) -> "GatewayPolicyConfig":
-        """Validate that all keys in fast_status_mapping are valid HTTP status codes (100–599)."""
-        for status_code in self.fast_status_mapping:
-            if not (100 <= status_code < 600):
-                raise ValueError(
-                    f"Invalid HTTP status code {status_code} in fast_status_mapping. "
-                    "Keys must be in range 100–599."
-                )
-        return self
 
 
 class ProviderConfig(BaseModel):
@@ -515,9 +478,10 @@ class ProviderConfig(BaseModel):
     # omitted from the user's YAML file. This is the key to the new design and
     # directly implements the user's requirement for "optional sections".
     access_control: AccessControlConfig = Field(default_factory=AccessControlConfig)
-    worker_health_policy: HealthPolicyConfig = Field(default_factory=HealthPolicyConfig)
     proxy_config: ProxyConfig = Field(default_factory=ProxyConfig)
     timeouts: TimeoutConfig = Field(default_factory=TimeoutConfig)
+    error_parsing: ErrorParsingConfig = Field(default_factory=ErrorParsingConfig)
+    worker_health_policy: HealthPolicyConfig = Field(default_factory=HealthPolicyConfig)
     gateway_policy: GatewayPolicyConfig = Field(default_factory=GatewayPolicyConfig)
 
 

@@ -232,11 +232,6 @@ class AnthropicProvider(AIBaseProvider):
         try:
             response = await client.get(api_url, headers=headers, timeout=timeout)
 
-            # Check for fast fail condition first
-            fast_fail_result = await self._check_fast_fail(response)
-            if fast_fail_result:
-                return fast_fail_result
-
             response.raise_for_status()
 
             return CheckResult.success(
@@ -261,16 +256,17 @@ class AnthropicProvider(AIBaseProvider):
             response = e.response
             status_code = response.status_code
 
-            # Check for fast fail condition
-            fast_fail_result = await self._check_fast_fail(response)
-            if fast_fail_result:
-                return fast_fail_result
-
             reason = self._map_status_code_to_reason(status_code)
 
+            # Refine reason using error parsing rules from provider-level config
+            text = response.text
+            refined = await self._refine_error_reason(
+                response, reason, body_bytes=text.encode()
+            )
+
             return CheckResult.fail(
-                reason=reason,
-                message=response.text,
+                reason=refined,
+                message=text,
                 response_time=response.elapsed.total_seconds(),
                 status_code=status_code,
             )

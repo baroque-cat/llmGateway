@@ -32,8 +32,7 @@ class TestErrorParsingScenarios:
     def create_mock_openai_provider(self, error_config):
         """Helper to create a mock OpenAILikeProvider."""
         mock_config = MagicMock(spec=ProviderConfig)
-        mock_config.gateway_policy = MagicMock(spec=GatewayPolicyConfig)
-        mock_config.gateway_policy.error_parsing = error_config
+        mock_config.error_parsing = error_config
 
         # Minimal config
         mock_config.provider_type = "openai"
@@ -54,8 +53,7 @@ class TestErrorParsingScenarios:
     def create_mock_gemini_provider(self, error_config):
         """Helper to create a mock GeminiProvider."""
         mock_config = MagicMock(spec=ProviderConfig)
-        mock_config.gateway_policy = MagicMock(spec=GatewayPolicyConfig)
-        mock_config.gateway_policy.error_parsing = error_config
+        mock_config.error_parsing = error_config
 
         # Minimal config
         mock_config.provider_type = "gemini"
@@ -225,11 +223,12 @@ class TestErrorParsingScenarios:
     @pytest.mark.asyncio
     async def test_gateway_vs_worker_behavior(self):
         """
-        Test that gateway and worker handle 400 errors differently.
+        Test that gateway and worker now use the same error_parsing rules.
 
-        Gateway: Uses error parsing rules to refine error classification.
-        Worker: In check() method, treats all 400 errors as INVALID_KEY
-                (this is tested separately in unit tests).
+        Previously, gateway and worker had different paths for error_parsing
+        (gateway via gateway_policy.error_parsing, worker via check() method).
+        Now both use ProviderConfig.error_parsing, ensuring consistent
+        error classification across both paths.
         """
         # This test demonstrates the conceptual difference
         # Gateway behavior with error parsing disabled
@@ -315,7 +314,7 @@ class TestErrorParsingScenarios:
                         status_code=400,
                         error_path="error.code",
                         match_pattern="insufficient_quota",
-                        map_to="no_quota_specific",
+                        map_to="no_quota",
                         priority=15,  # Higher priority
                         description="Specific insufficient quota code",
                     ),

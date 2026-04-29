@@ -221,11 +221,6 @@ class OpenAILikeProvider(AIBaseProvider):
             response = e.response
             status_code = response.status_code
 
-            # NEW: Check for fast fail condition before any other processing
-            fast_fail_result = await self._check_fast_fail(response)
-            if fast_fail_result:
-                return fast_fail_result
-
             # Special handling for worker: 400 errors in check() likely indicate invalid key
             # since the request format is predetermined and correct
             if status_code == 400:
@@ -236,9 +231,15 @@ class OpenAILikeProvider(AIBaseProvider):
             else:
                 reason = self._map_status_code_to_reason(status_code)
 
+            # Refine reason using error parsing rules from provider-level config
+            text = response.text
+            refined = await self._refine_error_reason(
+                response, reason, body_bytes=text.encode()
+            )
+
             return CheckResult.fail(
-                reason=reason,
-                message=response.text,
+                reason=refined,
+                message=text,
                 response_time=response.elapsed.total_seconds(),
                 status_code=status_code,
             )

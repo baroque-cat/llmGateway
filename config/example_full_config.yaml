@@ -158,47 +158,31 @@ providers:
       # Verification Loop Configuration
       # How many times to re-verify a key after a retryable error (e.g., rate limit).
       verification_attempts: 3
-      # Hard delay between verification attempts (seconds). 
-      # Should be >60 seconds to survive minute-based rate limits.
       verification_delay_sec: 65
-      
-      # Fast Status Mapping for worker health checks
-      # Immediately fails health checks with these status codes without reading the response body.
-      # Uncomment and add entries as needed. An empty mapping is valid.
-      # fast_status_mapping:
-      #   418: "no_quota"   # Example: Map 418 Teapot to NO_QUOTA
+
+    # Configuration for parsing error responses to refine error classification.
+    # This enables distinguishing between different error types with the same HTTP status code.
+    # Supports two matching modes:
+    #   - Dot-path mode: error_path like "error.status" extracts a JSON field.
+    #   - Fulltext mode: error_path "$" applies regex to the entire raw response body.
+    error_parsing:
+      enabled: false  # Default is false to maintain Zero-Overhead behavior
+      rules:
+        - status_code: 400
+          error_path: "error.status"
+          match_pattern: "INVALID_ARGUMENT"
+          map_to: "invalid_key"
+          # Priority determines which rule wins if multiple rules match the same status_code.
+          # Higher values = Higher priority.
+          # Useful for defining specific matches (e.g. priority 100) vs catch-alls (e.g. priority 0).
+          priority: 10
+          description: "Gemini invalid API key"
 
     # Gateway specific policies
     gateway_policy:
       streaming_mode: "auto" # "auto" or "disabled"
       debug_mode: "disabled" # "disabled", "no_content", "full_body"
       
-      # Fast Status Mapping (Fast Fail)
-      # Immediately fails requests with these status codes without reading the response body.
-      # This provides maximum performance but prevents forwarding upstream error messages.
-      fast_status_mapping:
-        400: "bad_request"   # 400 -> BAD_REQUEST (No penalty, no body read)
-        # 403: "no_access"   # Uncomment to force fast fail on 403
-      
-      # Error parsing rules for better error classification (Slow Path)
-      # Only reads the response body if a rule matches the status code.
-      #
-      # NOTE: Do not use 'unsafe_status_mapping' and 'error_parsing' for the SAME status code.
-      # 'unsafe_status_mapping' takes precedence (Fast Path) and prevents body reading,
-      # so these parsing rules will never run for that status code.
-      error_parsing:
-        enabled: false # Default is false to maintain Zero-Overhead behavior
-        rules:
-          - status_code: 400
-            error_path: "error.status"
-            match_pattern: "INVALID_ARGUMENT"
-            map_to: "invalid_key"
-            # Priority determines which rule wins if multiple rules match the same error.
-            # Higher values = Higher priority. 
-            # Useful for defining specific matches (e.g. priority 10) vs catch-alls (e.g. priority 0).
-            priority: 10
-            description: "Gemini invalid API key"
-
       retry:
         enabled: true
         on_key_error:
@@ -318,13 +302,6 @@ providers:
     gateway_policy:
       streaming_mode: "auto"
       debug_mode: "disabled"
-      
-      fast_status_mapping:
-        400: "bad_request"
-      
-      error_parsing:
-        enabled: false
-        rules: []
       
       retry:
         enabled: true

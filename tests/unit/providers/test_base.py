@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
+from pydantic import ValidationError
 
 from src.config.schemas import (
     ErrorParsingConfig,
@@ -79,7 +80,7 @@ class TestErrorParsingBase:
         if error_config is None:
             error_config = ErrorParsingConfig(enabled=False, rules=[])
 
-        mock_config.gateway_policy.error_parsing = error_config
+        mock_config.error_parsing = error_config
 
         # Create provider instance using our mock implementation
         provider = MockAIBaseProvider("test_provider", mock_config)
@@ -338,8 +339,28 @@ class TestErrorParsingBase:
         assert result == ErrorReason.INVALID_KEY
 
     @pytest.mark.asyncio
-    async def test_refine_error_reason_invalid_map_to_value(self):
-        """Test handling of invalid map_to values in rules."""
+    async def test_refine_error_reason_map_to_validated_at_schema_level(self):
+        """
+        Test that map_to is validated at the Pydantic schema level,
+        ensuring _refine_error_reason always receives valid ErrorReason values.
+
+        Since map_to is now typed as ErrorReason in ErrorParsingRule,
+        invalid values are rejected at construction time by Pydantic,
+        not at runtime by _refine_error_reason.
+        """
+        # Verify that invalid map_to values are rejected by Pydantic
+        with pytest.raises(ValidationError) as exc_info:
+            ErrorParsingRule(
+                status_code=400,
+                error_path="error.type",
+                match_pattern="TestError",
+                map_to="invalid_error_reason",  # Not a valid ErrorReason
+            )
+
+        error_message = str(exc_info.value)
+        assert "invalid_error_reason" in error_message or "map_to" in error_message
+
+        # Verify that valid map_to values work correctly with _refine_error_reason
         provider = self.create_mock_provider(
             error_config=ErrorParsingConfig(
                 enabled=True,
@@ -347,8 +368,8 @@ class TestErrorParsingBase:
                     ErrorParsingRule(
                         status_code=400,
                         error_path="error.type",
-                        match_pattern="TestError",
-                        map_to="invalid_error_reason",  # Not a valid ErrorReason
+                        match_pattern="Arrearage",
+                        map_to=ErrorReason.INVALID_KEY,
                         priority=10,
                     )
                 ],
@@ -357,24 +378,16 @@ class TestErrorParsingBase:
 
         mock_response = MagicMock()
         mock_response.status_code = 400
-        response_data = {"error": {"type": "TestError"}}
+        response_data = {"error": {"type": "Arrearage"}}
 
-        # Patch logger to capture warning
-        with patch("src.providers.base.logger") as mock_logger:
-            result = await provider._refine_error_reason(
-                response=mock_response,
-                default_reason=ErrorReason.BAD_REQUEST,
-                response_data=response_data,
-            )
+        result = await provider._refine_error_reason(
+            response=mock_response,
+            default_reason=ErrorReason.BAD_REQUEST,
+            response_data=response_data,
+        )
 
-            # Should fall back to default reason
-            assert result == ErrorReason.BAD_REQUEST
-
-            # Should log a warning
-            mock_logger.warning.assert_called_once()
-            warning_msg = mock_logger.warning.call_args[0][0]
-            assert "invalid_error_reason" in warning_msg
-            assert "test_provider" in warning_msg
+        # Should return the valid ErrorReason from the rule
+        assert result == ErrorReason.INVALID_KEY
 
     @pytest.mark.asyncio
     async def test_refine_error_reason_body_parsing(self):
@@ -500,22 +513,24 @@ class TestErrorParsingBase:
 
     @pytest.mark.asyncio
     async def test_refine_error_reason_rule_evaluation_error(self):
-        """Test handling of errors during rule evaluation."""
+        """Test handling of rules that don't match alongside rules that do."""
         provider = self.create_mock_provider(
             error_config=ErrorParsingConfig(
                 enabled=True,
                 rules=[
                     ErrorParsingRule(
                         status_code=400,
-                        error_path="error.type",
-                        match_pattern="[",  # Invalid regex
-                        map_to="invalid_key",
+                        error_path="error.nonexistent_field",
+                        match_pattern="Arrearage",
+                        map_to=ErrorReason.INVALID_KEY,
+                        priority=5,
                     ),
                     ErrorParsingRule(
                         status_code=400,
                         error_path="error.code",
                         match_pattern="valid_pattern",
-                        map_to="no_quota",
+                        map_to=ErrorReason.NO_QUOTA,
+                        priority=10,
                     ),
                 ],
             )
@@ -532,7 +547,7 @@ class TestErrorParsingBase:
             response_data=response_data,
         )
 
-        # First rule has invalid regex, second rule should match
+        # First rule's path doesn't exist (no match), second rule matches
         assert result == ErrorReason.NO_QUOTA
 
     @pytest.mark.asyncio
@@ -600,6 +615,312 @@ class TestErrorParsingBase:
         )
         assert result_500 == ErrorReason.SERVER_ERROR
 
+    # --- BASE-1: _refine_error_reason reads ProviderConfig.error_parsing ---
+    @pytest.mark.asyncio
+    async def test_refine_error_reason_reads_provider_config_error_parsing(self):
+        """
+        BASE-1: _refine_error_reason() reads self.config.error_parsing
+        (not self.config.gateway_policy.error_parsing).
+
+        Verifies: When error_parsing is on ProviderConfig, rules are applied.
+        When accessed via gateway_policy, it does not exist there.
+        """
+        provider = self.create_mock_provider(
+            error_config=ErrorParsingConfig(
+                enabled=True,
+                rules=[
+                    ErrorParsingRule(
+                        status_code=400,
+                        error_path="error.type",
+                        match_pattern="Arrearage",
+                        map_to=ErrorReason.INVALID_KEY,
+                        priority=10,
+                    )
+                ],
+            )
+        )
+
+        # Verify: config.error_parsing exists at ProviderConfig level
+        assert hasattr(provider.config, "error_parsing")
+        assert provider.config.error_parsing.enabled is True
+
+        # Verify: _refine_error_reason applies rules from ProviderConfig.error_parsing
+        mock_response = MagicMock()
+        mock_response.status_code = 400
+        response_data = {"error": {"type": "Arrearage"}}
+
+        result = await provider._refine_error_reason(
+            response=mock_response,
+            default_reason=ErrorReason.BAD_REQUEST,
+            response_data=response_data,
+        )
+        assert result == ErrorReason.INVALID_KEY
+
+    # --- BASE-2: fulltext mode with error_path="$" ---
+    @pytest.mark.asyncio
+    async def test_refine_error_reason_fulltext_mode_dollar(self):
+        """
+        BASE-2: Fulltext mode with error_path="$" — regex applied
+        to the entire raw response body.
+
+        Verifies: re.search("RATE_LIMIT_EXCEEDED", raw_body) matches,
+        returning the mapped ErrorReason.
+        """
+        provider = self.create_mock_provider(
+            error_config=ErrorParsingConfig(
+                enabled=True,
+                rules=[
+                    ErrorParsingRule(
+                        status_code=429,
+                        error_path="$",
+                        match_pattern="RATE_LIMIT_EXCEEDED",
+                        map_to=ErrorReason.RATE_LIMITED,
+                        priority=10,
+                    )
+                ],
+            )
+        )
+
+        mock_response = MagicMock()
+        mock_response.status_code = 429
+
+        body_bytes = b'{"error":{"message":"RATE_LIMIT_EXCEEDED: too many requests"}}'
+
+        result = await provider._refine_error_reason(
+            response=mock_response,
+            default_reason=ErrorReason.NO_QUOTA,
+            body_bytes=body_bytes,
+        )
+        assert result == ErrorReason.RATE_LIMITED
+
+    # --- BASE-3: fulltext mode with error_path="" ---
+    @pytest.mark.asyncio
+    async def test_refine_error_reason_fulltext_mode_empty_path(self):
+        """
+        BASE-3: Fulltext mode with error_path="" — equivalent to "$",
+        regex applied to the entire raw response body.
+        """
+        provider = self.create_mock_provider(
+            error_config=ErrorParsingConfig(
+                enabled=True,
+                rules=[
+                    ErrorParsingRule(
+                        status_code=429,
+                        error_path="",
+                        match_pattern="RATE_LIMIT_EXCEEDED",
+                        map_to=ErrorReason.RATE_LIMITED,
+                        priority=10,
+                    )
+                ],
+            )
+        )
+
+        mock_response = MagicMock()
+        mock_response.status_code = 429
+
+        body_bytes = b'{"error":{"message":"RATE_LIMIT_EXCEEDED: too many requests"}}'
+
+        result = await provider._refine_error_reason(
+            response=mock_response,
+            default_reason=ErrorReason.NO_QUOTA,
+            body_bytes=body_bytes,
+        )
+        assert result == ErrorReason.RATE_LIMITED
+
+    # --- BASE-4: fulltext mode — pattern not found ---
+    @pytest.mark.asyncio
+    async def test_refine_error_reason_fulltext_no_match(self):
+        """
+        BASE-4: Fulltext mode where the pattern is not found in the
+        raw body. Rule is not added to matched_rules, default_reason
+        is returned.
+        """
+        provider = self.create_mock_provider(
+            error_config=ErrorParsingConfig(
+                enabled=True,
+                rules=[
+                    ErrorParsingRule(
+                        status_code=400,
+                        error_path="$",
+                        match_pattern="RATE_LIMIT_EXCEEDED",
+                        map_to=ErrorReason.RATE_LIMITED,
+                        priority=10,
+                    )
+                ],
+            )
+        )
+
+        mock_response = MagicMock()
+        mock_response.status_code = 400
+
+        body_bytes = b'{"error":{"message":"Invalid request format"}}'
+
+        result = await provider._refine_error_reason(
+            response=mock_response,
+            default_reason=ErrorReason.BAD_REQUEST,
+            body_bytes=body_bytes,
+        )
+        assert result == ErrorReason.BAD_REQUEST
+
+    # --- BASE-5: fulltext mode with body_bytes=None ---
+    @pytest.mark.asyncio
+    async def test_refine_error_reason_fulltext_body_bytes_none(self):
+        """
+        BASE-5: Fulltext mode with body_bytes=None — no text available
+        for search, rule is skipped, default_reason returned.
+        """
+        provider = self.create_mock_provider(
+            error_config=ErrorParsingConfig(
+                enabled=True,
+                rules=[
+                    ErrorParsingRule(
+                        status_code=400,
+                        error_path="$",
+                        match_pattern="RATE_LIMIT_EXCEEDED",
+                        map_to=ErrorReason.RATE_LIMITED,
+                        priority=10,
+                    )
+                ],
+            )
+        )
+
+        mock_response = MagicMock()
+        mock_response.status_code = 400
+
+        result = await provider._refine_error_reason(
+            response=mock_response,
+            default_reason=ErrorReason.BAD_REQUEST,
+            body_bytes=None,
+        )
+        assert result == ErrorReason.BAD_REQUEST
+
+    # --- BASE-6: fulltext mode with non-UTF-8 body ---
+    @pytest.mark.asyncio
+    async def test_refine_error_reason_fulltext_non_utf8_body(self):
+        """
+        BASE-6: Fulltext mode with non-UTF-8 body_bytes — decoded
+        with errors="ignore", regex applied to recovered text.
+        """
+        provider = self.create_mock_provider(
+            error_config=ErrorParsingConfig(
+                enabled=True,
+                rules=[
+                    ErrorParsingRule(
+                        status_code=400,
+                        error_path="$",
+                        match_pattern="Arrearage",
+                        map_to=ErrorReason.INVALID_KEY,
+                        priority=10,
+                    )
+                ],
+            )
+        )
+
+        mock_response = MagicMock()
+        mock_response.status_code = 400
+
+        # Mix valid UTF-8 text with invalid bytes (0xff 0xfe)
+        body_bytes = b'\xff\xfe{"error":{"type":"Arrearage"}}\xff\xfe'
+
+        result = await provider._refine_error_reason(
+            response=mock_response,
+            default_reason=ErrorReason.BAD_REQUEST,
+            body_bytes=body_bytes,
+        )
+        # After decoding with errors="ignore", the invalid bytes are dropped,
+        # but "Arrearage" is still present in the recovered text
+        assert result == ErrorReason.INVALID_KEY
+
+    # --- BASE-7: fulltext + dotpath coexist, fulltext wins by priority ---
+    @pytest.mark.asyncio
+    async def test_refine_error_reason_fulltext_and_dotpath_coexist_priority(self):
+        """
+        BASE-7: Fulltext rule (priority=80) and dot-path rule (priority=50)
+        for the same status_code. Both match, but fulltext wins because
+        it has higher priority.
+        """
+        provider = self.create_mock_provider(
+            error_config=ErrorParsingConfig(
+                enabled=True,
+                rules=[
+                    ErrorParsingRule(
+                        status_code=400,
+                        error_path="$",
+                        match_pattern="Arrearage",
+                        map_to=ErrorReason.INVALID_KEY,
+                        priority=80,
+                    ),
+                    ErrorParsingRule(
+                        status_code=400,
+                        error_path="error.type",
+                        match_pattern="Arrearage",
+                        map_to=ErrorReason.NO_QUOTA,
+                        priority=50,
+                    ),
+                ],
+            )
+        )
+
+        mock_response = MagicMock()
+        mock_response.status_code = 400
+
+        body_bytes = b'{"error":{"type":"Arrearage","message":"Payment overdue"}}'
+        response_data = {"error": {"type": "Arrearage", "message": "Payment overdue"}}
+
+        result = await provider._refine_error_reason(
+            response=mock_response,
+            default_reason=ErrorReason.BAD_REQUEST,
+            body_bytes=body_bytes,
+            response_data=response_data,
+        )
+        # Fulltext rule wins (priority 80 > 50)
+        assert result == ErrorReason.INVALID_KEY
+
+    # --- BASE-8: dotpath wins over fulltext by priority ---
+    @pytest.mark.asyncio
+    async def test_refine_error_reason_dotpath_wins_over_fulltext_priority(self):
+        """
+        BASE-8: Dot-path rule (priority=100) and fulltext rule (priority=10)
+        for the same status_code. Both match, but dotpath wins because
+        it has higher priority.
+        """
+        provider = self.create_mock_provider(
+            error_config=ErrorParsingConfig(
+                enabled=True,
+                rules=[
+                    ErrorParsingRule(
+                        status_code=400,
+                        error_path="error.type",
+                        match_pattern="Arrearage",
+                        map_to=ErrorReason.NO_QUOTA,
+                        priority=100,
+                    ),
+                    ErrorParsingRule(
+                        status_code=400,
+                        error_path="$",
+                        match_pattern="Arrearage",
+                        map_to=ErrorReason.INVALID_KEY,
+                        priority=10,
+                    ),
+                ],
+            )
+        )
+
+        mock_response = MagicMock()
+        mock_response.status_code = 400
+
+        body_bytes = b'{"error":{"type":"Arrearage","message":"Payment overdue"}}'
+        response_data = {"error": {"type": "Arrearage", "message": "Payment overdue"}}
+
+        result = await provider._refine_error_reason(
+            response=mock_response,
+            default_reason=ErrorReason.BAD_REQUEST,
+            body_bytes=body_bytes,
+            response_data=response_data,
+        )
+        # Dot-path rule wins (priority 100 > 10)
+        assert result == ErrorReason.NO_QUOTA
+
 
 class TestSendProxyRequest400BodyPreservation:
     """
@@ -613,32 +934,27 @@ class TestSendProxyRequest400BodyPreservation:
 
     def _create_provider_with_config(
         self,
-        fast_status_mapping: dict[int, str] | None = None,
         debug_mode: str = "disabled",
         error_parsing_enabled: bool = False,
         error_parsing_rules: list | None = None,
     ) -> MockAIBaseProvider:
-        """Helper to create a MockAIBaseProvider with specific gateway policy config."""
-        if fast_status_mapping is None:
-            fast_status_mapping = {}
+        """Helper to create a MockAIBaseProvider with specific config."""
         if error_parsing_rules is None:
             error_parsing_rules = []
 
         gateway_policy = GatewayPolicyConfig(
             debug_mode=debug_mode,
-            fast_status_mapping=fast_status_mapping,
+        )
+
+        # Build a minimal ProviderConfig. error_parsing is now at the
+        # ProviderConfig level (not inside gateway_policy).
+        provider_config = ProviderConfig(
+            provider_type="openai_like",
+            keys_path="/tmp/nonexistent",
+            gateway_policy=gateway_policy,
             error_parsing=ErrorParsingConfig(
                 enabled=error_parsing_enabled, rules=error_parsing_rules
             ),
-        )
-
-        # Build a minimal ProviderConfig. We need keys_path and provider_type
-        # which are required fields. Use MagicMock for the rest to avoid
-        # needing to construct every nested config.
-        provider_config = ProviderConfig(
-            provider_type="test",
-            keys_path="/tmp/nonexistent",
-            gateway_policy=gateway_policy,
         )
 
         return MockAIBaseProvider("test_provider", provider_config)
@@ -658,7 +974,7 @@ class TestSendProxyRequest400BodyPreservation:
     @pytest.mark.asyncio
     async def test_400_without_rules_stream_not_closed(self):
         """
-        UT-1: _send_proxy_request with 400, no fast_status_mapping,
+        UT-1: _send_proxy_request with 400,
         no debug_mode, no error_parsing.
 
         Verifies: aclose() is NOT called, _parse_proxy_error is called
@@ -700,7 +1016,7 @@ class TestSendProxyRequest400BodyPreservation:
     @pytest.mark.asyncio
     async def test_401_without_rules_stream_closed_regression(self):
         """
-        UT-2: _send_proxy_request with 401, no fast_status_mapping,
+        UT-2: _send_proxy_request with 401,
         no debug_mode, no error_parsing.
 
         Verifies: aclose() IS called (existing Zero-Overhead Fallback
@@ -727,35 +1043,6 @@ class TestSendProxyRequest400BodyPreservation:
 
             # Verify: _parse_proxy_error was called with content=None
             mock_parse.assert_called_once_with(mock_upstream, None)
-
-    # --- UT-3: 400 + fast_status_mapping — stream closed, fast mapping priority ---
-    @pytest.mark.asyncio
-    async def test_400_with_fast_status_mapping_stream_closed_regression(self):
-        """
-        UT-3: _send_proxy_request with 400, fast_status_mapping = {400: "INVALID_KEY"}.
-
-        Verifies: aclose() IS called (fast mapping has priority over
-        body preservation), CheckResult.fail(INVALID_KEY) returned.
-        """
-        provider = self._create_provider_with_config(
-            fast_status_mapping={400: "invalid_key"}
-        )
-
-        mock_upstream = self._create_mock_upstream_response(status_code=400)
-        mock_client = AsyncMock(spec=httpx.AsyncClient)
-        mock_client.send = AsyncMock(return_value=mock_upstream)
-        mock_request = MagicMock(spec=httpx.Request)
-
-        response, check_result = await provider._send_proxy_request(
-            mock_client, mock_request
-        )
-
-        # Verify: aclose() WAS called (fast mapping closes stream)
-        mock_upstream.aclose.assert_called_once()
-
-        # Verify: CheckResult is fail with INVALID_KEY (from fast mapping)
-        assert check_result.available is False
-        assert check_result.error_reason == ErrorReason.INVALID_KEY
 
     # --- UT-4: 400 + error_parsing — body read, error_parsing priority ---
     @pytest.mark.asyncio
@@ -846,7 +1133,7 @@ class TestSendProxyRequest400BodyPreservation:
     @pytest.mark.asyncio
     async def test_500_without_rules_stream_closed_regression(self):
         """
-        UT-6: _send_proxy_request with 500, no fast_status_mapping,
+        UT-6: _send_proxy_request with 500,
         no debug_mode, no error_parsing.
 
         Verifies: aclose() IS called (existing behavior for 5xx unchanged).
@@ -872,3 +1159,129 @@ class TestSendProxyRequest400BodyPreservation:
 
             # Verify: _parse_proxy_error was called with content=None
             mock_parse.assert_called_once_with(mock_upstream, None)
+
+    # --- BASE-10: _send_proxy_request has no fast_status_mapping branch ---
+    @pytest.mark.asyncio
+    async def test_send_proxy_request_no_fast_status_mapping(self):
+        """
+        BASE-10: _send_proxy_request does not reference fast_status_mapping.
+        The priority order is: debug_mode > error_parsing > fallback.
+
+        Verifies: With error_parsing enabled for 400, body is read
+        (error_parsing branch). Without error_parsing or debug_mode,
+        fallback branch is used (no body read, stream preserved for 400).
+        """
+        # Test with error_parsing enabled — body is read
+        provider_with_parsing = self._create_provider_with_config(
+            error_parsing_enabled=True,
+            error_parsing_rules=[
+                ErrorParsingRule(
+                    status_code=400,
+                    error_path="error.type",
+                    match_pattern="Arrearage",
+                    map_to=ErrorReason.INVALID_KEY,
+                    priority=10,
+                )
+            ],
+        )
+
+        body = b'{"error":{"type":"Arrearage"}}'
+        mock_upstream = self._create_mock_upstream_response(status_code=400, body=body)
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.send = AsyncMock(return_value=mock_upstream)
+        mock_request = MagicMock(spec=httpx.Request)
+
+        with patch.object(
+            provider_with_parsing,
+            "_parse_proxy_error",
+            new=AsyncMock(return_value=CheckResult.fail(ErrorReason.INVALID_KEY)),
+        ):
+            _, result = await provider_with_parsing._send_proxy_request(
+                mock_client, mock_request
+            )
+            # Body was read (error_parsing branch)
+            mock_upstream.aread.assert_called_once()
+            assert result.error_reason == ErrorReason.INVALID_KEY
+
+        # Test without error_parsing or debug_mode — fallback branch
+        provider_fallback = self._create_provider_with_config()
+
+        mock_upstream2 = self._create_mock_upstream_response(status_code=400)
+        mock_client2 = AsyncMock(spec=httpx.AsyncClient)
+        mock_client2.send = AsyncMock(return_value=mock_upstream2)
+
+        with patch.object(
+            provider_fallback,
+            "_parse_proxy_error",
+            new=AsyncMock(return_value=CheckResult.fail(ErrorReason.BAD_REQUEST)),
+        ):
+            _, result2 = await provider_fallback._send_proxy_request(
+                mock_client2, mock_request
+            )
+            # Body was NOT read (fallback branch)
+            mock_upstream2.aread.assert_not_called()
+            assert result2.error_reason == ErrorReason.BAD_REQUEST
+
+    # --- BASE-11: _send_proxy_request reads ProviderConfig.error_parsing ---
+    @pytest.mark.asyncio
+    async def test_send_proxy_request_reads_provider_error_parsing(self):
+        """
+        BASE-11: _send_proxy_request reads self.config.error_parsing
+        for gating body read (not self.config.gateway_policy.error_parsing).
+
+        Verifies: should_read_body is computed from ProviderConfig.error_parsing.
+        """
+        provider = self._create_provider_with_config(
+            error_parsing_enabled=True,
+            error_parsing_rules=[
+                ErrorParsingRule(
+                    status_code=400,
+                    error_path="error.type",
+                    match_pattern="Arrearage",
+                    map_to=ErrorReason.INVALID_KEY,
+                    priority=10,
+                )
+            ],
+        )
+
+        # Verify: config.error_parsing is at ProviderConfig level
+        assert hasattr(provider.config, "error_parsing")
+        assert provider.config.error_parsing.enabled is True
+        assert len(provider.config.error_parsing.rules) == 1
+
+        body = b'{"error":{"type":"Arrearage"}}'
+        mock_upstream = self._create_mock_upstream_response(status_code=400, body=body)
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.send = AsyncMock(return_value=mock_upstream)
+        mock_request = MagicMock(spec=httpx.Request)
+
+        with patch.object(
+            provider,
+            "_parse_proxy_error",
+            new=AsyncMock(return_value=CheckResult.fail(ErrorReason.INVALID_KEY)),
+        ):
+            _, result = await provider._send_proxy_request(mock_client, mock_request)
+            # Body was read because error_parsing.enabled=True and rule matches 400
+            mock_upstream.aread.assert_called_once()
+            assert result.error_reason == ErrorReason.INVALID_KEY
+
+
+class TestCheckFastFailRemoved:
+    """Test suite verifying _check_fast_fail method has been removed."""
+
+    # --- BASE-9: _check_fast_fail method does not exist ---
+    def test_check_fast_fail_method_removed(self):
+        """
+        BASE-9: _check_fast_fail method does not exist on AIBaseProvider.
+
+        Verifies: hasattr(provider, "_check_fast_fail") == False.
+        """
+        mock_config = MagicMock(spec=ProviderConfig)
+        mock_config.error_parsing = ErrorParsingConfig(enabled=False, rules=[])
+        mock_config.gateway_policy = MagicMock(spec=GatewayPolicyConfig)
+
+        provider = MockAIBaseProvider("test_provider", mock_config)
+
+        assert not hasattr(
+            provider, "_check_fast_fail"
+        ), "_check_fast_fail should not exist on AIBaseProvider"

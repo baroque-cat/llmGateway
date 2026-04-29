@@ -119,9 +119,10 @@ class TestErrorParsingValidation:
         """
         Test that empty error_path is accepted by Pydantic (str field accepts "").
 
-        NOTE: This was previously rejected by ConfigValidator with "must be a non-empty string".
-        With Pydantic v2, the error_path field is a required str, which accepts empty strings.
-        This is a known validation gap - the ConfigValidator's non-empty check is no longer enforced.
+        NOTE: error_path="" is now a meaningful value that enables fulltext
+        search mode in _refine_error_reason. The regex is applied against
+        the entire raw response body instead of a specific JSON field.
+        This is equivalent to error_path="$" (also fulltext mode).
         """
         rule = ErrorParsingRule(
             status_code=400,
@@ -147,40 +148,46 @@ class TestErrorParsingValidation:
         )
         assert rule.match_pattern == ""
 
-    def test_invalid_map_to_value_accepted_by_pydantic(self):
+    def test_invalid_map_to_value_rejected_by_pydantic(self):
         """
-        Test that any string value for map_to is accepted by Pydantic (str field).
+        Test that invalid map_to values are rejected by Pydantic.
 
-        NOTE: This was previously validated against ErrorReason enum by ConfigValidator.
-        With Pydantic v2, map_to is a plain str field, so any string is accepted.
-        This is a known validation gap - ErrorReason enum validation is no longer enforced
-        at the schema level.
+        NOTE: map_to is now typed as ErrorReason enum in ErrorParsingRule.
+        Previously, map_to was a plain str field that accepted any string,
+        and validation was done by ConfigValidator at runtime. Now, Pydantic
+        enforces that map_to must be a valid ErrorReason value at construction
+        time, eliminating the validation gap.
         """
-        rule = ErrorParsingRule(
-            status_code=400,
-            error_path="error.type",
-            match_pattern="test",
-            map_to="invalid_reason",  # Not a valid ErrorReason, but accepted by Pydantic str
-        )
-        assert rule.map_to == "invalid_reason"
+        with pytest.raises(ValidationError) as exc_info:
+            ErrorParsingRule(
+                status_code=400,
+                error_path="error.type",
+                match_pattern="test",
+                map_to="invalid_reason",  # Not a valid ErrorReason
+            )
+
+        error_message = str(exc_info.value)
+        assert "map_to" in error_message
+        assert "invalid_reason" in error_message
 
     def test_valid_map_to_values(self):
-        """Test that valid ErrorReason string values are accepted."""
+        """Test that valid ErrorReason string values are accepted and coerced to enum."""
         valid_reasons = [
-            "bad_request",
-            "invalid_key",
-            "no_quota",
-            "rate_limited",
-            "server_error",
+            ("bad_request", ErrorReason.BAD_REQUEST),
+            ("invalid_key", ErrorReason.INVALID_KEY),
+            ("no_quota", ErrorReason.NO_QUOTA),
+            ("rate_limited", ErrorReason.RATE_LIMITED),
+            ("server_error", ErrorReason.SERVER_ERROR),
         ]
-        for reason in valid_reasons:
+        for reason_str, expected_enum in valid_reasons:
             rule = ErrorParsingRule(
                 status_code=400,
                 error_path="error.type",
                 match_pattern="test",
-                map_to=reason,
+                map_to=reason_str,
             )
-            assert rule.map_to == reason
+            assert rule.map_to == expected_enum
+            assert rule.map_to.value == reason_str
 
     def test_negative_priority_rejected(self):
         """Test that negative priority values are rejected by Pydantic Field(ge=0)."""

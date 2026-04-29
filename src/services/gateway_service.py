@@ -5,7 +5,6 @@ import json
 import logging
 import re
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
 import httpx
@@ -18,6 +17,7 @@ from src.core.constants import ErrorReason  # Added explicitly for error type ch
 from src.core.http_client_factory import HttpClientFactory
 from src.core.interfaces import IProvider
 from src.core.models import CheckResult
+from src.core.policy_utils import compute_next_check_time
 from src.db import database
 from src.db.database import DatabaseManager
 from src.providers import get_provider
@@ -440,20 +440,25 @@ async def _report_key_failure(
     provider_name: str,
     model_name: str,
     result: CheckResult,
+    accessor: ConfigAccessor,
 ) -> None:
     """
     A fire-and-forget background task to report a key failure to the database.
     This implements the "fast feedback loop".
+
+    Computes ``next_check_time`` from the provider's ``HealthPolicyConfig``
+    based on the error reason, respecting the configured cooldown intervals.
     """
     try:
-        # The next_check_time here is a placeholder. The KeyProbe's logic will calculate the real one.
-        placeholder_next_check = datetime.now(UTC) + timedelta(minutes=1)
+        provider_config = accessor.get_provider_or_raise(provider_name)
+        health_policy = provider_config.worker_health_policy
+        next_check = compute_next_check_time(health_policy, result.error_reason)
         await db_manager.keys.update_status(
             key_id=key_id,
             model_name=model_name,
             provider_name=provider_name,
             result=result,
-            next_check_time=placeholder_next_check,
+            next_check_time=next_check,
         )
         logger.debug(
             f"Fast feedback: Successfully reported failure for key_id {key_id} to the database."
@@ -565,6 +570,7 @@ async def _handle_full_stream_request(
     cache = _get_gateway_cache(request)
     http_factory = _get_http_client_factory(request)
     db_manager = _get_db_manager(request)
+    accessor = _get_config_accessor(request)
 
     key_info = cache.get_key_from_pool(instance_name, model_name)
     if not key_info:
@@ -673,176 +679,12 @@ async def _handle_full_stream_request(
         # Report and remove the failed key from the live cache.
         asyncio.create_task(
             _report_key_failure(
-                db_manager, key_id, instance_name, model_name, check_result
+                db_manager, key_id, instance_name, model_name, check_result, accessor
             )
         )
         asyncio.create_task(
             cache.remove_key_from_pool(instance_name, model_name, key_id)
         )
-        return JSONResponse(
-            status_code=503,
-            content={
-                "error": f"Upstream service failed: {check_result.error_reason.value}"
-            },
-        )
-
-
-async def _handle_buffered_request(
-    request: Request, provider: IProvider, instance_name: str
-) -> Response:
-    """
-    Handles requests where the request body must be buffered but the response can be streamed.
-    """
-    cache = _get_gateway_cache(request)
-    http_factory = _get_http_client_factory(request)
-    db_manager = _get_db_manager(request)
-    accessor = _get_config_accessor(request)
-
-    provider_config = accessor.get_provider_or_raise(instance_name)
-
-    # Buffer the request body to parse it
-    request_body = await request.body()
-    try:
-        details = await provider.parse_request_details(
-            path=request.url.path, content=request_body
-        )
-    except ValueError as e:
-        return JSONResponse(status_code=400, content={"error": f"Bad request: {e}"})
-
-    if details.model_name not in provider_config.models:
-        return JSONResponse(
-            status_code=400,
-            content={
-                "error": f"Model '{details.model_name}' is not permitted for this instance."
-            },
-        )
-
-    key_info = cache.get_key_from_pool(instance_name, details.model_name)
-    if not key_info:
-        return JSONResponse(
-            status_code=503, content={"error": "No available API keys."}
-        )
-
-    key_id, api_key = key_info
-    client = await http_factory.get_client_for_provider(instance_name)
-
-    upstream_response, check_result = await provider.proxy_request(
-        client=client,
-        token=api_key,
-        method=request.method,
-        headers=dict(request.headers),
-        path=request.url.path,
-        query_params=str(request.url.query),
-        content=request_body,
-    )
-
-    if check_result.ok:
-        # Case 1: Success. Check if debug logging is needed.
-        effective_debug_mode = request.app.state.debug_mode_map.get(
-            instance_name, "disabled"
-        )
-
-        if effective_debug_mode != "disabled":
-            return await _debug_and_respond(
-                upstream_response=upstream_response,
-                debug_mode=effective_debug_mode,
-                instance_name=instance_name,
-                provider_type=provider_config.provider_type,
-                request=request,
-                request_body=request_body,
-            )
-        else:
-            # Normal streaming response when debug is disabled
-            client_ip = request.client.host if request.client else "unknown"
-            stream_monitor = StreamMonitor(
-                upstream_response=upstream_response,
-                client_ip=client_ip,
-                request_method=request.method,
-                request_path=str(request.url),
-                provider_name=instance_name,
-                model_name=details.model_name,
-                check_result=check_result,
-            )
-            filtered_headers = {
-                key: value
-                for key, value in upstream_response.headers.items()
-                if key.lower() not in HOP_BY_HOP_HEADERS
-            }
-            return StreamingResponse(
-                content=stream_monitor,
-                status_code=upstream_response.status_code,
-                media_type=upstream_response.headers.get("content-type"),
-                headers=filtered_headers,
-            )
-
-    elif check_result.error_reason.is_client_error():
-        # Case 2: Client-side error (e.g., 400 Bad Request). The key is not at fault.
-        logger.warning(
-            f"Request for '{instance_name}' failed due to a client-side error: [{check_result.error_reason.value}]. "
-            f"The API key (ID: {key_id}) will NOT be penalized. Forwarding original error to client."
-        )
-        effective_debug_mode = request.app.state.debug_mode_map.get(
-            instance_name, "disabled"
-        )
-        if effective_debug_mode != "disabled":
-            return await _debug_and_respond(
-                upstream_response=upstream_response,
-                debug_mode=effective_debug_mode,
-                instance_name=instance_name,
-                provider_type=provider_config.provider_type,
-                request=request,
-                request_body=request_body,
-            )
-
-        try:
-            response_body = await upstream_response.aread()
-        except Exception:
-            # Stream closed by provider optimizer (StreamClosed)
-            response_body = f'{{"error": "Upstream error: {check_result.message or check_result.error_reason.value}"}}'.encode()
-        finally:
-            await upstream_response.aclose()
-
-        filtered_headers = {
-            key: value
-            for key, value in upstream_response.headers.items()
-            if key.lower() not in HOP_BY_HOP_HEADERS
-        }
-        return Response(
-            content=response_body,
-            status_code=upstream_response.status_code,
-            headers=filtered_headers,
-        )
-
-    else:
-        # Case 3: Upstream or key-related error. The key is at fault.
-        logger.warning(
-            f"Request for '{instance_name}' failed due to an upstream/key error: [{check_result.error_reason.value}]. "
-            f"The API key (ID: {key_id}) WILL be penalized."
-        )
-
-        # Report and remove the failed key from the live cache.
-        asyncio.create_task(
-            _report_key_failure(
-                db_manager, key_id, instance_name, details.model_name, check_result
-            )
-        )
-        asyncio.create_task(
-            cache.remove_key_from_pool(instance_name, details.model_name, key_id)
-        )
-
-        effective_debug_mode = request.app.state.debug_mode_map.get(
-            instance_name, "disabled"
-        )
-        if effective_debug_mode != "disabled":
-            return await _debug_and_respond(
-                upstream_response=upstream_response,
-                debug_mode=effective_debug_mode,
-                instance_name=instance_name,
-                provider_type=provider_config.provider_type,
-                request=request,
-                request_body=request_body,
-            )
-
         return JSONResponse(
             status_code=503,
             content={
@@ -1021,7 +863,12 @@ async def _handle_buffered_retryable_request(
 
             asyncio.create_task(
                 _report_key_failure(
-                    db_manager, key_id, instance_name, details.model_name, check_result
+                    db_manager,
+                    key_id,
+                    instance_name,
+                    details.model_name,
+                    check_result,
+                    accessor,
                 )
             )
             asyncio.create_task(
@@ -1086,6 +933,7 @@ async def _handle_buffered_retryable_request(
                         instance_name,
                         details.model_name,
                         check_result,
+                        accessor,
                     )
                 )
                 asyncio.create_task(

@@ -7,17 +7,20 @@ This module tests the core functionality of the Anthropic provider implementatio
 including header construction, request parsing, and error mapping.
 """
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from src.config.schemas import (
     ErrorParsingConfig,
+    ErrorParsingRule,
     GatewayPolicyConfig,
+    ModelInfo,
     ProviderConfig,
 )
 from src.core.constants import ErrorReason
-from src.core.models import RequestDetails
+from src.core.models import CheckResult, RequestDetails
 from src.providers.impl.anthropic import AnthropicProvider
 
 
@@ -32,7 +35,7 @@ class TestAnthropicProvider:
         if error_config is None:
             error_config = ErrorParsingConfig(enabled=False, rules=[])
 
-        mock_config.gateway_policy.error_parsing = error_config
+        mock_config.error_parsing = error_config
 
         # Set up other required config fields
         mock_config.provider_type = "anthropic"
@@ -51,7 +54,6 @@ class TestAnthropicProvider:
         mock_config.timeouts.read = 30.0
         mock_config.timeouts.write = 30.0
         mock_config.worker_health_policy = MagicMock()
-        mock_config.worker_health_policy.fast_status_mapping = {}
 
         # Create provider instance
         provider = AnthropicProvider("test_provider", mock_config)
@@ -321,3 +323,151 @@ class TestAnthropicProvider:
         for code in test_codes:
             reason = provider._map_status_code_to_reason(code)
             assert reason == ErrorReason.UNKNOWN, f"Status {code} should map to UNKNOWN"
+
+    # --- ANT-1 through ANT-4: check() method integration with _refine_error_reason ---
+
+    @pytest.mark.asyncio
+    async def test_check_calls_refine_error_reason_on_error(self):
+        """ANT-1: AnthropicProvider.check() calls _refine_error_reason() on HTTP error."""
+        provider = self.create_mock_provider(
+            error_config=ErrorParsingConfig(enabled=True, rules=[])
+        )
+        provider.config.models = {
+            "claude-3-opus-20240229": ModelInfo(
+                endpoint_suffix="/v1/messages",
+                test_payload={"messages": [{"role": "user", "content": "hi"}]},
+            )
+        }
+        provider.config.timeouts.pool = 35.0
+
+        mock_request = httpx.Request("GET", "https://api.anthropic.com/v1/models")
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 401
+        mock_response.elapsed = MagicMock()
+        mock_response.elapsed.total_seconds.return_value = 0.5
+        mock_response.text = '{"error": {"type": "authentication_error"}}'
+
+        httpx_error = httpx.HTTPStatusError(
+            "401 Unauthorized", request=mock_request, response=mock_response
+        )
+        mock_response.raise_for_status = MagicMock(side_effect=httpx_error)
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.get = AsyncMock(return_value=mock_response)
+
+        with patch.object(
+            provider, "_refine_error_reason", new=AsyncMock()
+        ) as mock_refine:
+            mock_refine.return_value = ErrorReason.INVALID_KEY
+
+            result = await provider.check(
+                mock_client, "test_token", model="claude-3-opus-20240229"
+            )
+
+            # Verify _refine_error_reason was called
+            mock_refine.assert_called_once()
+            call_args = mock_refine.call_args
+            # First positional arg is the response object
+            assert call_args[0][0] is mock_response
+            # Second positional arg is default_reason from _map_status_code_to_reason(401) = INVALID_KEY
+            assert call_args[0][1] == ErrorReason.INVALID_KEY
+            # body_bytes keyword arg contains encoded response text
+            assert "body_bytes" in call_args[1]
+            assert (
+                call_args[1]["body_bytes"]
+                == b'{"error": {"type": "authentication_error"}}'
+            )
+
+    @pytest.mark.asyncio
+    async def test_check_refine_401_to_no_quota_via_error_parsing(self):
+        """ANT-2: check() with 401 + error_parsing rule → refined reason (NO_QUOTA)."""
+        provider = self.create_mock_provider(
+            error_config=ErrorParsingConfig(
+                enabled=True,
+                rules=[
+                    ErrorParsingRule(
+                        status_code=401,
+                        error_path="error.type",
+                        match_pattern="insufficient_quota|billing_inactive",
+                        map_to="no_quota",
+                        priority=10,
+                    )
+                ],
+            )
+        )
+        provider.config.models = {
+            "claude-3-opus-20240229": ModelInfo(
+                endpoint_suffix="/v1/messages",
+                test_payload={"messages": [{"role": "user", "content": "hi"}]},
+            )
+        }
+        provider.config.timeouts.pool = 35.0
+
+        mock_request = httpx.Request("GET", "https://api.anthropic.com/v1/models")
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 401
+        mock_response.elapsed = MagicMock()
+        mock_response.elapsed.total_seconds.return_value = 0.5
+        mock_response.text = (
+            '{"error": {"type": "insufficient_quota", "message": "No quota remaining"}}'
+        )
+
+        httpx_error = httpx.HTTPStatusError(
+            "401 Unauthorized", request=mock_request, response=mock_response
+        )
+        mock_response.raise_for_status = MagicMock(side_effect=httpx_error)
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.get = AsyncMock(return_value=mock_response)
+
+        result = await provider.check(
+            mock_client, "test_token", model="claude-3-opus-20240229"
+        )
+
+        assert not result.available
+        assert result.error_reason == ErrorReason.NO_QUOTA
+        assert result.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_check_fallback_when_error_parsing_disabled(self):
+        """ANT-3: check() with error_parsing.enabled=False → default_reason."""
+        provider = self.create_mock_provider(
+            error_config=ErrorParsingConfig(enabled=False, rules=[])
+        )
+        provider.config.models = {
+            "claude-3-opus-20240229": ModelInfo(
+                endpoint_suffix="/v1/messages",
+                test_payload={"messages": [{"role": "user", "content": "hi"}]},
+            )
+        }
+        provider.config.timeouts.pool = 35.0
+
+        mock_request = httpx.Request("GET", "https://api.anthropic.com/v1/models")
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 401
+        mock_response.elapsed = MagicMock()
+        mock_response.elapsed.total_seconds.return_value = 0.5
+        mock_response.text = '{"error": {"type": "authentication_error"}}'
+
+        httpx_error = httpx.HTTPStatusError(
+            "401 Unauthorized", request=mock_request, response=mock_response
+        )
+        mock_response.raise_for_status = MagicMock(side_effect=httpx_error)
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.get = AsyncMock(return_value=mock_response)
+
+        result = await provider.check(
+            mock_client, "test_token", model="claude-3-opus-20240229"
+        )
+
+        assert not result.available
+        # When error_parsing is disabled, default_reason for 401 is INVALID_KEY
+        assert result.error_reason == ErrorReason.INVALID_KEY
+        assert result.status_code == 401
+
+    def test_check_does_not_call_check_fast_fail(self):
+        """ANT-4: check() doesn't call _check_fast_fail() — method has been removed."""
+        provider = self.create_mock_provider()
+        # _check_fast_fail method should not exist on the provider
+        assert not hasattr(provider, "_check_fast_fail")

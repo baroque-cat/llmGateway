@@ -18,6 +18,7 @@ from src.config.schemas import (
     ErrorParsingConfig,
     ErrorParsingRule,
     GatewayPolicyConfig,
+    ModelInfo,
     ProviderConfig,
 )
 from src.core.constants import ErrorReason
@@ -36,7 +37,7 @@ class TestGeminiErrorParsing:
         if error_config is None:
             error_config = ErrorParsingConfig(enabled=False, rules=[])
 
-        mock_config.gateway_policy.error_parsing = error_config
+        mock_config.error_parsing = error_config
 
         # Set up other required config fields
         mock_config.provider_type = "gemini"
@@ -386,6 +387,151 @@ class TestGeminiErrorParsing:
         assert result.status_code == 400
         assert result.response_time == 0.5
 
+    @pytest.mark.asyncio
+    async def test_check_calls_refine_error_reason_on_429(self):
+        """GEM-1: GeminiBaseProvider.check() calls _refine_error_reason() on HTTP 429."""
+        provider = self.create_mock_provider(
+            error_config=ErrorParsingConfig(enabled=True, rules=[])
+        )
+        provider.config.models = {
+            "gemini-pro": ModelInfo(
+                endpoint_suffix=":generateContent",
+                test_payload={"contents": [{"parts": [{"text": "hi"}]}]},
+            )
+        }
+        provider.config.timeouts.pool = 35.0
+
+        mock_request = httpx.Request(
+            "POST",
+            "https://generativelanguage.googleapis.com/v1/v1beta/models/gemini-pro:generateContent",
+        )
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 429
+        mock_response.elapsed = MagicMock()
+        mock_response.elapsed.total_seconds.return_value = 0.5
+        mock_response.text = (
+            '{"error": {"status": "RESOURCE_EXHAUSTED", "message": "Quota exceeded"}}'
+        )
+
+        httpx_error = httpx.HTTPStatusError(
+            "429 Too Many Requests", request=mock_request, response=mock_response
+        )
+        mock_response.raise_for_status = MagicMock(side_effect=httpx_error)
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.post = AsyncMock(return_value=mock_response)
+
+        with patch.object(
+            provider, "_refine_error_reason", new=AsyncMock()
+        ) as mock_refine:
+            mock_refine.return_value = ErrorReason.NO_QUOTA
+
+            result = await provider.check(mock_client, "test_token", model="gemini-pro")
+
+            # Verify _refine_error_reason was called
+            mock_refine.assert_called_once()
+            call_args = mock_refine.call_args
+            # First positional arg is the response object
+            assert call_args[0][0] is mock_response
+            # Second positional arg is default_reason (NO_QUOTA for 429 in Gemini _map_error_to_reason)
+            assert call_args[0][1] == ErrorReason.NO_QUOTA
+            # body_bytes keyword arg contains encoded response text
+            assert "body_bytes" in call_args[1]
+
+    @pytest.mark.asyncio
+    async def test_check_refine_429_to_rate_limited_via_fulltext(self):
+        """GEM-2: check() with 429 + fulltext rule RATE_LIMIT_EXCEEDED → RATE_LIMITED."""
+        provider = self.create_mock_provider(
+            error_config=ErrorParsingConfig(
+                enabled=True,
+                rules=[
+                    ErrorParsingRule(
+                        status_code=429,
+                        error_path="$",
+                        match_pattern="RATE_LIMIT_EXCEEDED|RESOURCE_EXHAUSTED",
+                        map_to="rate_limited",
+                        priority=10,
+                    )
+                ],
+            )
+        )
+        provider.config.models = {
+            "gemini-pro": ModelInfo(
+                endpoint_suffix=":generateContent",
+                test_payload={"contents": [{"parts": [{"text": "hi"}]}]},
+            )
+        }
+        provider.config.timeouts.pool = 35.0
+
+        mock_request = httpx.Request(
+            "POST",
+            "https://generativelanguage.googleapis.com/v1/v1beta/models/gemini-pro:generateContent",
+        )
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 429
+        mock_response.elapsed = MagicMock()
+        mock_response.elapsed.total_seconds.return_value = 0.5
+        mock_response.text = '{"error": {"status": "RESOURCE_EXHAUSTED", "message": "Rate limit exceeded"}}'
+
+        httpx_error = httpx.HTTPStatusError(
+            "429 Too Many Requests", request=mock_request, response=mock_response
+        )
+        mock_response.raise_for_status = MagicMock(side_effect=httpx_error)
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.post = AsyncMock(return_value=mock_response)
+
+        result = await provider.check(mock_client, "test_token", model="gemini-pro")
+
+        assert not result.available
+        assert result.error_reason == ErrorReason.RATE_LIMITED
+        assert result.status_code == 429
+
+    @pytest.mark.asyncio
+    async def test_check_fallback_when_error_parsing_disabled(self):
+        """GEM-3: check() with error_parsing.enabled=False → default_reason (NO_QUOTA for Gemini 429)."""
+        provider = self.create_mock_provider(
+            error_config=ErrorParsingConfig(enabled=False, rules=[])
+        )
+        provider.config.models = {
+            "gemini-pro": ModelInfo(
+                endpoint_suffix=":generateContent",
+                test_payload={"contents": [{"parts": [{"text": "hi"}]}]},
+            )
+        }
+        provider.config.timeouts.pool = 35.0
+
+        mock_request = httpx.Request(
+            "POST",
+            "https://generativelanguage.googleapis.com/v1/v1beta/models/gemini-pro:generateContent",
+        )
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 429
+        mock_response.elapsed = MagicMock()
+        mock_response.elapsed.total_seconds.return_value = 0.5
+        mock_response.text = '{"error": {"status": "RESOURCE_EXHAUSTED"}}'
+
+        httpx_error = httpx.HTTPStatusError(
+            "429 Too Many Requests", request=mock_request, response=mock_response
+        )
+        mock_response.raise_for_status = MagicMock(side_effect=httpx_error)
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.post = AsyncMock(return_value=mock_response)
+
+        result = await provider.check(mock_client, "test_token", model="gemini-pro")
+
+        assert not result.available
+        # When error_parsing is disabled, default_reason for 429 in Gemini is NO_QUOTA
+        assert result.error_reason == ErrorReason.NO_QUOTA
+        assert result.status_code == 429
+
+    def test_check_does_not_call_check_fast_fail(self):
+        """GEM-4: check() doesn't call _check_fast_fail() — method has been removed."""
+        provider = self.create_mock_provider()
+        # _check_fast_fail method should not exist on the provider
+        assert not hasattr(provider, "_check_fast_fail")
+
     def test_map_error_to_reason_4xx_errors(self):
         """
         Test that _map_error_to_reason correctly maps various 4xx errors to BAD_REQUEST.
@@ -424,10 +570,7 @@ class TestGeminiProxyRequest:
         )
 
         mock_config = MagicMock(spec=ProviderConfig)
-        mock_config.gateway_policy = MagicMock(spec=GatewayPolicyConfig)
-        mock_config.gateway_policy.error_parsing = ErrorParsingConfig(
-            enabled=False, rules=[]
-        )
+        mock_config.error_parsing = ErrorParsingConfig(enabled=False, rules=[])
         mock_config.provider_type = "gemini"
         mock_config.keys_path = "/test/keys"
         mock_config.api_base_url = "https://generativelanguage.googleapis.com/v1"

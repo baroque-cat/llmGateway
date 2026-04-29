@@ -80,19 +80,18 @@ def make_mock_request(
 
 def create_provider_config_with_catch_all_rule() -> ProviderConfig:
     """Create a provider config with specific catch-all error parsing rules."""
-    config = ProviderConfig(provider_type="test", keys_path="keys/test/")
+    retry_policy = RetryPolicyConfig(
+        enabled=True,
+        on_key_error=RetryOnErrorConfig(attempts=2, backoff_sec=0.1),
+        on_server_error=RetryOnErrorConfig(attempts=2, backoff_sec=0.1),
+    )
+    config = ProviderConfig(provider_type="openai_like", keys_path="keys/test/")
     config.models = {"gpt-4": ModelInfo()}
-    config.gateway_policy = GatewayPolicyConfig()
-    config.gateway_policy.retry = RetryPolicyConfig(enabled=True)
-    config.gateway_policy.retry.on_key_error = RetryOnErrorConfig(
-        attempts=2, backoff_sec=0.1
-    )
-    config.gateway_policy.retry.on_server_error = RetryOnErrorConfig(
-        attempts=2, backoff_sec=0.1
-    )
+    config.gateway_policy = GatewayPolicyConfig(retry=retry_policy)
 
     # Error parsing configuration with specific rule and catch-all rule
-    config.gateway_policy.error_parsing = ErrorParsingConfig(
+    # error_parsing now lives on ProviderConfig (not gateway_policy)
+    config.error_parsing = ErrorParsingConfig(
         enabled=True,
         rules=[
             ErrorParsingRule(

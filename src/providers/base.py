@@ -92,6 +92,18 @@ class AIBaseProvider(IProvider):
         to provide more accurate error classification. For example, it can distinguish
         between different types of 400 errors (e.g., "Arrearage" vs format errors).
 
+        Supports two matching modes:
+
+        - **JSON dot-path mode** (default): ``error_path`` specifies a dot-separated
+          path into the JSON response body (e.g. ``"error.code"``). The value at that
+          path is extracted and matched against ``match_pattern`` via regex.
+
+        - **Fulltext mode**: when ``error_path`` is ``"$"`` or ``""``, the rule's
+          regex is applied against the **entire raw response body** (decoded as UTF-8
+          with ``errors="ignore"``), rather than against a specific JSON field. This
+          is useful for providers with complex error structures (e.g. Gemini nested
+          arrays).
+
         Args:
             response: The HTTP response from the upstream API
             default_reason: The default error reason based on HTTP status code
@@ -102,7 +114,7 @@ class AIBaseProvider(IProvider):
             Refined error reason if a rule matches, otherwise the default reason
         """
         # Check if error parsing is enabled and has rules
-        error_config = self.config.gateway_policy.error_parsing
+        error_config = self.config.error_parsing
         if not error_config.enabled or not error_config.rules:
             return default_reason
 
@@ -113,9 +125,23 @@ class AIBaseProvider(IProvider):
         if not rules:
             return default_reason
 
-        # Parse response body if not already provided
+        # Separate rules into fulltext and dot-path rules
+        fulltext_rules: list[ErrorParsingRule] = []
+        dotpath_rules: list[ErrorParsingRule] = []
+        for rule in rules:
+            if rule.error_path in ("$", ""):
+                fulltext_rules.append(rule)
+            else:
+                dotpath_rules.append(rule)
+
+        # Decode raw body text for fulltext rules (if needed)
+        raw_text: str | None = None
+        if fulltext_rules and body_bytes is not None:
+            raw_text = body_bytes.decode("utf-8", errors="ignore")
+
+        # Parse JSON body for dot-path rules (if needed and not already provided)
         parsed_data = response_data
-        if parsed_data is None:
+        if dotpath_rules and parsed_data is None:
             try:
                 if body_bytes is None:
                     body_bytes = await response.aread()
@@ -124,19 +150,30 @@ class AIBaseProvider(IProvider):
                         body_bytes.decode("utf-8", errors="ignore")
                     )
                 else:
-                    # Empty body, can't parse
-                    return default_reason
+                    # Empty body, can't parse — skip dot-path rules
+                    parsed_data = None
             except (json.JSONDecodeError, UnicodeDecodeError, AttributeError):
-                # If we can't parse the body, return the default reason
-                return default_reason
+                parsed_data = None
 
         # Apply rules in priority order (higher priority first)
         matched_rules: list[ErrorParsingRule] = []
         for rule in sorted(rules, key=lambda x: x.priority, reverse=True):
             try:
-                value = self._extract_json_value(parsed_data, rule.error_path)
-                if value and re.search(rule.match_pattern, str(value), re.IGNORECASE):
-                    matched_rules.append(rule)
+                if rule.error_path in ("$", ""):
+                    # Fulltext mode: apply regex to raw body text
+                    if raw_text is None:
+                        continue  # No text available, skip
+                    if re.search(rule.match_pattern, raw_text, re.IGNORECASE):
+                        matched_rules.append(rule)
+                else:
+                    # Dot-path mode: extract value from JSON
+                    if parsed_data is None:
+                        continue  # JSON not available, skip
+                    value = self._extract_json_value(parsed_data, rule.error_path)
+                    if value and re.search(
+                        rule.match_pattern, str(value), re.IGNORECASE
+                    ):
+                        matched_rules.append(rule)
             except (KeyError, TypeError, re.error):
                 # Skip rules that can't be evaluated
                 continue
@@ -168,37 +205,6 @@ class AIBaseProvider(IProvider):
                 return None
         return current
 
-    async def _check_fast_fail(self, response: httpx.Response) -> CheckResult | None:
-        """
-        Checks if the response status code matches any entry in the worker's fast_status_mapping.
-        If a match is found, returns a CheckResult with the mapped ErrorReason immediately.
-        This enables "fast fail" behavior for worker health checks without reading the response body.
-
-        Args:
-            response: The HTTP response from the upstream API
-
-        Returns:
-            CheckResult if a fast fail condition is met, None otherwise
-        """
-        status_code = response.status_code
-        health_policy = self.config.worker_health_policy
-
-        if status_code in health_policy.fast_status_mapping:
-            reason = health_policy.fast_status_mapping[status_code]
-
-            # Log the fast fail event
-            logger.debug(
-                f"Worker fast fail for provider '{self.name}': Status {status_code} mapped to {reason.value}"
-            )
-
-            return CheckResult.fail(
-                reason=reason,
-                message=f"Worker fast fail: {reason.value} (Status {status_code})",
-                status_code=status_code,
-            )
-
-        return None
-
     # --- REFACTORED: Protected helper method for sending requests (Template Method pattern) ---
     async def _send_proxy_request(
         self, client: httpx.AsyncClient, request: httpx.Request
@@ -211,8 +217,8 @@ class AIBaseProvider(IProvider):
         It delegates the parsing of provider-specific errors to the
         `_parse_proxy_error` method.
 
-        For the Zero-Overhead Fallback path (no fast_status_mapping, no error_parsing,
-        no debug_mode), the upstream stream is normally closed with aclose() to release
+        For the Zero-Overhead Fallback path (no error_parsing, no debug_mode),
+        the upstream stream is normally closed with aclose() to release
         resources. However, for HTTP 400 (Bad Request), the stream is intentionally
         left open so the gateway's client-error handler can read the body via aread()
         and return the original provider error message to the client, instead of a
@@ -240,61 +246,48 @@ class AIBaseProvider(IProvider):
                 # --- NEW: Zero-Overhead Error Handling Pipeline ---
                 status_code = upstream_response.status_code
                 gateway_policy = self.config.gateway_policy
+                error_config = self.config.error_parsing
 
-                # 1. Fast Status Mapping (Highest Priority - Fast Fail)
-                if status_code in gateway_policy.fast_status_mapping:
-                    reason = gateway_policy.fast_status_mapping[status_code]
+                # 1. Debug Mode or Error Parsing (Read Body)
+                should_read_body = False
 
-                    # STOP: Close stream without reading body
-                    await upstream_response.aclose()
+                # Check Debug Mode (both full_body and no_content need the body)
+                if gateway_policy.debug_mode in ("full_body", "no_content"):
+                    should_read_body = True
 
-                    check_result = CheckResult.fail(
-                        reason=reason,
-                        message=f"Fast fail: {reason.value} (Status {status_code})",
-                        status_code=status_code,
+                # Check Error Parsing Rules
+                elif error_config.enabled:
+                    # Only read if there is a rule for this specific status code
+                    for rule in error_config.rules:
+                        if rule.status_code == status_code:
+                            should_read_body = True
+                            break
+
+                if should_read_body:
+                    # READ: Read body into memory
+                    try:
+                        content_bytes = await upstream_response.aread()
+                    except Exception as e:
+                        logger.error(f"Failed to read error response body: {e}")
+                        content_bytes = None
+
+                    # Delegate parsing with content
+                    check_result = await self._parse_proxy_error(
+                        upstream_response, content_bytes
                     )
-
-                # 2. Debug Mode or Error Parsing (Read Body)
                 else:
-                    should_read_body = False
+                    # STOP: Fast Fallback (Default Behavior)
+                    # Do NOT read body; close stream to release resources.
+                    # Exception: For status 400, preserve the stream so the gateway
+                    # can read the error body via aread() and return it to the client
+                    # instead of a synthetic placeholder.
+                    if status_code != 400:
+                        await upstream_response.aclose()
 
-                    # Check Debug Mode (both full_body and no_content need the body)
-                    if gateway_policy.debug_mode in ("full_body", "no_content"):
-                        should_read_body = True
-
-                    # Check Error Parsing Rules
-                    elif gateway_policy.error_parsing.enabled:
-                        # Only read if there is a rule for this specific status code
-                        for rule in gateway_policy.error_parsing.rules:
-                            if rule.status_code == status_code:
-                                should_read_body = True
-                                break
-
-                    if should_read_body:
-                        # READ: Read body into memory
-                        try:
-                            content_bytes = await upstream_response.aread()
-                        except Exception as e:
-                            logger.error(f"Failed to read error response body: {e}")
-                            content_bytes = None
-
-                        # Delegate parsing with content
-                        check_result = await self._parse_proxy_error(
-                            upstream_response, content_bytes
-                        )
-                    else:
-                        # STOP: Fast Fallback (Default Behavior)
-                        # Do NOT read body; close stream to release resources.
-                        # Exception: For status 400, preserve the stream so the gateway
-                        # can read the error body via aread() and return it to the client
-                        # instead of a synthetic placeholder.
-                        if status_code != 400:
-                            await upstream_response.aclose()
-
-                        # Delegate parsing WITHOUT content (will use status code mapping)
-                        check_result = await self._parse_proxy_error(
-                            upstream_response, None
-                        )
+                    # Delegate parsing WITHOUT content (will use status code mapping)
+                    check_result = await self._parse_proxy_error(
+                        upstream_response, None
+                    )
 
         except httpx.RequestError as e:
             error_message = f"Upstream request failed with a network-level error: {e}"

@@ -18,6 +18,7 @@ from src.config.schemas import (
     ErrorParsingConfig,
     ErrorParsingRule,
     GatewayPolicyConfig,
+    ModelInfo,
     ProviderConfig,
 )
 from src.core.constants import ErrorReason
@@ -36,7 +37,7 @@ class TestOpenAILikeErrorParsing:
         if error_config is None:
             error_config = ErrorParsingConfig(enabled=False, rules=[])
 
-        mock_config.gateway_policy.error_parsing = error_config
+        mock_config.error_parsing = error_config
 
         # Set up other required config fields
         mock_config.provider_type = "openai"
@@ -365,32 +366,240 @@ class TestOpenAILikeErrorParsing:
     @pytest.mark.asyncio
     async def test_check_method_400_behavior(self):
         """
-        Test that check method treats 400 errors as INVALID_KEY.
+        Test that check() calls _refine_error_reason() on HTTP 400 errors.
 
-        This is worker-specific behavior and should not depend on error parsing.
+        When error_parsing is disabled, check() returns the default reason
+        (INVALID_KEY for 400). When enabled with a matching rule, it returns
+        the refined reason from error_parsing.
         """
-        provider = self.create_mock_provider(
+        # Case 1: error_parsing disabled → default reason (INVALID_KEY for 400)
+        provider_disabled = self.create_mock_provider(
             error_config=ErrorParsingConfig(enabled=False, rules=[])
         )
+        provider_disabled.config.models = {
+            "gpt-4": ModelInfo(
+                endpoint_suffix="/chat/completions",
+                test_payload={"messages": [{"role": "user", "content": "hi"}]},
+            )
+        }
+        provider_disabled.config.timeouts.pool = 35.0
 
-        # Mock the underlying HTTP call to return 400
+        mock_request = httpx.Request(
+            "POST", "https://api.openai.com/v1/chat/completions"
+        )
+        mock_response_400 = MagicMock(spec=httpx.Response)
+        mock_response_400.status_code = 400
+        mock_response_400.elapsed = MagicMock()
+        mock_response_400.elapsed.total_seconds.return_value = 0.5
+        mock_response_400.text = '{"error": {"message": "Bad request"}}'
+
+        httpx_error_400 = httpx.HTTPStatusError(
+            "400 Bad Request", request=mock_request, response=mock_response_400
+        )
+        mock_response_400.raise_for_status = MagicMock(side_effect=httpx_error_400)
+
         mock_client = AsyncMock(spec=httpx.AsyncClient)
-        mock_response = AsyncMock(spec=httpx.Response)
+        mock_client.post = AsyncMock(return_value=mock_response_400)
+
+        result = await provider_disabled.check(mock_client, "test_token", model="gpt-4")
+
+        assert not result.available
+        assert result.error_reason == ErrorReason.INVALID_KEY
+        assert result.status_code == 400
+
+        # Case 2: error_parsing enabled with matching rule → refined reason
+        provider_enabled = self.create_mock_provider(
+            error_config=ErrorParsingConfig(
+                enabled=True,
+                rules=[
+                    ErrorParsingRule(
+                        status_code=400,
+                        error_path="error.type",
+                        match_pattern="Arrearage",
+                        map_to="no_quota",
+                        priority=10,
+                    )
+                ],
+            )
+        )
+        provider_enabled.config.models = {
+            "gpt-4": ModelInfo(
+                endpoint_suffix="/chat/completions",
+                test_payload={"messages": [{"role": "user", "content": "hi"}]},
+            )
+        }
+        provider_enabled.config.timeouts.pool = 35.0
+
+        mock_response_arrearage = MagicMock(spec=httpx.Response)
+        mock_response_arrearage.status_code = 400
+        mock_response_arrearage.elapsed = MagicMock()
+        mock_response_arrearage.elapsed.total_seconds.return_value = 0.5
+        mock_response_arrearage.text = (
+            '{"error": {"type": "Arrearage", "message": "Payment overdue"}}'
+        )
+
+        httpx_error_arrearage = httpx.HTTPStatusError(
+            "400 Bad Request",
+            request=mock_request,
+            response=mock_response_arrearage,
+        )
+        mock_response_arrearage.raise_for_status = MagicMock(
+            side_effect=httpx_error_arrearage
+        )
+
+        mock_client2 = AsyncMock(spec=httpx.AsyncClient)
+        mock_client2.post = AsyncMock(return_value=mock_response_arrearage)
+
+        result = await provider_enabled.check(mock_client2, "test_token", model="gpt-4")
+
+        assert not result.available
+        assert result.error_reason == ErrorReason.NO_QUOTA
+        assert result.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_check_calls_refine_error_reason_on_400(self):
+        """OAI-1: OpenAILikeProvider.check() calls _refine_error_reason() on HTTP 400."""
+        provider = self.create_mock_provider(
+            error_config=ErrorParsingConfig(enabled=True, rules=[])
+        )
+        provider.config.models = {
+            "gpt-4": ModelInfo(
+                endpoint_suffix="/chat/completions",
+                test_payload={"messages": [{"role": "user", "content": "hi"}]},
+            )
+        }
+        provider.config.timeouts.pool = 35.0
+
+        mock_request = httpx.Request(
+            "POST", "https://api.openai.com/v1/chat/completions"
+        )
+        mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 400
         mock_response.elapsed = MagicMock()
         mock_response.elapsed.total_seconds.return_value = 0.5
-        mock_response.aread = AsyncMock(return_value=b'{"error": {"message": "test"}}')
+        mock_response.text = '{"error": {"message": "Bad request"}}'
 
-        mock_client.request = AsyncMock(return_value=mock_response)
+        httpx_error = httpx.HTTPStatusError(
+            "400 Bad Request", request=mock_request, response=mock_response
+        )
+        mock_response.raise_for_status = MagicMock(side_effect=httpx_error)
 
-        # We need to test the check method, but it requires complex setup
-        # For now, verify that the provider has the check method
-        assert hasattr(provider, "check")
-        assert callable(provider.check)
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.post = AsyncMock(return_value=mock_response)
 
-        # Note: Actual check method testing would require more comprehensive
-        # mocking of the entire HTTP request flow, which is beyond the scope
-        # of error parsing integration tests.
+        with patch.object(
+            provider, "_refine_error_reason", new=AsyncMock()
+        ) as mock_refine:
+            mock_refine.return_value = ErrorReason.INVALID_KEY
+
+            result = await provider.check(mock_client, "test_token", model="gpt-4")
+
+            # Verify _refine_error_reason was called
+            mock_refine.assert_called_once()
+            call_args = mock_refine.call_args
+            # First positional arg is the response object
+            assert call_args[0][0] is mock_response
+            # Second positional arg is default_reason (INVALID_KEY for 400 in check())
+            assert call_args[0][1] == ErrorReason.INVALID_KEY
+            # body_bytes keyword arg contains encoded response text
+            assert "body_bytes" in call_args[1]
+            assert (
+                call_args[1]["body_bytes"] == b'{"error": {"message": "Bad request"}}'
+            )
+
+    @pytest.mark.asyncio
+    async def test_check_refine_400_to_no_quota_via_error_parsing(self):
+        """OAI-2: check() with 400 + Arrearage rule → NO_QUOTA instead of INVALID_KEY."""
+        provider = self.create_mock_provider(
+            error_config=ErrorParsingConfig(
+                enabled=True,
+                rules=[
+                    ErrorParsingRule(
+                        status_code=400,
+                        error_path="error.type",
+                        match_pattern="Arrearage|BillingHardLimit",
+                        map_to="no_quota",
+                        priority=10,
+                    )
+                ],
+            )
+        )
+        provider.config.models = {
+            "gpt-4": ModelInfo(
+                endpoint_suffix="/chat/completions",
+                test_payload={"messages": [{"role": "user", "content": "hi"}]},
+            )
+        }
+        provider.config.timeouts.pool = 35.0
+
+        mock_request = httpx.Request(
+            "POST", "https://api.openai.com/v1/chat/completions"
+        )
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 400
+        mock_response.elapsed = MagicMock()
+        mock_response.elapsed.total_seconds.return_value = 0.5
+        mock_response.text = (
+            '{"error": {"type": "Arrearage", "message": "Payment overdue"}}'
+        )
+
+        httpx_error = httpx.HTTPStatusError(
+            "400 Bad Request", request=mock_request, response=mock_response
+        )
+        mock_response.raise_for_status = MagicMock(side_effect=httpx_error)
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.post = AsyncMock(return_value=mock_response)
+
+        result = await provider.check(mock_client, "test_token", model="gpt-4")
+
+        assert not result.available
+        assert result.error_reason == ErrorReason.NO_QUOTA
+        assert result.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_check_fallback_when_error_parsing_disabled(self):
+        """OAI-3: check() with error_parsing.enabled=False → default_reason (INVALID_KEY for 400)."""
+        provider = self.create_mock_provider(
+            error_config=ErrorParsingConfig(enabled=False, rules=[])
+        )
+        provider.config.models = {
+            "gpt-4": ModelInfo(
+                endpoint_suffix="/chat/completions",
+                test_payload={"messages": [{"role": "user", "content": "hi"}]},
+            )
+        }
+        provider.config.timeouts.pool = 35.0
+
+        mock_request = httpx.Request(
+            "POST", "https://api.openai.com/v1/chat/completions"
+        )
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 400
+        mock_response.elapsed = MagicMock()
+        mock_response.elapsed.total_seconds.return_value = 0.5
+        mock_response.text = '{"error": {"message": "Bad request"}}'
+
+        httpx_error = httpx.HTTPStatusError(
+            "400 Bad Request", request=mock_request, response=mock_response
+        )
+        mock_response.raise_for_status = MagicMock(side_effect=httpx_error)
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.post = AsyncMock(return_value=mock_response)
+
+        result = await provider.check(mock_client, "test_token", model="gpt-4")
+
+        assert not result.available
+        # When error_parsing is disabled, default_reason for 400 in check() is INVALID_KEY
+        assert result.error_reason == ErrorReason.INVALID_KEY
+        assert result.status_code == 400
+
+    def test_check_does_not_call_check_fast_fail(self):
+        """OAI-4: check() doesn't call _check_fast_fail() — method has been removed."""
+        provider = self.create_mock_provider()
+        # _check_fast_fail method should not exist on the provider
+        assert not hasattr(provider, "_check_fast_fail")
 
     def test_map_status_code_to_reason_4xx_errors(self):
         """
@@ -432,10 +641,7 @@ class TestOpenAILikeProxyRequest:
         )
 
         mock_config = MagicMock(spec=ProviderConfig)
-        mock_config.gateway_policy = MagicMock(spec=GatewayPolicyConfig)
-        mock_config.gateway_policy.error_parsing = ErrorParsingConfig(
-            enabled=False, rules=[]
-        )
+        mock_config.error_parsing = ErrorParsingConfig(enabled=False, rules=[])
         mock_config.provider_type = "openai"
         mock_config.keys_path = "/test/keys"
         mock_config.api_base_url = "https://api.openai.com/v1"

@@ -121,9 +121,10 @@ def get_default_config() -> dict[str, Any]:
                     # Verification Loop Configuration
                     "verification_attempts": 3,
                     "verification_delay_sec": 65,
-                    # Fast Status Mapping for worker health checks
-                    "fast_status_mapping": {},
                 },
+                # Configuration for parsing error responses to refine error classification
+                # This enables distinguishing between different error types with the same HTTP status code
+                "error_parsing": {"enabled": False, "rules": []},
                 # Policies applied only by the API Gateway during request processing.
                 "gateway_policy": {
                     # Controls whether streaming is enabled for this provider instance.
@@ -137,9 +138,6 @@ def get_default_config() -> dict[str, Any]:
                     # - "full_body": Log full request and response including all bodies,
                     #                with sensitive fields (api_key, token) redacted.
                     "debug_mode": "disabled",
-                    # Configuration for parsing error responses to refine error classification
-                    # This enables distinguishing between different error types with the same HTTP status code
-                    "error_parsing": {"enabled": False, "rules": []},
                     # Retry policies for failed requests.
                     "retry": {
                         "enabled": False,
@@ -164,10 +162,6 @@ def get_default_config() -> dict[str, Any]:
                             "factor": 2.0,
                         },
                     },
-                    # Mapping of HTTP status codes to ErrorReason strings for fast, body-less error handling.
-                    # When a status code matches an entry here, the gateway will IMMEDIATELY fail the request
-                    # with the mapped reason without reading the response body.
-                    "fast_status_mapping": {},
                 },
             },
         },
