@@ -91,7 +91,7 @@ async def test_default_400_behavior(mock_client, mock_response):
     - Body NOT read (Zero Overhead).
     - Reason is BAD_REQUEST (No penalty).
     """
-    config = ProviderConfig(provider_type="mock", keys_path="keys/mock/")
+    config = ProviderConfig(provider_type="openai_like")
     provider = RealisticMockProvider("test", config)
 
     mock_response.status_code = 400
@@ -104,7 +104,8 @@ async def test_default_400_behavior(mock_client, mock_response):
     assert result.error_reason == ErrorReason.BAD_REQUEST
     assert result.message == "Body NOT read"
     mock_response.aread.assert_not_called()  # Critical
-    mock_response.aclose.assert_called_once()  # Resource cleanup
+    # For 400, stream is intentionally NOT closed (special exception in base)
+    mock_response.aclose.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -115,7 +116,7 @@ async def test_default_401_behavior(mock_client, mock_response):
     - Body NOT read (Zero Overhead).
     - Reason is INVALID_KEY (Penalty applies downstream).
     """
-    config = ProviderConfig(provider_type="mock", keys_path="keys/mock/")
+    config = ProviderConfig(provider_type="openai_like")
     provider = RealisticMockProvider("test", config)
 
     mock_response.status_code = 401
@@ -131,21 +132,21 @@ async def test_default_401_behavior(mock_client, mock_response):
     mock_response.aclose.assert_called_once()
 
 
-# --- 2. FAST MAPPING TESTS ---
+# --- 2. FAST FALLBACK (DEFAULT BEHAVIOR) TESTS ---
 
 
 @pytest.mark.asyncio
-async def test_fast_400_mapping(mock_client, mock_response):
+async def test_fast_fallback_400(mock_client, mock_response):
     """
-    Scenario: Fast mapping {400: "invalid_key"}.
+    Scenario: Default config (no debug, no error_parsing), Status 400.
     Expectation:
-    - Body NOT read.
-    - Reason is INVALID_KEY (Overridden).
+    - Body NOT read (Fast Fallback).
+    - Reason is BAD_REQUEST (Default status mapping).
+    - Stream NOT closed (special exception for 400).
     """
     config = ProviderConfig(
-        provider_type="mock",
-        keys_path="keys/mock/",
-        gateway_policy=GatewayPolicyConfig(fast_status_mapping={400: "invalid_key"}),
+        provider_type="openai_like",
+        gateway_policy=GatewayPolicyConfig(),
     )
     provider = RealisticMockProvider("test", config)
 
@@ -155,11 +156,12 @@ async def test_fast_400_mapping(mock_client, mock_response):
 
     _, result = await provider._send_proxy_request(mock_client, request)
 
-    # Assertions
-    assert result.error_reason == ErrorReason.INVALID_KEY  # Mapped!
-    assert "Fast fail" in result.message
+    # Assertions - fast_status_mapping removed, falls through to default
+    assert result.error_reason == ErrorReason.BAD_REQUEST  # Default mapping
+    assert result.message == "Body NOT read"
     mock_response.aread.assert_not_called()
-    mock_response.aclose.assert_called_once()
+    # For 400, stream is intentionally NOT closed (special exception in base)
+    mock_response.aclose.assert_not_called()
 
 
 # --- 3. TARGETED ERROR PARSING TESTS ---
@@ -173,17 +175,17 @@ async def test_error_parsing_triggered(mock_client, mock_response):
     - Body IS read (to look for details).
     """
     config = ProviderConfig(
-        provider_type="mock",
-        keys_path="keys/mock/",
-        gateway_policy=GatewayPolicyConfig(
-            error_parsing=ErrorParsingConfig(
-                enabled=True,
-                rules=[
-                    ErrorParsingRule(
-                        status_code=400, error_path="e", match_pattern="p", map_to="x"
-                    )
-                ],
-            )
+        provider_type="openai_like",
+        error_parsing=ErrorParsingConfig(
+            enabled=True,
+            rules=[
+                ErrorParsingRule(
+                    status_code=400,
+                    error_path="e",
+                    match_pattern="p",
+                    map_to="invalid_key",
+                )
+            ],
         ),
     )
     provider = RealisticMockProvider("test", config)
@@ -208,17 +210,17 @@ async def test_error_parsing_ignored_on_mismatch(mock_client, mock_response):
     - Returns SERVER_ERROR based on status.
     """
     config = ProviderConfig(
-        provider_type="mock",
-        keys_path="keys/mock/",
-        gateway_policy=GatewayPolicyConfig(
-            error_parsing=ErrorParsingConfig(
-                enabled=True,
-                rules=[
-                    ErrorParsingRule(
-                        status_code=400, error_path="e", match_pattern="p", map_to="x"
-                    )
-                ],
-            )
+        provider_type="openai_like",
+        error_parsing=ErrorParsingConfig(
+            enabled=True,
+            rules=[
+                ErrorParsingRule(
+                    status_code=400,
+                    error_path="e",
+                    match_pattern="p",
+                    map_to="invalid_key",
+                )
+            ],
         ),
     )
     provider = RealisticMockProvider("test", config)
@@ -245,8 +247,7 @@ async def test_debug_mode_force_read(mock_client, mock_response):
     Expectation: Body IS read regardless of status.
     """
     config = ProviderConfig(
-        provider_type="mock",
-        keys_path="keys/mock/",
+        provider_type="openai_like",
         gateway_policy=GatewayPolicyConfig(debug_mode="full_body"),
     )
     provider = RealisticMockProvider("test", config)

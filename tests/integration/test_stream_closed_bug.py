@@ -71,17 +71,17 @@ def create_provider_config(
     rule_matches: bool = False,
 ) -> ProviderConfig:
     """Create a provider config with specific error parsing settings."""
-    config = ProviderConfig(provider_type="test", keys_path="keys/test/")
+    config = ProviderConfig(provider_type="openai_like")
     config.models = {"gpt-4": ModelInfo()}
     config.gateway_policy = GatewayPolicyConfig()
-    config.gateway_policy.retry = RetryPolicyConfig(enabled=retry_enabled)
     if retry_enabled:
-        config.gateway_policy.retry.on_key_error = RetryOnErrorConfig(
-            attempts=2, backoff_sec=0.1
+        config.gateway_policy.retry = RetryPolicyConfig(
+            enabled=True,
+            on_key_error=RetryOnErrorConfig(attempts=2, backoff_sec=0.1),
+            on_server_error=RetryOnErrorConfig(attempts=2, backoff_sec=0.1),
         )
-        config.gateway_policy.retry.on_server_error = RetryOnErrorConfig(
-            attempts=2, backoff_sec=0.1
-        )
+    else:
+        config.gateway_policy.retry = RetryPolicyConfig(enabled=False)
 
     if error_parsing_enabled:
         rules: list[ErrorParsingRule] = []
@@ -97,13 +97,9 @@ def create_provider_config(
                     priority=10,
                 )
             )
-        config.gateway_policy.error_parsing = ErrorParsingConfig(
-            enabled=True, rules=rules
-        )
+        config.error_parsing = ErrorParsingConfig(enabled=True, rules=rules)
     else:
-        config.gateway_policy.error_parsing = ErrorParsingConfig(
-            enabled=False, rules=[]
-        )
+        config.error_parsing = ErrorParsingConfig(enabled=False, rules=[])
 
     return config
 

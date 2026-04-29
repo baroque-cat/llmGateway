@@ -17,7 +17,6 @@ import pytest
 from src.config.schemas import (
     ErrorParsingConfig,
     ErrorParsingRule,
-    GatewayPolicyConfig,
     ProviderConfig,
 )
 from src.core.constants import ErrorReason
@@ -31,12 +30,10 @@ class TestErrorParsingEdgeCases:
     def create_mock_openai_provider(self, error_config):
         """Helper to create a mock OpenAILikeProvider."""
         mock_config = MagicMock(spec=ProviderConfig)
-        mock_config.gateway_policy = MagicMock(spec=GatewayPolicyConfig)
-        mock_config.gateway_policy.error_parsing = error_config
+        mock_config.error_parsing = error_config
 
         # Minimal config
         mock_config.provider_type = "openai"
-        mock_config.keys_path = "/test/keys"
         mock_config.api_base_url = "https://api.openai.com/v1"
         mock_config.default_model = "gpt-4"
         mock_config.models = {}
@@ -259,20 +256,31 @@ class TestErrorParsingEdgeCases:
         """
         Test error parsing with invalid regex patterns in rules.
 
-        Ensures the system gracefully handles regex compilation errors
-        and falls back to default error reason.
+        Ensures the system validates regex patterns at the schema level,
+        rejecting invalid patterns during ErrorParsingRule construction.
+        Valid patterns still work correctly for error parsing.
         """
+        # Invalid regex patterns are now rejected at the Pydantic schema level
+        # during ErrorParsingRule construction, not at runtime.
+        with pytest.raises(Exception) as exc_info:
+            ErrorParsingRule(
+                status_code=400,
+                error_path="error.message",
+                match_pattern="[invalid-regex",  # Invalid regex
+                map_to="invalid_key",
+                priority=10,
+            )
+        # Should mention the invalid regex
+        assert (
+            "invalid-regex" in str(exc_info.value)
+            or "regex" in str(exc_info.value).lower()
+        )
+
+        # Valid regex patterns should still work correctly
         provider = self.create_mock_openai_provider(
             error_config=ErrorParsingConfig(
                 enabled=True,
                 rules=[
-                    ErrorParsingRule(
-                        status_code=400,
-                        error_path="error.message",
-                        match_pattern="[invalid-regex",  # Invalid regex
-                        map_to="invalid_key",
-                        priority=10,
-                    ),
                     ErrorParsingRule(
                         status_code=400,
                         error_path="error.code",
@@ -294,7 +302,7 @@ class TestErrorParsingEdgeCases:
         ).encode("utf-8")
         mock_response.aread = AsyncMock(return_value=error_body)
 
-        # Should skip the invalid regex rule and match the valid one
+        # Should match the valid regex rule
         result = await provider._parse_proxy_error(mock_response, error_body)
 
         assert result.error_reason == ErrorReason.NO_QUOTA

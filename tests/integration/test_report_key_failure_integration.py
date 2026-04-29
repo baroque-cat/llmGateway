@@ -43,9 +43,7 @@ async def test_report_key_failure_integration_next_check_from_policy() -> None:
 
     # Create a ProviderConfig with custom HealthPolicyConfig values
     # so we can distinguish the computed time from +1 minute
-    provider_config = ProviderConfig(
-        provider_type="openai_like", keys_path="keys/test/"
-    )
+    provider_config = ProviderConfig(provider_type="openai_like")
     provider_config.worker_health_policy = HealthPolicyConfig(
         on_server_error_min=15,
         on_overload_min=20,

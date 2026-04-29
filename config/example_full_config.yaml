@@ -57,8 +57,6 @@ providers:
   gemini-production:
     provider_type: "gemini"
     enabled: true
-    # Directory to store API keys
-    keys_path: "keys/gemini-production/"
     
     api_base_url: "https://generativelanguage.googleapis.com"
     default_model: "gemini-2.5-flash"
@@ -210,7 +208,6 @@ providers:
   deepseek-main:
     provider_type: "openai_like"
     enabled: true
-    keys_path: "keys/deepseek-main/"
     
     api_base_url: "https://api.deepseek.com/v1"
     default_model: "deepseek-chat"
@@ -236,7 +233,6 @@ providers:
   anthropic-production:
     provider_type: "anthropic"
     enabled: true
-    keys_path: "keys/anthropic-production/"
     
     api_base_url: "https://api.anthropic.com"
     default_model: "claude-sonnet-4-20250514"

@@ -39,7 +39,6 @@ class TestAnthropicProvider:
 
         # Set up other required config fields
         mock_config.provider_type = "anthropic"
-        mock_config.keys_path = "/test/keys"
         mock_config.api_base_url = "https://api.anthropic.com/v1"
         mock_config.default_model = "claude-3-opus-20240229"
         mock_config.models = {}

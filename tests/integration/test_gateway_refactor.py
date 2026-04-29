@@ -15,6 +15,7 @@ from starlette.responses import StreamingResponse
 
 from src.config.schemas import (
     GatewayPolicyConfig,
+    HealthPolicyConfig,
     ProviderConfig,
     RetryOnErrorConfig,
     RetryPolicyConfig,
@@ -77,7 +78,7 @@ async def test_server_retry_fail_then_new_key():
     provider.parse_request_details.return_value = MagicMock(model_name="gpt-4")
 
     # Setup Config: 2 server attempts, 2 key attempts
-    provider_config = ProviderConfig(provider_type="test", keys_path="keys/test/")
+    provider_config = ProviderConfig(provider_type="openai_like")
     provider_config.models = {"gpt-4": {}}
     provider_config.gateway_policy.retry.enabled = True
     provider_config.gateway_policy.retry.on_server_error = RetryOnErrorConfig(
@@ -152,7 +153,7 @@ async def test_key_storm_protection():
     provider.parse_request_details.return_value = MagicMock(model_name="gpt-4")
 
     # Setup Config: 0 server attempts (fail fast), 3 key attempts with backoff
-    provider_config = ProviderConfig(provider_type="test", keys_path="keys/test/")
+    provider_config = ProviderConfig(provider_type="openai_like")
     provider_config.models = {"gpt-4": {}}
     provider_config.gateway_policy.retry.enabled = True
     provider_config.gateway_policy.retry.on_server_error = RetryOnErrorConfig(
@@ -210,7 +211,7 @@ async def test_unsafe_400_fatal():
     provider.parse_request_details.return_value = MagicMock(model_name="gpt-4")
 
     # Config: 2 key attempts
-    provider_config = ProviderConfig(provider_type="test", keys_path="keys/test/")
+    provider_config = ProviderConfig(provider_type="openai_like")
     provider_config.models = {"gpt-4": {}}
     provider_config.gateway_policy.retry.enabled = True
     provider_config.gateway_policy.retry.on_key_error = RetryOnErrorConfig(
@@ -437,9 +438,7 @@ async def test_end_to_end_no_content_with_openai_like():
     from src.services.gateway_service import create_app
 
     accessor = MagicMock()
-    provider_config = ProviderConfig(
-        provider_type="openai_like", keys_path="keys/test/"
-    )
+    provider_config = ProviderConfig(provider_type="openai_like")
     provider_config.enabled = True
     provider_config.models = {"gpt-4": {}}
     provider_config.gateway_policy = GatewayPolicyConfig(
@@ -574,14 +573,16 @@ async def test_startup_warning_debug_plus_retry(caplog):
     from src.services.gateway_service import create_app
 
     accessor = MagicMock()
-    provider_config = ProviderConfig(
-        provider_type="openai_like", keys_path="keys/test/"
-    )
+    provider_config = ProviderConfig(provider_type="openai_like")
     provider_config.enabled = True
     provider_config.models = {"gpt-4": {}}
     provider_config.gateway_policy = GatewayPolicyConfig(
         debug_mode="no_content",
-        retry=RetryPolicyConfig(enabled=True),
+        retry=RetryPolicyConfig(
+            enabled=True,
+            on_key_error=RetryOnErrorConfig(attempts=2, backoff_sec=0.1),
+            on_server_error=RetryOnErrorConfig(attempts=2, backoff_sec=0.1),
+        ),
     )
     accessor.get_enabled_providers.return_value = {"my_provider": provider_config}
     accessor.get_provider_or_raise.return_value = provider_config
@@ -638,9 +639,7 @@ async def test_no_warning_debug_without_retry(caplog):
     from src.services.gateway_service import create_app
 
     accessor = MagicMock()
-    provider_config = ProviderConfig(
-        provider_type="openai_like", keys_path="keys/test/"
-    )
+    provider_config = ProviderConfig(provider_type="openai_like")
     provider_config.enabled = True
     provider_config.models = {"gpt-4": {}}
     provider_config.gateway_policy = GatewayPolicyConfig(
@@ -702,14 +701,16 @@ async def test_no_warning_retry_without_debug(caplog):
     from src.services.gateway_service import create_app
 
     accessor = MagicMock()
-    provider_config = ProviderConfig(
-        provider_type="openai_like", keys_path="keys/test/"
-    )
+    provider_config = ProviderConfig(provider_type="openai_like")
     provider_config.enabled = True
     provider_config.models = {"gpt-4": {}}
     provider_config.gateway_policy = GatewayPolicyConfig(
         debug_mode="disabled",
-        retry=RetryPolicyConfig(enabled=True),
+        retry=RetryPolicyConfig(
+            enabled=True,
+            on_key_error=RetryOnErrorConfig(attempts=2, backoff_sec=0.1),
+            on_server_error=RetryOnErrorConfig(attempts=2, backoff_sec=0.1),
+        ),
     )
     accessor.get_enabled_providers.return_value = {"my_provider": provider_config}
     accessor.get_provider_or_raise.return_value = provider_config
@@ -851,7 +852,7 @@ async def test_IT2_handle_buffered_request_400_client_gets_original_body():
     provider.proxy_request = AsyncMock()
 
     # Setup provider config
-    provider_config = ProviderConfig(provider_type="test", keys_path="keys/test/")
+    provider_config = ProviderConfig(provider_type="openai_like")
     provider_config.models = {"gpt-4": {}}
     req.app.state.accessor.get_provider_or_raise.return_value = provider_config
 
@@ -916,7 +917,7 @@ async def test_IT3_handle_buffered_retryable_request_400_retry_aborted_key_not_r
     provider.proxy_request = AsyncMock()
 
     # Setup Config: retry enabled with multiple key attempts
-    provider_config = ProviderConfig(provider_type="test", keys_path="keys/test/")
+    provider_config = ProviderConfig(provider_type="openai_like")
     provider_config.models = {"gpt-4": {}}
     provider_config.gateway_policy.retry.enabled = True
     provider_config.gateway_policy.retry.on_key_error = RetryOnErrorConfig(
@@ -990,7 +991,7 @@ async def test_IT4_handle_buffered_retryable_request_401_existing_behavior_regre
     provider.parse_request_details.return_value = MagicMock(model_name="gpt-4")
 
     # Setup Config: 2 key attempts
-    provider_config = ProviderConfig(provider_type="test", keys_path="keys/test/")
+    provider_config = ProviderConfig(provider_type="openai_like")
     provider_config.models = {"gpt-4": {}}
     provider_config.gateway_policy.retry.enabled = True
     provider_config.gateway_policy.retry.on_key_error = RetryOnErrorConfig(
@@ -1069,6 +1070,12 @@ async def test_IT5_handle_full_stream_request_500_existing_behavior_regression()
 
     provider.proxy_request = AsyncMock()
 
+    # Setup accessor to return a proper ProviderConfig with HealthPolicyConfig
+    # so _report_key_failure can compute next_check_time without TypeError
+    provider_config = ProviderConfig(provider_type="openai_like")
+    provider_config.worker_health_policy = HealthPolicyConfig()
+    req.app.state.accessor.get_provider_or_raise.return_value = provider_config
+
     # Setup key pool to return a valid key
     req.app.state.gateway_cache.get_key_from_pool.return_value = (1, "test-api-key")
 
@@ -1123,7 +1130,7 @@ async def test_IT6_handle_buffered_request_400_content_type_preserved():
     provider.proxy_request = AsyncMock()
 
     # Setup provider config
-    provider_config = ProviderConfig(provider_type="test", keys_path="keys/test/")
+    provider_config = ProviderConfig(provider_type="openai_like")
     provider_config.models = {"gpt-4": {}}
     req.app.state.accessor.get_provider_or_raise.return_value = provider_config
 
@@ -1181,7 +1188,7 @@ async def test_IT7_handle_buffered_retryable_request_400_debug_mode_priority():
     provider.proxy_request = AsyncMock()
 
     # Setup Config: retry enabled + debug_mode = "no_content"
-    provider_config = ProviderConfig(provider_type="test", keys_path="keys/test/")
+    provider_config = ProviderConfig(provider_type="openai_like")
     provider_config.models = {"gpt-4": {}}
     provider_config.gateway_policy.retry.enabled = True
     provider_config.gateway_policy.retry.on_key_error = RetryOnErrorConfig(
@@ -1422,7 +1429,7 @@ async def test_6_3_handle_buffered_request_read_error_intercepted():
     provider.parse_request_details.return_value = MagicMock(model_name="gpt-4")
     provider.proxy_request = AsyncMock()
 
-    provider_config = ProviderConfig(provider_type="test", keys_path="keys/test/")
+    provider_config = ProviderConfig(provider_type="openai_like")
     provider_config.models = {"gpt-4": {}}
     req.app.state.accessor.get_provider_or_raise.return_value = provider_config
     req.app.state.gateway_cache.get_key_from_pool.return_value = (1, "test-api-key")
@@ -1482,7 +1489,7 @@ async def test_6_4_handle_buffered_retryable_request_read_error_first_attempt():
     provider.parse_request_details.return_value = MagicMock(model_name="gpt-4")
     provider.proxy_request = AsyncMock()
 
-    provider_config = ProviderConfig(provider_type="test", keys_path="keys/test/")
+    provider_config = ProviderConfig(provider_type="openai_like")
     provider_config.models = {"gpt-4": {}}
     provider_config.gateway_policy.retry.enabled = True
     provider_config.gateway_policy.retry.on_key_error = RetryOnErrorConfig(
@@ -1552,7 +1559,7 @@ async def test_6_5_handle_buffered_retryable_request_read_error_on_retry():
     provider.parse_request_details = AsyncMock()
     provider.parse_request_details.return_value = MagicMock(model_name="gpt-4")
 
-    provider_config = ProviderConfig(provider_type="test", keys_path="keys/test/")
+    provider_config = ProviderConfig(provider_type="openai_like")
     provider_config.models = {"gpt-4": {}}
     provider_config.gateway_policy.retry.enabled = True
     provider_config.gateway_policy.retry.on_key_error = RetryOnErrorConfig(

@@ -38,8 +38,7 @@ def _make_provider_config(
 ) -> ProviderConfig:
     """Create a ProviderConfig with controlled dedicated_http_client and proxy."""
     return ProviderConfig(
-        provider_type="mock",
-        keys_path="keys/mock/",
+        provider_type="openai_like",
         dedicated_http_client=dedicated,
         proxy_config=_make_proxy_config(mode=proxy_mode, static_url=static_url),
     )

@@ -39,8 +39,8 @@ def _setup_directories(accessor: ConfigAccessor) -> None:
 
     for provider_name, provider in accessor.get_all_providers().items():
         if provider.enabled:
-            if provider.keys_path:
-                paths_to_check.add(provider.keys_path)
+            key_path = os.path.join("data", provider_name, "raw")
+            paths_to_check.add(key_path)
 
             # REFACTORED: Use accessor to get proxy config safely
             proxy_config = accessor.get_proxy_config(provider_name)
@@ -56,6 +56,24 @@ def _setup_directories(accessor: ConfigAccessor) -> None:
             if path:
                 os.makedirs(path, exist_ok=True)
                 logger.debug(f"Directory ensured: '{path}'")
+
+        # Warn if any enabled provider's key directory has no key files
+        for provider_name, provider in accessor.get_all_providers().items():
+            if provider.enabled:
+                key_path = os.path.join("data", provider_name, "raw")
+                if os.path.isdir(key_path):
+                    entries = os.listdir(key_path)
+                    has_keys = any(
+                        os.path.isfile(os.path.join(key_path, e))
+                        and os.path.splitext(e)[1].lower() in (".txt", ".ndjson")
+                        for e in entries
+                    )
+                    if not has_keys:
+                        logger.warning(
+                            f"No key files (.txt/.ndjson) found in '{key_path}'. "
+                            f"Please place API keys in this directory."
+                        )
+
         logger.info("Directory setup complete.")
     except PermissionError as e:
         logger.critical(
@@ -94,7 +112,8 @@ async def run_sync_cycle(
         enabled_providers = accessor.get_enabled_providers()
         for provider_name, provider_config in enabled_providers.items():
             # For KeySyncer (always runs for enabled providers)
-            keys_from_file = read_keys_from_directory(provider_config.keys_path)
+            key_path = os.path.join("data", provider_name, "raw")
+            keys_from_file = read_keys_from_directory(key_path)
             models_from_config = list(provider_config.models.keys())
             key_state: ProviderKeyState = {
                 "keys_from_files": keys_from_file,

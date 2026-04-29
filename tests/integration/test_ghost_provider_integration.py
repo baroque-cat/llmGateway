@@ -26,22 +26,19 @@ def test_complete_ghost_provider_workflow():
     initial_config.providers = {
         "active_provider": ProviderConfig(
             enabled=True,
-            provider_type="test",
-            keys_path="/tmp/keys1",
+            provider_type="openai_like",
             api_base_url="http://active.com",
             default_model="model1",
         ),
         "disabled_provider": ProviderConfig(
             enabled=False,
-            provider_type="test",
-            keys_path="/tmp/keys2",
+            provider_type="openai_like",
             api_base_url="http://disabled.com",
             default_model="model2",
         ),
         "ghost_provider": ProviderConfig(
             enabled=True,
-            provider_type="test",
-            keys_path="/tmp/keys3",
+            provider_type="openai_like",
             api_base_url="http://ghost.com",
             default_model="model3",
         ),
@@ -64,15 +61,13 @@ def test_complete_ghost_provider_workflow():
     updated_config.providers = {
         "active_provider": ProviderConfig(
             enabled=True,
-            provider_type="test",
-            keys_path="/tmp/keys1",
+            provider_type="openai_like",
             api_base_url="http://active.com",
             default_model="model1",
         ),
         "disabled_provider": ProviderConfig(
             enabled=False,
-            provider_type="test",
-            keys_path="/tmp/keys2",
+            provider_type="openai_like",
             api_base_url="http://disabled.com",
             default_model="model2",
         ),
@@ -97,18 +92,10 @@ def test_worker_only_processes_enabled_providers():
     """Verify that the worker logic correctly filters to enabled providers only."""
     config = Config()
     config.providers = {
-        "provider_a": ProviderConfig(
-            enabled=True, provider_type="test", keys_path="keys/a/"
-        ),
-        "provider_b": ProviderConfig(
-            enabled=False, provider_type="test", keys_path="keys/b/"
-        ),
-        "provider_c": ProviderConfig(
-            enabled=True, provider_type="test", keys_path="keys/c/"
-        ),
-        "provider_d": ProviderConfig(
-            enabled=False, provider_type="test", keys_path="keys/d/"
-        ),
+        "provider_a": ProviderConfig(enabled=True, provider_type="openai_like"),
+        "provider_b": ProviderConfig(enabled=False, provider_type="openai_like"),
+        "provider_c": ProviderConfig(enabled=True, provider_type="openai_like"),
+        "provider_d": ProviderConfig(enabled=False, provider_type="openai_like"),
     }
 
     accessor = ConfigAccessor(config)
@@ -132,8 +119,8 @@ def test_empty_enabled_providers_handling():
 
     # All providers disabled
     config.providers = {
-        "p1": ProviderConfig(enabled=False, provider_type="test", keys_path="keys/p1/"),
-        "p2": ProviderConfig(enabled=False, provider_type="test", keys_path="keys/p2/"),
+        "p1": ProviderConfig(enabled=False, provider_type="openai_like"),
+        "p2": ProviderConfig(enabled=False, provider_type="openai_like"),
     }
     accessor = ConfigAccessor(config)
     enabled_providers = accessor.get_enabled_providers()

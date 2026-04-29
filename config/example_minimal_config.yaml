@@ -29,7 +29,6 @@ providers:
   gemini-minimal:
     provider_type: "gemini"
     enabled: true
-    keys_path: "keys/gemini-minimal/"
     
     api_base_url: "https://generativelanguage.googleapis.com"
     default_model: "gemini-2.5-flash"

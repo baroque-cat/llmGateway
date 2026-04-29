@@ -950,7 +950,6 @@ class TestSendProxyRequest400BodyPreservation:
         # ProviderConfig level (not inside gateway_policy).
         provider_config = ProviderConfig(
             provider_type="openai_like",
-            keys_path="/tmp/nonexistent",
             gateway_policy=gateway_policy,
             error_parsing=ErrorParsingConfig(
                 enabled=error_parsing_enabled, rules=error_parsing_rules

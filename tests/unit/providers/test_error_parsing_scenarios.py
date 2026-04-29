@@ -36,7 +36,6 @@ class TestErrorParsingScenarios:
 
         # Minimal config
         mock_config.provider_type = "openai"
-        mock_config.keys_path = "/test/keys"
         mock_config.api_base_url = "https://api.openai.com/v1"
         mock_config.default_model = "gpt-4"
         mock_config.models = {}
@@ -57,7 +56,6 @@ class TestErrorParsingScenarios:
 
         # Minimal config
         mock_config.provider_type = "gemini"
-        mock_config.keys_path = "/test/keys"
         mock_config.api_base_url = "https://generativelanguage.googleapis.com/v1"
         mock_config.default_model = "gemini-pro"
         mock_config.models = {}

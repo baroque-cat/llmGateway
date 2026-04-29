@@ -12,22 +12,19 @@ def test_enabled_providers_filtering():
     config.providers = {
         "enabled_provider": ProviderConfig(
             enabled=True,
-            provider_type="test",
-            keys_path="/tmp/keys",
+            provider_type="openai_like",
             api_base_url="http://test.com",
             default_model="test-model",
         ),
         "disabled_provider": ProviderConfig(
             enabled=False,
-            provider_type="test",
-            keys_path="/tmp/keys2",
+            provider_type="openai_like",
             api_base_url="http://test2.com",
             default_model="test-model2",
         ),
         "another_enabled": ProviderConfig(
             enabled=True,
-            provider_type="test3",
-            keys_path="/tmp/keys3",
+            provider_type="gemini",
             api_base_url="http://test3.com",
             default_model="test-model3",
         ),
@@ -47,12 +44,8 @@ def test_get_all_providers_includes_disabled():
     """Test that get_all_providers includes both enabled and disabled."""
     config = Config()
     config.providers = {
-        "enabled_provider": ProviderConfig(
-            enabled=True, provider_type="test", keys_path="keys/test/"
-        ),
-        "disabled_provider": ProviderConfig(
-            enabled=False, provider_type="test2", keys_path="keys/test2/"
-        ),
+        "enabled_provider": ProviderConfig(enabled=True, provider_type="openai_like"),
+        "disabled_provider": ProviderConfig(enabled=False, provider_type="gemini"),
     }
 
     accessor = ConfigAccessor(config)

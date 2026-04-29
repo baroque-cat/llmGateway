@@ -35,13 +35,9 @@ class TestAnthropicProxy:
 
         mock_config = MagicMock(spec=ProviderConfig)
         mock_config.gateway_policy = MagicMock(spec=GatewayPolicyConfig)
-        mock_config.gateway_policy.error_parsing = ErrorParsingConfig(
-            enabled=False, rules=[]
-        )
-        mock_config.gateway_policy.fast_status_mapping = {}
+        mock_config.error_parsing = ErrorParsingConfig(enabled=False, rules=[])
         mock_config.gateway_policy.debug_mode = "none"
         mock_config.provider_type = "anthropic"
-        mock_config.keys_path = "/test/keys"
         mock_config.api_base_url = "https://api.anthropic.com"
         mock_config.default_model = "claude-3-opus-20240229"
         if models is None:

@@ -36,22 +36,21 @@ class TestAnthropicErrorHandling:
 
         # Setup gateway_policy
         if gateway_policy is None:
-            gateway_policy = GatewayPolicyConfig()
+            gateway_policy = MagicMock(spec=GatewayPolicyConfig)
         mock_config.gateway_policy = gateway_policy
 
         # Setup worker_health_policy
         if health_policy is None:
-            health_policy = HealthPolicyConfig()
+            health_policy = MagicMock(spec=HealthPolicyConfig)
         mock_config.worker_health_policy = health_policy
 
-        # Setup error parsing config
+        # Setup error parsing config (now at ProviderConfig level)
         if error_config is None:
             error_config = ErrorParsingConfig(enabled=False, rules=[])
-        mock_config.gateway_policy.error_parsing = error_config
+        mock_config.error_parsing = error_config
 
         # Set up other required config fields
         mock_config.provider_type = "anthropic"
-        mock_config.keys_path = "/test/keys"
         mock_config.api_base_url = "https://api.anthropic.com"
         mock_config.default_model = "claude-3-opus-20240229"
         mock_config.models = {
@@ -222,11 +221,9 @@ class TestAnthropicErrorHandling:
 
         mock_client.get = AsyncMock(return_value=mock_response)
 
-        # Mock _check_fast_fail to return None
-        with patch.object(provider, "_check_fast_fail", AsyncMock(return_value=None)):
-            result = await provider.check(
-                mock_client, "test_token", model="claude-3-opus-20240229"
-            )
+        result = await provider.check(
+            mock_client, "test_token", model="claude-3-opus-20240229"
+        )
 
         assert isinstance(result, CheckResult)
         assert result.available
@@ -252,11 +249,9 @@ class TestAnthropicErrorHandling:
 
         mock_client.get = AsyncMock(return_value=mock_response)
 
-        # Mock _check_fast_fail to return None
-        with patch.object(provider, "_check_fast_fail", AsyncMock(return_value=None)):
-            result = await provider.check(
-                mock_client, "test_token", model="claude-3-opus-20240229"
-            )
+        result = await provider.check(
+            mock_client, "test_token", model="claude-3-opus-20240229"
+        )
 
         assert isinstance(result, CheckResult)
         assert not result.available
@@ -281,10 +276,9 @@ class TestAnthropicErrorHandling:
 
         mock_client.get = AsyncMock(return_value=mock_response)
 
-        with patch.object(provider, "_check_fast_fail", AsyncMock(return_value=None)):
-            result = await provider.check(
-                mock_client, "test_token", model="claude-3-opus-20240229"
-            )
+        result = await provider.check(
+            mock_client, "test_token", model="claude-3-opus-20240229"
+        )
 
         assert isinstance(result, CheckResult)
         assert not result.available
@@ -309,45 +303,14 @@ class TestAnthropicErrorHandling:
 
         mock_client.get = AsyncMock(return_value=mock_response)
 
-        with patch.object(provider, "_check_fast_fail", AsyncMock(return_value=None)):
-            result = await provider.check(
-                mock_client, "test_token", model="claude-3-opus-20240229"
-            )
-
-        assert isinstance(result, CheckResult)
-        assert not result.available
-        assert result.error_reason == ErrorReason.NO_QUOTA
-        assert result.status_code == 402
-
-    @pytest.mark.asyncio
-    async def test_check_fast_fail_via_check_fast_fail(self):
-        """Test check method with fast-fail via _check_fast_fail."""
-        # Create health policy with fast_status_mapping
-        health_policy = HealthPolicyConfig()
-        health_policy.fast_status_mapping = {429: "rate_limited"}
-        provider = self.create_mock_provider(health_policy=health_policy)
-
-        mock_client = AsyncMock(spec=httpx.AsyncClient)
-        mock_response = AsyncMock(spec=httpx.Response)
-        mock_response.status_code = 429
-        mock_response.elapsed = MagicMock()
-        mock_response.elapsed.total_seconds.return_value = 0.1
-
-        mock_client.get = AsyncMock(return_value=mock_response)
-
-        # _check_fast_fail should be called and return a CheckResult
-        # We'll let the real method handle it; we've set up mapping
         result = await provider.check(
             mock_client, "test_token", model="claude-3-opus-20240229"
         )
 
         assert isinstance(result, CheckResult)
         assert not result.available
-        assert result.error_reason == ErrorReason.RATE_LIMITED
-        assert result.status_code == 429
-        # Verify that the response body was not read (fast fail)
-        # We can check that _check_fast_fail was called, but we can't assert no aread calls
-        # because mock_response.aread is not defined; but fine.
+        assert result.error_reason == ErrorReason.NO_QUOTA
+        assert result.status_code == 402
 
     @pytest.mark.asyncio
     async def test_check_network_errors(self):

@@ -56,8 +56,6 @@ def get_default_config() -> dict[str, Any]:
                 # This will be overridden by the template (e.g., 'gemini', 'deepseek').
                 "provider_type": "gemini",
                 "enabled": True,
-                # This path is customized by the config manager.
-                "keys_path": "keys/llm_provider_default/",
                 "api_base_url": "https://api.example.com/v1",
                 # Set to true to give this instance its own HTTP client pool (high-load instances)
                 "dedicated_http_client": False,

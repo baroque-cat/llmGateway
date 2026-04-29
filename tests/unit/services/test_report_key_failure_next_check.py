@@ -123,9 +123,7 @@ class TestReportKeyFailureNextCheck:
         db_manager.keys.update_status = AsyncMock()
 
         accessor = MagicMock()
-        provider_config = ProviderConfig(
-            provider_type="openai_like", keys_path="keys/test/"
-        )
+        provider_config = ProviderConfig(provider_type="openai_like")
         # Use non-default values so we can distinguish from +1 min
         provider_config.worker_health_policy = HealthPolicyConfig(
             on_no_quota_hr=6,
@@ -190,9 +188,7 @@ class TestReportKeyFailureNextCheck:
         db_manager.keys.update_status = AsyncMock()
 
         accessor = MagicMock()
-        provider_config = ProviderConfig(
-            provider_type="openai_like", keys_path="keys/test/"
-        )
+        provider_config = ProviderConfig(provider_type="openai_like")
         # Use default HealthPolicyConfig (on_no_quota_hr=6)
         accessor.get_provider_or_raise.return_value = provider_config
 

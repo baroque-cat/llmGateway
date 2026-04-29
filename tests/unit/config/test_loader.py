@@ -25,8 +25,7 @@ worker:
 providers:
   test_provider:
     enabled: true
-    provider_type: "test"
-    keys_path: "keys/test/"
+    provider_type: "gemini"
     api_base_url: "https://api.test.com/v1"
     access_control:
       gateway_access_token: "test_token"
@@ -49,7 +48,7 @@ providers:
         assert "test_provider" in config.providers
         provider = config.providers["test_provider"]
         assert provider.enabled is True
-        assert provider.provider_type == "test"
+        assert provider.provider_type == "gemini"
         assert provider.api_base_url == "https://api.test.com/v1"
 
 
@@ -91,8 +90,7 @@ worker:
 providers:
   test_provider:
     enabled: true
-    provider_type: "test"
-    keys_path: "keys/test/"
+    provider_type: "gemini"
     api_base_url: "https://api.test.com/v1"
     access_control:
       gateway_access_token: "test_token"
@@ -132,8 +130,7 @@ worker:
 providers:
   test_provider:
     enabled: true
-    provider_type: "test"
-    keys_path: "keys/test/"
+    provider_type: "gemini"
     api_base_url: "https://api.test.com/v1"
     access_control:
       gateway_access_token: "test_token"

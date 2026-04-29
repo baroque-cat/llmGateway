@@ -58,7 +58,6 @@ def test_invalid_debug_mode_should_fail_validation():
   test_provider:
     enabled: true
     provider_type: "openai_like"
-    keys_path: "keys/test/"
     api_base_url: "https://api.test.com/v1"
     access_control:
       gateway_access_token: "test_token"
@@ -109,7 +108,6 @@ def test_invalid_streaming_mode_should_fail_validation():
   test_provider:
     enabled: true
     provider_type: "openai_like"
-    keys_path: "keys/test/"
     api_base_url: "https://api.test.com/v1"
     access_control:
       gateway_access_token: "test_token"
@@ -146,20 +144,19 @@ def test_invalid_streaming_mode_direct_schema_validation():
 
 def test_invalid_fast_mapping_value_should_fail():
     """
-    Test that an invalid ErrorReason in fast_status_mapping causes validation failure.
+    Test that fast_status_mapping on GatewayPolicyConfig causes validation failure.
 
-    INVERTED: Previously, fast_status_mapping was typed as dict[int, str], so any
-    string value was accepted at the schema level. After changing to dict[int, ErrorReason],
-    invalid ErrorReason values are now rejected by Pydantic enum validation.
+    INVERTED: Previously, fast_status_mapping was a valid field typed as dict[int, str],
+    so any string value was accepted at the schema level. After removing the field from
+    GatewayPolicyConfig (which uses extra="forbid"), passing fast_status_mapping is now
+    rejected as an extra field regardless of the value.
     """
     with pytest.raises(ValidationError) as exc_info:
         GatewayPolicyConfig(fast_status_mapping={400: "invalid_typo_reason"})
 
     error_message = str(exc_info.value)
-    # Verify that the error message mentions the invalid value
-    assert "invalid_typo_reason" in error_message
-    # Verify that the error message lists valid ErrorReason enum members
-    assert "bad_request" in error_message
+    # Verify that the error message mentions the extra field
+    assert "fast_status_mapping" in error_message
 
 
 def test_valid_config_should_pass_validation():
@@ -171,15 +168,12 @@ def test_valid_config_should_pass_validation():
   test_provider:
     enabled: true
     provider_type: "openai_like"
-    keys_path: "keys/test/"
     api_base_url: "https://api.test.com/v1"
     access_control:
       gateway_access_token: "test_token"
     gateway_policy:
       debug_mode: "disabled"
       streaming_mode: "auto"
-      fast_status_mapping:
-        400: "bad_request"
 """
 
     with (
@@ -193,9 +187,6 @@ def test_valid_config_should_pass_validation():
         provider = config.providers["test_provider"]
         assert provider.gateway_policy.debug_mode == DebugMode.DISABLED
         assert provider.gateway_policy.streaming_mode == StreamingMode.AUTO
-        assert (
-            provider.gateway_policy.fast_status_mapping[400] == ErrorReason.BAD_REQUEST
-        )
 
 
 def test_proxy_config_static_mode_requires_url():
@@ -239,7 +230,6 @@ def test_provider_config_extra_fields_forbidden():
     with pytest.raises(ValidationError) as exc_info:
         ProviderConfig(
             provider_type="openai_like",
-            keys_path="keys/test/",
             unknown_field="should_be_rejected",
         )
 
@@ -294,13 +284,11 @@ def test_duplicate_gateway_tokens_rejected():
                 "providers": {
                     "provider_a": {
                         "provider_type": "openai_like",
-                        "keys_path": "keys/a/",
                         "enabled": True,
                         "access_control": {"gateway_access_token": "same_token"},
                     },
                     "provider_b": {
                         "provider_type": "openai_like",
-                        "keys_path": "keys/b/",
                         "enabled": True,
                         "access_control": {"gateway_access_token": "same_token"},
                     },
@@ -366,7 +354,6 @@ def test_ut_b03_yaml_batch_size_under_worker_health_policy_causes_error():
   test_provider:
     enabled: true
     provider_type: "openai_like"
-    keys_path: "keys/test/"
     api_base_url: "https://api.test.com/v1"
     access_control:
       gateway_access_token: "test_token"
@@ -502,7 +489,6 @@ def test_ut_h12_legacy_batch_size_in_yaml_causes_validation_error():
   test_provider:
     enabled: true
     provider_type: "openai_like"
-    keys_path: "keys/test/"
     api_base_url: "https://api.test.com/v1"
     access_control:
       gateway_access_token: "test_token"
@@ -531,7 +517,6 @@ def test_ut_h13_new_format_yaml_with_start_batch_size_is_valid():
   test_provider:
     enabled: true
     provider_type: "openai_like"
-    keys_path: "keys/test/"
     api_base_url: "https://api.test.com/v1"
     access_control:
       gateway_access_token: "test_token"
@@ -568,7 +553,7 @@ def test_g2_1_1_dedicated_http_client_default_is_false():
     G2-1.1: ProviderConfig.dedicated_http_client defaults to False when the
     field is not explicitly provided.
     """
-    provider = ProviderConfig(provider_type="openai_like", keys_path="keys/test/")
+    provider = ProviderConfig(provider_type="openai_like")
     assert provider.dedicated_http_client is False
 
 
@@ -576,9 +561,7 @@ def test_g2_1_2_dedicated_http_client_explicit_true():
     """
     G2-1.2: ProviderConfig.dedicated_http_client can be explicitly set to True.
     """
-    provider = ProviderConfig(
-        provider_type="openai_like", keys_path="keys/test/", dedicated_http_client=True
-    )
+    provider = ProviderConfig(provider_type="openai_like", dedicated_http_client=True)
     assert provider.dedicated_http_client is True
 
 
@@ -595,7 +578,6 @@ def test_g2_1_3_dedicated_http_client_invalid_type_raises_validation_error():
     with pytest.raises(ValidationError) as exc_info:
         ProviderConfig(
             provider_type="openai_like",
-            keys_path="keys/test/",
             dedicated_http_client=["yes"],
         )
 
@@ -612,7 +594,6 @@ def test_g2_1_4_yaml_dedicated_http_client_true():
   test_provider:
     enabled: true
     provider_type: "openai_like"
-    keys_path: "keys/test/"
     api_base_url: "https://api.test.com/v1"
     access_control:
       gateway_access_token: "test_token"
@@ -639,7 +620,6 @@ def test_g2_1_5_yaml_dedicated_http_client_absent_defaults_to_false():
   test_provider:
     enabled: true
     provider_type: "openai_like"
-    keys_path: "keys/test/"
     api_base_url: "https://api.test.com/v1"
     access_control:
       gateway_access_token: "test_token"
@@ -670,7 +650,6 @@ def test_full_valid_config_with_all_enums_loads_via_yaml():
   gemini_provider:
     enabled: true
     provider_type: "gemini"
-    keys_path: "keys/gemini/"
     api_base_url: "https://generativelanguage.googleapis.com/v1beta"
     access_control:
       gateway_access_token: "gemini_token"
@@ -679,10 +658,6 @@ def test_full_valid_config_with_all_enums_loads_via_yaml():
     gateway_policy:
       debug_mode: "no_content"
       streaming_mode: "auto"
-      fast_status_mapping:
-        400: "bad_request"
-        429: "rate_limited"
-        500: "server_error"
       circuit_breaker:
         mode: "auto_recovery"
       retry:
@@ -701,15 +676,6 @@ def test_full_valid_config_with_all_enums_loads_via_yaml():
         assert provider.provider_type == ProviderType.GEMINI
         assert provider.gateway_policy.debug_mode == DebugMode.NO_CONTENT
         assert provider.gateway_policy.streaming_mode == StreamingMode.AUTO
-        assert (
-            provider.gateway_policy.fast_status_mapping[400] == ErrorReason.BAD_REQUEST
-        )
-        assert (
-            provider.gateway_policy.fast_status_mapping[429] == ErrorReason.RATE_LIMITED
-        )
-        assert (
-            provider.gateway_policy.fast_status_mapping[500] == ErrorReason.SERVER_ERROR
-        )
         assert provider.proxy_config.mode == ProxyMode.NONE
         assert (
             provider.gateway_policy.circuit_breaker.mode
@@ -726,7 +692,6 @@ def test_yaml_with_typo_in_provider_type_causes_system_exit_with_formatted_error
   deepseek_provider:
     enabled: true
     provider_type: "deepseek"
-    keys_path: "keys/deepseek/"
     api_base_url: "https://api.deepseek.com/v1"
     access_control:
       gateway_access_token: "ds_token"
@@ -750,7 +715,6 @@ def test_yaml_with_invalid_fast_status_mapping_key_causes_system_exit():
   test_provider:
     enabled: true
     provider_type: "openai_like"
-    keys_path: "keys/test/"
     api_base_url: "https://api.test.com/v1"
     access_control:
       gateway_access_token: "test_token"
@@ -777,7 +741,6 @@ def test_yaml_with_invalid_error_parsing_map_to_causes_system_exit():
   test_provider:
     enabled: true
     provider_type: "openai_like"
-    keys_path: "keys/test/"
     api_base_url: "https://api.test.com/v1"
     access_control:
       gateway_access_token: "test_token"
@@ -809,7 +772,6 @@ def test_yaml_with_invalid_regex_in_error_parsing_causes_system_exit():
   test_provider:
     enabled: true
     provider_type: "openai_like"
-    keys_path: "keys/test/"
     api_base_url: "https://api.test.com/v1"
     access_control:
       gateway_access_token: "test_token"
@@ -845,7 +807,6 @@ def test_yaml_with_retry_enabled_no_attempts_causes_system_exit():
   test_provider:
     enabled: true
     provider_type: "openai_like"
-    keys_path: "keys/test/"
     api_base_url: "https://api.test.com/v1"
     access_control:
       gateway_access_token: "test_token"
@@ -876,7 +837,6 @@ def test_yaml_with_backoff_base_exceeding_max_causes_system_exit():
   test_provider:
     enabled: true
     provider_type: "openai_like"
-    keys_path: "keys/test/"
     api_base_url: "https://api.test.com/v1"
     access_control:
       gateway_access_token: "test_token"
@@ -907,7 +867,7 @@ def test_provider_type_injection_rejected():
     Security: ProviderConfig rejects SQL injection-style provider_type values.
     """
     with pytest.raises(ValidationError) as exc_info:
-        ProviderConfig(provider_type="; DROP TABLE keys;", keys_path="k/")
+        ProviderConfig(provider_type="; DROP TABLE keys;")
 
     error_message = str(exc_info.value)
     # The error should list valid ProviderType enum members
@@ -997,3 +957,92 @@ def test_regex_dos_pattern_compiles_but_documented():
     assert rule.match_pattern == "(a+)+$"
     # NOTE: This test documents that the validator only checks compilability,
     # not ReDoS safety. A timeout-based re.compile would be needed for full protection.
+
+
+# ==============================================================================
+# C5: Provider name validation tests
+# ==============================================================================
+
+
+def test_valid_provider_name_passes():
+    """Valid provider names (alphanumeric, hyphens, underscores) pass validation."""
+    from src.config.schemas import Config, ProviderConfig
+
+    providers = {
+        "gemini-pro-home": ProviderConfig(provider_type="gemini"),
+        "deepseek_home": ProviderConfig(provider_type="openai_like"),
+        "test123": ProviderConfig(provider_type="gemini"),
+    }
+    config = Config(providers=providers)
+    assert "gemini-pro-home" in config.providers
+
+
+def test_invalid_name_with_slash_rejected():
+    """Provider name with slash raises ValidationError."""
+    from src.config.schemas import Config, ProviderConfig
+
+    with pytest.raises(ValidationError):
+        Config(providers={"bad/name": ProviderConfig(provider_type="gemini")})
+
+
+def test_invalid_name_with_dot_dot_rejected():
+    """Provider name with .. raises ValidationError."""
+    from src.config.schemas import Config, ProviderConfig
+
+    with pytest.raises(ValidationError):
+        Config(providers={"../escape": ProviderConfig(provider_type="gemini")})
+
+
+def test_invalid_name_with_space_rejected():
+    """Provider name with space raises ValidationError."""
+    from src.config.schemas import Config, ProviderConfig
+
+    with pytest.raises(ValidationError):
+        Config(providers={"bad name": ProviderConfig(provider_type="gemini")})
+
+
+def test_invalid_name_with_special_chars_rejected():
+    """Provider name with special chars raises ValidationError."""
+    from src.config.schemas import Config, ProviderConfig
+
+    with pytest.raises(ValidationError):
+        Config(providers={"name@!": ProviderConfig(provider_type="gemini")})
+
+
+# ==============================================================================
+# C6: keys_path rejection tests
+# ==============================================================================
+
+
+def test_keys_path_in_yaml_raises_validation_error():
+    """YAML with keys_path raises ValidationError (extra field forbidden)."""
+    from src.config.schemas import Config
+
+    import yaml
+
+    yaml_content = """
+providers:
+  test-provider:
+    provider_type: gemini
+    enabled: true
+    keys_path: keys/test/
+"""
+    data = yaml.safe_load(yaml_content)
+    with pytest.raises(ValidationError):
+        Config(**data)
+
+
+def test_provider_config_valid_without_keys_path():
+    """ProviderConfig without keys_path is valid."""
+    from src.config.schemas import ProviderConfig
+
+    provider = ProviderConfig(provider_type="gemini")
+    assert provider.provider_type.value == "gemini"
+
+
+def test_keys_path_attribute_does_not_exist():
+    """ProviderConfig has no keys_path attribute."""
+    from src.config.schemas import ProviderConfig
+
+    provider = ProviderConfig(provider_type="gemini")
+    assert not hasattr(provider, "keys_path")

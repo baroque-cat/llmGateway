@@ -4,6 +4,8 @@
 Unit tests for key synchronization functionality.
 """
 
+import builtins
+import logging
 import os
 import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -15,138 +17,19 @@ from src.core.interfaces import ProviderKeyState
 from src.db.database import DatabaseManager
 from src.services.synchronizers.key_sync import (
     KeySyncer,
-    _sanitize_key_file,
     read_keys_from_directory,
 )
-
-# --- Tests for _sanitize_key_file ---
-
-
-def test_sanitize_key_file_removes_duplicates():
-    """Test that duplicate keys are removed while preserving order."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
-        f.write("key1\n")
-        f.write("key2\n")
-        f.write("key1\n")  # duplicate
-        f.write("key3\n")
-        f.write("key2\n")  # duplicate
-        filepath = f.name
-    try:
-        _sanitize_key_file(filepath)
-        with open(filepath) as f:
-            lines = [line.strip() for line in f if line.strip()]
-        # Should have unique keys in order of first occurrence
-        assert lines == ["key1", "key2", "key3"]
-    finally:
-        os.unlink(filepath)
-
-
-def test_sanitize_key_file_preserves_empty_lines_and_whitespace():
-    """
-    Test that empty lines and whitespace are handled appropriately.
-    The implementation splits on whitespace and commas, so empty lines are ignored
-    and multi-key lines are normalized to one key per line.
-    Duplicate keys are removed, preserving order of first occurrence.
-    """
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
-        f.write("key1\n")
-        f.write("\n")
-        f.write("key2  key3\n")  # two keys on same line separated by whitespace
-        f.write("key1,key4\n")  # comma separated
-        filepath = f.name
-    try:
-        _sanitize_key_file(filepath)
-        with open(filepath) as f:
-            lines = [line.strip() for line in f if line.strip()]
-        # The file should be rewritten because there are duplicate keys and multi-key lines.
-        # Whitespace and commas are treated as delimiters, so each key is placed on its own line.
-        # Duplicate key1 appears twice but only kept once.
-        # Empty line is ignored.
-        # Expected output: each unique key on its own line, in order of first occurrence.
-        assert lines == ["key1", "key2", "key3", "key4"]
-    finally:
-        os.unlink(filepath)
-
-
-def test_sanitize_key_file_no_change_if_no_duplicates():
-    """Test that file is not rewritten if there are no duplicates."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
-        original = "key1\nkey2\nkey3\n"
-        f.write(original)
-        filepath = f.name
-    try:
-        # Mock os.replace to ensure it's not called
-        with patch("os.replace") as mock_replace:
-            _sanitize_key_file(filepath)
-            # Should not call os.replace because no duplicates
-            mock_replace.assert_not_called()
-        with open(filepath) as f:
-            assert f.read() == original
-    finally:
-        os.unlink(filepath)
-
-
-def test_sanitize_key_file_atomic_replace():
-    """Test that file replacement is atomic (uses os.replace)."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
-        f.write("key1\nkey1\n")
-        filepath = f.name
-    try:
-        with patch("os.replace") as mock_replace:
-            _sanitize_key_file(filepath)
-            # Should call os.replace with temporary file and original path
-            mock_replace.assert_called_once()
-            args = mock_replace.call_args
-            assert args[0][1] == filepath
-            # Temporary file should be deleted after replace? Actually os.replace moves it.
-            # The temporary file is created with delete=False, so it's not auto-deleted.
-            # The function does not delete it after replace, but that's fine.
-    finally:
-        os.unlink(filepath)
-
-
-def test_sanitize_key_file_permission_error_handled():
-    """Test that PermissionError is caught and logged (no crash)."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
-        f.write("key1\nkey1\n")
-        filepath = f.name
-    # Make file read-only to cause PermissionError on write
-    os.chmod(filepath, 0o444)
-    try:
-        # Should not raise exception
-        _sanitize_key_file(filepath)
-    finally:
-        os.chmod(filepath, 0o644)
-        os.unlink(filepath)
-
 
 # --- Tests for read_keys_from_directory ---
 
 
-def test_read_keys_from_directory_sanitizes_files():
-    """Test that read_keys_from_directory calls _sanitize_key_file for each file."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        file1 = os.path.join(tmpdir, "keys1.txt")
-        with open(file1, "w") as f:
-            f.write("key1\nkey2\nkey1\n")
-        file2 = os.path.join(tmpdir, "keys2.txt")
-        with open(file2, "w") as f:
-            f.write("key3\nkey4\n")
-        with patch(
-            "src.services.synchronizers.key_sync._sanitize_key_file"
-        ) as mock_sanitize:
-            keys = read_keys_from_directory(tmpdir)
-            # Should call sanitize for each file
-            assert mock_sanitize.call_count == 2
-            # Keys should be unique across files
-            assert keys == {"key1", "key2", "key3", "key4"}
-
-
-def test_read_keys_from_directory_nonexistent_path():
-    """Test that reading from nonexistent directory returns empty set."""
-    with patch("os.path.exists", return_value=False):
-        keys = read_keys_from_directory("/nonexistent")
-        assert keys == set()
+def test_read_keys_from_directory_nonexistent_path(caplog):
+    """Non-existent directory returns empty set with warning."""
+    result = read_keys_from_directory("/nonexistent/path/12345")
+    assert result == set()
+    assert (
+        "not found" in caplog.text.lower() or "not a directory" in caplog.text.lower()
+    )
 
 
 # --- Tests for KeySyncer apply_state (sync behavior) ---
@@ -310,8 +193,245 @@ def test_key_syncer_get_resource_type():
     assert syncer.get_resource_type() == "keys"
 
 
-# We'll also write a test for atomic file rewrite using mocking.
-# However, we already have a test for atomic replace with os.replace.
+# --- NDJSON parsing tests ---
+
+
+def test_read_keys_ndjson_valid_line(tmp_path):
+    """A .ndjson file with {"value": "sk-c62c80..."} extracts the key."""
+    d = tmp_path / "keys"
+    d.mkdir()
+    (d / "keys.ndjson").write_text(
+        '{"value": "sk-c62c80ccd9d94857b36e4f3f25d49a9d"}\n', encoding="utf-8"
+    )
+    result = read_keys_from_directory(str(d))
+    assert result == {"sk-c62c80ccd9d94857b36e4f3f25d49a9d"}
+
+
+def test_read_keys_ndjson_multiple_lines(tmp_path):
+    """3 NDJSON lines yield 3 keys."""
+    d = tmp_path / "keys"
+    d.mkdir()
+    (d / "keys.ndjson").write_text(
+        '{"value": "key1"}\n{"value": "key2"}\n{"value": "key3"}\n',
+        encoding="utf-8",
+    )
+    result = read_keys_from_directory(str(d))
+    assert result == {"key1", "key2", "key3"}
+
+
+def test_read_keys_ndjson_empty_line_skipped(tmp_path, caplog):
+    """Empty line between NDJSON objects is silently skipped."""
+    d = tmp_path / "keys"
+    d.mkdir()
+    (d / "keys.ndjson").write_text(
+        '{"value": "key1"}\n\n{"value": "key2"}\n', encoding="utf-8"
+    )
+    with caplog.at_level(logging.WARNING):
+        result = read_keys_from_directory(str(d))
+    assert result == {"key1", "key2"}
+    # No warnings for empty lines
+    assert "empty" not in caplog.text.lower()
+
+
+def test_read_keys_ndjson_malformed_json_skipped(tmp_path, caplog):
+    """Non-JSON line is logged as warning and skipped; valid lines processed."""
+    d = tmp_path / "keys"
+    d.mkdir()
+    (d / "keys.ndjson").write_text(
+        '{"value": "key1"}\nnot json\n{"value": "key2"}\n', encoding="utf-8"
+    )
+    with caplog.at_level(logging.WARNING):
+        result = read_keys_from_directory(str(d))
+    assert result == {"key1", "key2"}
+    assert "non-JSON" in caplog.text.lower() or "not json" in caplog.text
+
+
+def test_read_keys_ndjson_missing_value_field(tmp_path, caplog):
+    """JSON without 'value' field is logged as warning and skipped."""
+    d = tmp_path / "keys"
+    d.mkdir()
+    (d / "keys.ndjson").write_text('{"other_field": "data"}\n', encoding="utf-8")
+    with caplog.at_level(logging.WARNING):
+        result = read_keys_from_directory(str(d))
+    assert result == set()
+    assert "value" in caplog.text.lower()
+
+
+def test_read_keys_ndjson_null_value_skipped(tmp_path, caplog):
+    """JSON with 'value': null is skipped with warning."""
+    d = tmp_path / "keys"
+    d.mkdir()
+    (d / "keys.ndjson").write_text('{"value": null}\n', encoding="utf-8")
+    with caplog.at_level(logging.WARNING):
+        result = read_keys_from_directory(str(d))
+    assert result == set()
+    assert "null" in caplog.text.lower()
+
+
+def test_read_keys_ndjson_integer_value_stringified(tmp_path, caplog):
+    """Integer 'value' is stringified with warning."""
+    d = tmp_path / "keys"
+    d.mkdir()
+    (d / "keys.ndjson").write_text('{"value": 12345}\n', encoding="utf-8")
+    with caplog.at_level(logging.WARNING):
+        result = read_keys_from_directory(str(d))
+    assert result == {"12345"}
+    assert "coerc" in caplog.text.lower()
+
+
+def test_read_keys_ndjson_bom_tolerance(tmp_path):
+    """UTF-8 BOM + JSON line is parsed correctly."""
+    d = tmp_path / "keys"
+    d.mkdir()
+    # Write file with BOM
+    with open(d / "keys.ndjson", "wb") as f:
+        f.write(b'\xef\xbb\xbf{"value": "sk-test"}\n')
+    result = read_keys_from_directory(str(d))
+    assert result == {"sk-test"}
+
+
+# --- Extension filtering tests ---
+
+
+def test_read_keys_txt_file_processed(tmp_path):
+    """A .txt file is processed and keys extracted."""
+    d = tmp_path / "keys"
+    d.mkdir()
+    (d / "keys.txt").write_text("key1  key2,key3", encoding="utf-8")
+    result = read_keys_from_directory(str(d))
+    assert result == {"key1", "key2", "key3"}
+
+
+def test_read_keys_ndjson_file_processed(tmp_path):
+    """A .ndjson file is processed and keys extracted."""
+    d = tmp_path / "keys"
+    d.mkdir()
+    (d / "keys.ndjson").write_text('{"value": "ndjson-key"}\n', encoding="utf-8")
+    result = read_keys_from_directory(str(d))
+    assert result == {"ndjson-key"}
+
+
+def test_read_keys_gitkeep_ignored(tmp_path, caplog):
+    """.gitkeep file is ignored (logged at debug, not processed)."""
+    d = tmp_path / "keys"
+    d.mkdir()
+    (d / ".gitkeep").write_text("", encoding="utf-8")
+    result = read_keys_from_directory(str(d))
+    assert result == set()
+
+
+def test_read_keys_no_extension_ignored(tmp_path):
+    """File without extension is ignored."""
+    d = tmp_path / "keys"
+    d.mkdir()
+    (d / "README").write_text("key1", encoding="utf-8")
+    result = read_keys_from_directory(str(d))
+    assert result == set()
+
+
+def test_read_keys_ds_store_ignored(tmp_path):
+    """.DS_Store file is ignored."""
+    d = tmp_path / "keys"
+    d.mkdir()
+    (d / ".DS_Store").write_text("junk", encoding="utf-8")
+    result = read_keys_from_directory(str(d))
+    assert result == set()
+
+
+# --- Mixed formats and deduplication ---
+
+
+def test_read_keys_mixed_txt_ndjson_merged(tmp_path):
+    """Keys from .txt and .ndjson are merged."""
+    d = tmp_path / "keys"
+    d.mkdir()
+    (d / "a.txt").write_text("key1", encoding="utf-8")
+    (d / "b.ndjson").write_text('{"value": "key2"}\n', encoding="utf-8")
+    result = read_keys_from_directory(str(d))
+    assert result == {"key1", "key2"}
+
+
+def test_read_keys_duplicate_across_formats_deduplicated(tmp_path):
+    """Duplicate key across .txt and .ndjson yields one entry."""
+    d = tmp_path / "keys"
+    d.mkdir()
+    (d / "a.txt").write_text("key1", encoding="utf-8")
+    (d / "b.ndjson").write_text('{"value": "key1"}\n', encoding="utf-8")
+    result = read_keys_from_directory(str(d))
+    assert result == {"key1"}
+
+
+def test_read_keys_same_key_in_two_txt_files(tmp_path):
+    """Same key in two .txt files yields one result."""
+    d = tmp_path / "keys"
+    d.mkdir()
+    (d / "a.txt").write_text("key1", encoding="utf-8")
+    (d / "b.txt").write_text("key1", encoding="utf-8")
+    result = read_keys_from_directory(str(d))
+    assert result == {"key1"}
+
+
+def test_read_keys_same_key_twice_in_one_txt_file(tmp_path):
+    """Same key twice in one .txt file yields one result."""
+    d = tmp_path / "keys"
+    d.mkdir()
+    (d / "keys.txt").write_text("key1\nkey1", encoding="utf-8")
+    result = read_keys_from_directory(str(d))
+    assert result == {"key1"}
+
+
+# --- File purity tests ---
+
+
+def test_sanitize_key_file_does_not_exist():
+    """_sanitize_key_file function no longer exists in key_sync."""
+    from src.services.synchronizers import key_sync
+
+    assert not hasattr(key_sync, "_sanitize_key_file")
+
+
+def test_read_keys_does_not_modify_files(tmp_path):
+    """read_keys_from_directory does not modify the original files."""
+    d = tmp_path / "keys"
+    d.mkdir()
+    (d / "keys.txt").write_text("key1\nkey2", encoding="utf-8")
+    (d / "keys.ndjson").write_text('{"value": "key3"}\n', encoding="utf-8")
+    _ = read_keys_from_directory(str(d))
+    assert (d / "keys.txt").read_text() == "key1\nkey2"
+    assert (d / "keys.ndjson").read_text() == '{"value": "key3"}\n'
+
+
+def test_read_keys_files_opened_read_only(tmp_path):
+    """Files are opened only in read mode ('r'), never write mode ('w'/'a')."""
+    d = tmp_path / "keys"
+    d.mkdir()
+    (d / "keys.txt").write_text("key1", encoding="utf-8")
+    real_open = builtins.open
+    open_calls = []
+    original_open = builtins.open
+
+    class TrackingOpen:
+        def __init__(self, *args, **kwargs):
+            open_calls.append((args, kwargs))
+            self._file = original_open(*args, **kwargs)
+
+        def __enter__(self):
+            self._file.__enter__()
+            return self._file
+
+        def __exit__(self, *exc):
+            return self._file.__exit__(*exc)
+
+        def __getattr__(self, name):
+            return getattr(self._file, name)
+
+    with patch("builtins.open", TrackingOpen):
+        _ = read_keys_from_directory(str(d))
+
+    for call_args, call_kwargs in open_calls:
+        mode = call_args[1] if len(call_args) >= 2 else call_kwargs.get("mode", "r")
+        assert mode == "r", f"Expected mode 'r' but got '{mode}'"
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

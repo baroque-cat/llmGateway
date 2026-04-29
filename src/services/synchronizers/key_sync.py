@@ -1,9 +1,10 @@
 # src/services/synchronizers/key_sync.py
 
+import json
 import logging
 import os
 import re
-import tempfile
+from typing import Any
 
 from src.core.accessor import ConfigAccessor
 
@@ -14,68 +15,33 @@ from src.db.database import DatabaseManager
 logger = logging.getLogger(__name__)
 
 
-def _sanitize_key_file(filepath: str) -> None:
-    """
-    Atomically rewrites a key file to remove duplicate lines.
-    Uses a temporary file and os.replace for atomicity to prevent data loss on crash.
-    """
-    try:
-        with open(filepath, encoding="utf-8") as f:
-            lines = f.readlines()
-
-        # Track seen keys and preserve order of first occurrence
-        seen_keys: set[str] = set()
-        unique_lines: list[str] = []
-        for line in lines:
-            # Split line into potential multiple keys (like the reader does)
-            potential_keys = re.split(r"[\s,]+", line.strip())
-            for key in potential_keys:
-                if key and key not in seen_keys:
-                    seen_keys.add(key)
-                    unique_lines.append(key + "\n")
-
-        # Rewrite if:
-        # 1. There are duplicate keys, OR
-        # 2. Any line contained multiple keys (needs normalization to one key per line)
-        original_key_count = 0
-        for line in lines:
-            stripped_line = line.strip()
-            if stripped_line:
-                # Count how many keys were on this line originally
-                keys_on_line = [k for k in re.split(r"[\s,]+", stripped_line) if k]
-                original_key_count += len(keys_on_line)
-
-        needs_rewrite = len(
-            unique_lines
-        ) < original_key_count or any(  # Duplicates found
-            len(re.split(r"[\s,]+", line.strip())) > 1 for line in lines if line.strip()
-        )  # Multi-key lines exist
-
-        if needs_rewrite:
-            with tempfile.NamedTemporaryFile(
-                "w", dir=os.path.dirname(filepath), delete=False, encoding="utf-8"
-            ) as tf:
-                tf.writelines(unique_lines)
-                temp_name = tf.name
-
-            # Atomic replace
-            os.replace(temp_name, filepath)
-            logger.info(f"Sanitized key file '{filepath}', removed duplicates.")
-
-    except PermissionError:
-        # Common in containerized environments with read-only mounts
-        logger.warning(
-            f"Permission denied while sanitizing '{filepath}'. Skipping cleanup."
-        )
-    except Exception as e:
-        logger.error(f"Failed to sanitize key file '{filepath}': {e}", exc_info=True)
-
-
 def read_keys_from_directory(path: str) -> set[str]:
     """
-    Reads all files in a specified directory, extracts API keys, and returns them as a unique set.
-    This function performs synchronous file I/O, which is acceptable for this periodic task.
-    This helper function is now intended to be called by the background worker during the "Read Phase".
+    Reads all API key files (.txt and .ndjson) from a directory and returns
+    a deduplicated set of keys.
+
+    Supported formats:
+      - ``.txt``: plain text files; content is split on whitespace and commas.
+      - ``.ndjson``: JSON Lines format; each line is a JSON object with a
+        ``"value"`` field containing the key.
+
+    Files with other extensions (``.gitkeep``, ``.DS_Store``, files without
+    extension) are silently ignored. The original files are never modified.
+
+    NDJSON parsing:
+      - Empty lines are silently skipped.
+      - Non‑JSON lines are logged as warnings and skipped.
+      - JSON objects without a ``"value"`` field are logged and skipped.
+      - ``"value": null`` is logged and skipped.
+      - A non‑string ``"value"`` is coerced via ``str()`` with a warning.
+      - Files are opened with ``encoding="utf-8-sig"`` to handle optional BOM.
+
+    Args:
+        path: Path to the directory containing key files.
+
+    Returns:
+        A ``set[str]`` of unique API keys, or an empty set if the directory
+        does not exist or contains no valid key files.
     """
     if not os.path.exists(path) or not os.path.isdir(path):
         logger.warning(
@@ -87,25 +53,85 @@ def read_keys_from_directory(path: str) -> set[str]:
     try:
         for filename in os.listdir(path):
             filepath = os.path.join(path, filename)
-            if os.path.isfile(filepath):
-                # Sanitize the file first to remove any duplicates
-                _sanitize_key_file(filepath)
+            if not os.path.isfile(filepath):
+                continue
 
-                try:
-                    with open(filepath, encoding="utf-8") as f:
-                        content = f.read()
-                        keys_in_file = re.split(r"[\s,]+", content)
-                        cleaned_keys = {key for key in keys_in_file if key}
-                        all_keys.update(cleaned_keys)
-                except Exception as e:
-                    logger.error(
-                        f"Failed to read or parse key file '{filepath}': {e}",
-                        exc_info=True,
-                    )
+            ext = os.path.splitext(filename)[1].lower()
+            if ext not in (".txt", ".ndjson"):
+                logger.debug(f"Skipping non-key file: '{filename}'")
+                continue
+
+            try:
+                if ext == ".txt":
+                    _read_txt_file(filepath, all_keys)
+                elif ext == ".ndjson":
+                    _read_ndjson_file(filepath, all_keys)
+            except Exception as e:
+                logger.error(
+                    f"Failed to read or parse key file '{filepath}': {e}",
+                    exc_info=True,
+                )
     except Exception as e:
         logger.error(f"Failed to list files in directory '{path}': {e}", exc_info=True)
 
     return all_keys
+
+
+def _read_txt_file(filepath: str, all_keys: set[str]) -> None:
+    """Read a plain text key file and add keys to ``all_keys``."""
+    with open(filepath, encoding="utf-8") as f:
+        content = f.read()
+    keys_in_file = re.split(r"[\s,]+", content)
+    cleaned_keys = {key for key in keys_in_file if key}
+    all_keys.update(cleaned_keys)
+
+
+def _read_ndjson_file(filepath: str, all_keys: set[str]) -> None:
+    """Read an NDJSON key file line‑by‑line and add keys to ``all_keys``."""
+    with open(filepath, encoding="utf-8-sig") as f:
+        for line_num, line in enumerate(f, start=1):
+            stripped = line.strip()
+            if not stripped:
+                continue  # empty line → skip silently
+
+            try:
+                obj: Any = json.loads(stripped)
+            except json.JSONDecodeError:
+                logger.warning(
+                    f"Skipping non-JSON line {line_num} in '{filepath}': {stripped!r}"
+                )
+                continue
+
+            if not isinstance(obj, dict):
+                logger.warning(
+                    f"Skipping non-dict JSON line {line_num} in '{filepath}'"
+                )
+                continue
+
+            if "value" not in obj:
+                logger.warning(
+                    f"Skipping JSON without 'value' field at line {line_num} "
+                    f"in '{filepath}': {obj}"
+                )
+                continue
+
+            raw_value: Any = obj["value"]  # pyright: ignore[reportUnknownVariableType]
+            if raw_value is None:
+                logger.warning(
+                    f"Skipping null 'value' at line {line_num} in '{filepath}'"
+                )
+                continue
+
+            if isinstance(raw_value, str):
+                all_keys.add(raw_value)
+            else:
+                logger.warning(
+                    f"Coercing non-string 'value' ({type(raw_value).__name__}) "  # pyright: ignore[reportUnknownArgumentType]
+                    f"to str at line {line_num} in '{filepath}'"
+                )
+                all_keys.add(
+                    str(raw_value)
+                )  # pyright: ignore[reportUnknownArgumentType]
 
 
 class KeySyncer(IResourceSyncer):

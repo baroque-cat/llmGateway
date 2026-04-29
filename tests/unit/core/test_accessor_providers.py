@@ -11,11 +11,9 @@ def test_no_enabled_providers():
     config = Config()
     config.providers = {
         "disabled_provider1": ProviderConfig(
-            enabled=False, provider_type="test1", keys_path="keys/test1/"
+            enabled=False, provider_type="openai_like"
         ),
-        "disabled_provider2": ProviderConfig(
-            enabled=False, provider_type="test2", keys_path="keys/test2/"
-        ),
+        "disabled_provider2": ProviderConfig(enabled=False, provider_type="gemini"),
     }
 
     accessor = ConfigAccessor(config)

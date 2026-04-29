@@ -39,7 +39,7 @@ def _make_openai_provider_config_with_error_parsing(
     rules: list[ErrorParsingRule],
 ) -> ProviderConfig:
     """Create an OpenAI-like ProviderConfig with error_parsing enabled."""
-    config = ProviderConfig(provider_type="openai_like", keys_path="keys/test/")
+    config = ProviderConfig(provider_type="openai_like")
     config.api_base_url = "https://api.test.com/v1"
     config.models = {"gpt-4": ModelInfo(endpoint_suffix="/chat/completions")}
     config.error_parsing = ErrorParsingConfig(enabled=True, rules=rules)
@@ -50,7 +50,7 @@ def _make_gemini_provider_config_with_error_parsing(
     rules: list[ErrorParsingRule],
 ) -> ProviderConfig:
     """Create a Gemini ProviderConfig with error_parsing enabled."""
-    config = ProviderConfig(provider_type="gemini", keys_path="keys/test/")
+    config = ProviderConfig(provider_type="gemini")
     config.api_base_url = "https://generativelanguage.googleapis.com/v1beta"
     config.models = {
         "gemini-pro": ModelInfo(endpoint_suffix="/models/gemini-pro:generateContent")
@@ -269,7 +269,7 @@ async def test_gateway_error_body_preservation_without_fast_status_mapping() -> 
     from src.services.gateway_service import _handle_full_stream_request
 
     # Create a provider config WITHOUT error_parsing (disabled by default)
-    config = ProviderConfig(provider_type="openai_like", keys_path="keys/test/")
+    config = ProviderConfig(provider_type="openai_like")
     config.models = {"gpt-4": ModelInfo()}
     # Explicitly verify error_parsing is disabled
     assert config.error_parsing.enabled is False

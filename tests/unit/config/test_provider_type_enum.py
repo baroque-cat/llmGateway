@@ -63,7 +63,7 @@ class TestProviderConfigProviderTypeValidation:
         Verify that ProviderConfig accepts a valid ProviderType string value
         and coerces it to the corresponding ProviderType enum member.
         """
-        provider = ProviderConfig(provider_type="gemini", keys_path="k/")
+        provider = ProviderConfig(provider_type="gemini")
         assert provider.provider_type == ProviderType.GEMINI
         assert provider.provider_type == "gemini"  # StrEnum is also a str
 
@@ -74,7 +74,7 @@ class TestProviderConfigProviderTypeValidation:
         valid enum values.
         """
         with pytest.raises(ValidationError) as exc_info:
-            ProviderConfig(provider_type="gemnii", keys_path="k/")
+            ProviderConfig(provider_type="gemnii")
 
         error_message = str(exc_info.value)
         # The error message should list the valid ProviderType values
@@ -88,7 +88,7 @@ class TestProviderConfigProviderTypeValidation:
         (it is a required field, no default value).
         """
         with pytest.raises(ValidationError) as exc_info:
-            ProviderConfig(keys_path="k/")
+            ProviderConfig()
 
         error_message = str(exc_info.value)
         assert "provider_type" in error_message
@@ -106,7 +106,6 @@ class TestProviderTypeYamlLoading:
   typo_provider:
     enabled: true
     provider_type: "deepseek"
-    keys_path: "keys/test/"
     api_base_url: "https://api.deepseek.com/v1"
     access_control:
       gateway_access_token: "test_token"
@@ -130,7 +129,6 @@ class TestProviderTypeYamlLoading:
   gemini_provider:
     enabled: true
     provider_type: "gemini"
-    keys_path: "keys/test/"
     api_base_url: "https://generativelanguage.googleapis.com/v1beta"
     access_control:
       gateway_access_token: "test_token"

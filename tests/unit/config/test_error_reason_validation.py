@@ -132,7 +132,7 @@ def test_provider_config_error_parsing_default():
     CFG-4: ProviderConfig always contains an error_parsing instance
     via default_factory. The default has enabled=False.
     """
-    config = ProviderConfig(provider_type="gemini", keys_path="keys/test/")
+    config = ProviderConfig(provider_type="gemini")
     assert config.error_parsing.enabled is False
 
 
@@ -141,7 +141,7 @@ def test_provider_config_error_parsing_never_none():
     CFG-5: ProviderConfig.error_parsing is never None — the default_factory
     always produces an ErrorParsingConfig instance.
     """
-    config = ProviderConfig(provider_type="gemini", keys_path="keys/test/")
+    config = ProviderConfig(provider_type="gemini")
     assert config.error_parsing is not None
     assert isinstance(config.error_parsing, ErrorParsingConfig)
 
@@ -193,7 +193,6 @@ def test_yaml_rejects_gateway_policy_fast_status_mapping():
   test_provider:
     enabled: true
     provider_type: "gemini"
-    keys_path: "keys/test/"
     api_base_url: "https://api.test.com/v1"
     access_control:
       gateway_access_token: "test_token"
@@ -220,7 +219,6 @@ def test_yaml_rejects_worker_health_policy_fast_status_mapping():
   test_provider:
     enabled: true
     provider_type: "gemini"
-    keys_path: "keys/test/"
     api_base_url: "https://api.test.com/v1"
     access_control:
       gateway_access_token: "test_token"
@@ -248,7 +246,6 @@ def test_yaml_rejects_gateway_policy_error_parsing():
   test_provider:
     enabled: true
     provider_type: "gemini"
-    keys_path: "keys/test/"
     api_base_url: "https://api.test.com/v1"
     access_control:
       gateway_access_token: "test_token"
@@ -276,7 +273,6 @@ def test_yaml_accepts_provider_level_error_parsing():
   test_provider:
     enabled: true
     provider_type: "gemini"
-    keys_path: "keys/test/"
     api_base_url: "https://api.test.com/v1"
     access_control:
       gateway_access_token: "test_token"

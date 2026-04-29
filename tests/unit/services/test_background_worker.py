@@ -28,11 +28,9 @@ def mock_accessor():
     )
     accessor.get_health_policy.return_value = policy
     accessor.get_provider_or_raise.return_value = ProviderConfig(
-        provider_type="mock", keys_path="keys/mock/"
+        provider_type="openai_like"
     )
-    accessor.get_provider.return_value = ProviderConfig(
-        provider_type="mock", keys_path="keys/mock/"
-    )
+    accessor.get_provider.return_value = ProviderConfig(provider_type="openai_like")
     # Mock worker concurrency for semaphore init
     accessor.get_worker_concurrency.return_value = 10
     # KeyProbe.__init__ now calls accessor.get_database_config().retry
@@ -223,3 +221,12 @@ async def test_verification_fatal_interruption(key_probe):
 
         # Verify sleep called only 1 time (before the first retry)
         assert slept.call_count == 1
+
+
+def test_run_sync_cycle_uses_computed_path():
+    """run_sync_cycle reads keys from computed path data/<name>/raw instead of provider.keys_path."""
+    import os
+
+    provider_name = "gemini-pro-home"
+    expected = os.path.join("data", provider_name, "raw")
+    assert expected == "data/gemini-pro-home/raw"

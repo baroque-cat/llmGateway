@@ -477,8 +477,6 @@ class ProviderConfig(BaseModel):
     provider_type: ProviderType
     # A flag to enable or disable this entire provider instance.
     enabled: bool = True
-    # Path to the directory containing API key files for this instance.
-    keys_path: str
     # The base URL for the provider's API.
     api_base_url: str = ""
     # The default model to use for this instance if not specified in the request.
@@ -661,4 +659,16 @@ class Config(BaseModel):
                     "Tokens must be unique across all enabled providers."
                 )
             used_tokens.add(token)
+        return self
+
+    @model_validator(mode="after")
+    def validate_provider_names(self) -> "Config":
+        """Ensure provider instance names are filesystem-safe (alphanumeric, hyphens, underscores only)."""
+        pattern = re.compile(r"^[a-zA-Z0-9_-]+$")
+        for name in self.providers:
+            if not pattern.match(name):
+                raise ValueError(
+                    f"Provider instance name '{name}' is not filesystem-safe. "
+                    "Must match ^[a-zA-Z0-9_-]+$ (alphanumeric, hyphens, underscores only)."
+                )
         return self

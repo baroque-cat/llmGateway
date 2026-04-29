@@ -154,7 +154,6 @@ def test_proxy_mode_yaml_typo_causes_system_exit():
   test_provider:
     enabled: true
     provider_type: "anthropic"
-    keys_path: "keys/test/"
     api_base_url: "https://api.test.com/v1"
     access_control:
       gateway_access_token: "test_token"
@@ -181,7 +180,6 @@ def test_proxy_mode_yaml_valid_stealth_loads():
   test_provider:
     enabled: true
     provider_type: "anthropic"
-    keys_path: "keys/test/"
     api_base_url: "https://api.test.com/v1"
     access_control:
       gateway_access_token: "test_token"

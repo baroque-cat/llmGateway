@@ -67,7 +67,7 @@ async def test_retry_synergy_server_error_then_fatal_then_server_exhaustion():
     provider.parse_request_details.return_value = MagicMock(model_name="gpt-4")
 
     # Setup Config: server attempts = 2, key attempts = 2
-    provider_config = ProviderConfig(provider_type="test", keys_path="keys/test/")
+    provider_config = ProviderConfig(provider_type="openai_like")
     provider_config.models = {"gpt-4": {}}
     provider_config.gateway_policy.retry.enabled = True
     provider_config.gateway_policy.retry.on_server_error = RetryOnErrorConfig(

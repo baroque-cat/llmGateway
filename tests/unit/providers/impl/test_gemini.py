@@ -41,7 +41,6 @@ class TestGeminiErrorParsing:
 
         # Set up other required config fields
         mock_config.provider_type = "gemini"
-        mock_config.keys_path = "/test/keys"
         mock_config.api_base_url = "https://generativelanguage.googleapis.com/v1"
         mock_config.default_model = "gemini-pro"
         mock_config.models = {}
@@ -572,7 +571,6 @@ class TestGeminiProxyRequest:
         mock_config = MagicMock(spec=ProviderConfig)
         mock_config.error_parsing = ErrorParsingConfig(enabled=False, rules=[])
         mock_config.provider_type = "gemini"
-        mock_config.keys_path = "/test/keys"
         mock_config.api_base_url = "https://generativelanguage.googleapis.com/v1"
         mock_config.default_model = "gemini-pro"
         mock_config.models = {}

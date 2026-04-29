@@ -41,7 +41,6 @@ class TestOpenAILikeErrorParsing:
 
         # Set up other required config fields
         mock_config.provider_type = "openai"
-        mock_config.keys_path = "/test/keys"
         mock_config.api_base_url = "https://api.openai.com/v1"
         mock_config.default_model = "gpt-4"
         mock_config.models = {}
@@ -643,7 +642,6 @@ class TestOpenAILikeProxyRequest:
         mock_config = MagicMock(spec=ProviderConfig)
         mock_config.error_parsing = ErrorParsingConfig(enabled=False, rules=[])
         mock_config.provider_type = "openai"
-        mock_config.keys_path = "/test/keys"
         mock_config.api_base_url = "https://api.openai.com/v1"
         mock_config.default_model = "gpt-4"
         mock_config.models = {}

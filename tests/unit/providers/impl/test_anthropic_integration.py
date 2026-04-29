@@ -14,6 +14,8 @@ from unittest.mock import mock_open, patch
 import pytest
 
 from src.config.loader import ConfigLoader
+from pydantic import ValidationError
+
 from src.config.schemas import ModelInfo, ProviderConfig
 from src.providers import _PROVIDER_CLASSES, get_provider
 from src.providers.impl.anthropic import AnthropicProvider
@@ -31,7 +33,6 @@ class TestAnthropicProviderFactory:
         """Verify that get_provider with anthropic type creates an AnthropicProvider instance."""
         config = ProviderConfig(
             provider_type="anthropic",
-            keys_path="keys/anthropic/",
             api_base_url="https://api.anthropic.com",
             models={"claude-3-opus": ModelInfo()},
         )
@@ -40,18 +41,13 @@ class TestAnthropicProviderFactory:
         assert provider.name == "test_anthropic"
         assert provider.config is config
 
-    def test_get_provider_unknown_type_raises_valueerror(self):
-        """Verify that get_provider with non-existent provider type raises ValueError."""
-        config = ProviderConfig(
-            provider_type="nonexistent", keys_path="keys/nonexistent/"
-        )
-        with pytest.raises(ValueError) as exc_info:
-            get_provider("test_bad", config)
-        assert "Unknown provider type" in str(exc_info.value)
-        # Should list available types
-        available = list(_PROVIDER_CLASSES.keys())
-        for provider_type in available:
-            assert provider_type in str(exc_info.value)
+    def test_get_provider_unknown_type_raises_validationerror(self):
+        """Verify that ProviderConfig with non-existent provider type raises ValidationError."""
+        with pytest.raises(ValidationError) as exc_info:
+            ProviderConfig(provider_type="nonexistent")
+        # Should mention the valid enum values
+        error_msg = str(exc_info.value)
+        assert "nonexistent" in error_msg or "provider_type" in error_msg
 
 
 class TestAnthropicConfigurationLoading:
@@ -69,7 +65,6 @@ providers:
   anthropic_main:
     provider_type: anthropic
     enabled: true
-    keys_path: keys/anthropic/
     api_base_url: https://api.anthropic.com
     default_model: claude-3-opus
     models:
@@ -108,7 +103,6 @@ providers:
             # Verify basic fields
             assert provider_config.provider_type == "anthropic"
             assert provider_config.enabled is True
-            assert provider_config.keys_path == "keys/anthropic/"
             assert provider_config.api_base_url == "https://api.anthropic.com"
             assert provider_config.default_model == "claude-3-opus"
 
