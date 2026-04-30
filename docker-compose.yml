@@ -48,7 +48,7 @@ services:
 
   worker:
     image: llmgateway:latest
-    container_name: llmgateway_worker
+    container_name: llmgateway_keeper
     command: ["python", "main.py", "keeper"]
     restart: unless-stopped
     # All configuration is loaded from the .env file.

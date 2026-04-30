@@ -1,4 +1,4 @@
-name: minimal_tests
+name: quality
 
 on:
   push:
@@ -6,8 +6,12 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  test:
+  check:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -22,32 +26,26 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install Poetry
-        run: |
-          pip install poetry
-
-      - name: Update poetry lock
-        run: |
-          poetry lock
+        run: pip install poetry
 
       - name: Install dependencies
-        run: |
-          poetry install
+        run: poetry install --with dev
 
-      - name: Run pyright type checking
-        run: |
-          poetry run pyright main.py src/
+      - name: Pyright (strict type checking)
+        run: poetry run pyright src/ main.py
 
-      - name: Run ruff linting
-        run: |
-          poetry run ruff check src/ main.py
+      - name: Ruff (linting)
+        run: poetry run ruff check src/ main.py
 
-      - name: Run black formatting check
-        run: |
-          poetry run black --check src/ main.py
+      - name: Black (formatting check)
+        run: poetry run black --check src/ main.py
 
-      - name: Run tests with coverage
-        run: |
-          poetry run pytest tests/ -v --cov=src --cov-report=xml --cov-report=term-missing
+      - name: Pytest
+        run: poetry run pytest tests/ -v
+
+      - name: Pytest with coverage
+        if: github.event_name == 'push'
+        run: poetry run pytest tests/ -v --cov=src --cov-report=xml --cov-report=term-missing
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
