@@ -74,7 +74,7 @@ class IResourceProbe(ABC):
 
         # REFACTORED: The semaphore limit is now dynamically read from the worker config.
         # This makes the probe's behavior configurable.
-        concurrency_limit = self.accessor.get_worker_concurrency()
+        concurrency_limit = self.accessor.get_keeper_concurrency()
         self.semaphore = asyncio.Semaphore(concurrency_limit)
 
         # State management for active tasks to enable non-blocking dispatching.

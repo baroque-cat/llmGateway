@@ -11,7 +11,7 @@ import logging
 
 import pytest
 
-from src.services.gateway_service import (
+from src.services.gateway.gateway_service import (
     _log_debug_info,
     _sanitize_body,
     _sanitize_headers,

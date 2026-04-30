@@ -9,7 +9,7 @@ content-only redaction scope.
 
 import json
 
-from src.services.sanitize_content import (
+from src.services.gateway.sanitize_content import (
     REDACT_CONTENT_PATHS,
     _redact_json,
     redact_content,

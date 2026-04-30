@@ -28,7 +28,7 @@ class CallbackTestProbe(IResourceProbe):
 def _make_probe(on_batch_complete=None):
     """Helper to create a probe with mocked dependencies."""
     mock_accessor = MagicMock()
-    mock_accessor.get_worker_concurrency.return_value = 10
+    mock_accessor.get_keeper_concurrency.return_value = 10
     mock_accessor.get_health_policy.return_value = HealthPolicyConfig(
         adaptive_batching=AdaptiveBatchingConfig(
             start_batch_size=10,
@@ -188,7 +188,7 @@ async def test_ut09_callback_after_rate_limited():
         ),
     )
     mock_accessor = MagicMock()
-    mock_accessor.get_worker_concurrency.return_value = 10
+    mock_accessor.get_keeper_concurrency.return_value = 10
     mock_accessor.get_health_policy.return_value = policy
     mock_db = MagicMock()
     mock_client_factory = MagicMock()
@@ -237,7 +237,7 @@ async def test_ut10_callback_on_every_while_iteration():
         ),
     )
     mock_accessor = MagicMock()
-    mock_accessor.get_worker_concurrency.return_value = 10
+    mock_accessor.get_keeper_concurrency.return_value = 10
     mock_accessor.get_health_policy.return_value = policy
     mock_db = MagicMock()
     mock_client_factory = MagicMock()

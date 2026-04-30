@@ -6,6 +6,7 @@ import logging
 
 from prometheus_client import Counter, Gauge
 
+from src.core.accessor import ConfigAccessor
 from src.core.interfaces import IDatabaseMaintainer
 from src.core.models import DatabaseTableHealth
 from src.core.policy_utils import should_vacuum
@@ -114,6 +115,31 @@ class DatabaseMaintainer(IDatabaseMaintainer):
         if vacuumed:
             logger.info("Smart VACUUM: %d table(s) vacuumed.", vacuumed)
         return vacuumed
+
+    @staticmethod
+    async def run_scheduled(
+        accessor: ConfigAccessor, db_manager: DatabaseManager
+    ) -> None:
+        """Check table health and conditionally run ``VACUUM ANALYZE``.
+
+        Queries ``pg_stat_user_tables`` for dead tuple statistics and vacuums
+        tables whose dead ratio exceeds the configured threshold.  Called by
+        the scheduler every ``vacuum_policy.interval_minutes``.
+
+        Args:
+            accessor: Configuration accessor for reading vacuum policy settings.
+            db_manager: Database manager for executing queries.
+        """
+        maintainer = DatabaseMaintainer()
+        db_config = accessor.get_database_config()
+        vacuum_policy = db_config.vacuum_policy
+
+        tables = await maintainer.get_table_health(db_manager)
+        await maintainer.run_conditional_vacuum(
+            tables=tables,
+            db_manager=db_manager,
+            threshold=vacuum_policy.dead_tuple_ratio_threshold,
+        )
 
 
 def record_purged_keys(provider_name: str, count: int) -> None:

@@ -2,13 +2,13 @@ from unittest.mock import patch
 
 import pytest
 
-from src.services.gateway_service import _log_debug_info
+from src.services.gateway.gateway_service import _log_debug_info
 
 
 @pytest.mark.asyncio
 async def test_log_debug_info_no_content():
     """Test that _log_debug_info logs headers and body (with redaction) in no_content mode."""
-    with patch("src.services.gateway_service.logger") as mock_logger:
+    with patch("src.services.gateway.gateway_service.logger") as mock_logger:
         _log_debug_info(
             debug_mode="no_content",
             instance_name="test_provider",
@@ -44,7 +44,7 @@ async def test_log_debug_info_no_content():
 @pytest.mark.asyncio
 async def test_log_debug_info_full_body():
     """Test that _log_debug_info logs full bodies in full_body mode."""
-    with patch("src.services.gateway_service.logger") as mock_logger:
+    with patch("src.services.gateway.gateway_service.logger") as mock_logger:
         _log_debug_info(
             debug_mode="full_body",
             instance_name="test_provider",

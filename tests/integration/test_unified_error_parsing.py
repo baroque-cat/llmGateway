@@ -263,7 +263,7 @@ async def test_gateway_error_body_preservation_without_fast_status_mapping() -> 
     (the exception case).  This allows the gateway's client-error handler
     to read the body via aread() and return the original error to the client.
     """
-    from src.services.gateway_service import _handle_full_stream_request
+    from src.services.gateway.gateway_service import _handle_full_stream_request
 
     # Create a provider config WITHOUT error_parsing (disabled by default)
     config = ProviderConfig(provider_type="openai_like")

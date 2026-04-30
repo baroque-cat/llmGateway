@@ -10,7 +10,7 @@ import pytest
 from src.config.schemas import DatabaseConfig, DatabaseRetryConfig
 from src.core.constants import ALL_MODELS_MARKER, ErrorReason
 from src.core.models import CheckResult
-from src.services.probes.key_probe import KeyProbe
+from src.services.key_probe import KeyProbe
 
 
 class TestWorkerLogFormat:
@@ -20,7 +20,7 @@ class TestWorkerLogFormat:
     def mock_accessor(self):
         """Provide a mock ConfigAccessor."""
         mock = Mock()
-        mock.get_worker_concurrency.return_value = 5
+        mock.get_keeper_concurrency.return_value = 5
         mock.get_database_config.return_value = DatabaseConfig(
             password="test", retry=DatabaseRetryConfig()
         )
@@ -79,7 +79,7 @@ class TestWorkerLogFormat:
             "failing_since": None,
             "next_check_time": datetime.now(UTC) - timedelta(hours=1),
         }
-        with patch("src.services.probes.key_probe.logger") as mock_logger:
+        with patch("src.services.key_probe.logger") as mock_logger:
             await probe._update_resource_status(resource, result)
             # Verify DB update was called
             mock_db_manager.keys.update_status.assert_called_once()
@@ -122,7 +122,7 @@ class TestWorkerLogFormat:
             "failing_since": datetime.now(UTC) - timedelta(days=2),
             "next_check_time": datetime.now(UTC) - timedelta(hours=2),
         }
-        with patch("src.services.probes.key_probe.logger") as mock_logger:
+        with patch("src.services.key_probe.logger") as mock_logger:
             await probe._update_resource_status(resource, result)
             mock_db_manager.keys.update_status.assert_called_once()
             mock_logger.info.assert_called_once()

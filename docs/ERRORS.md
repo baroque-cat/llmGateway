@@ -23,9 +23,9 @@ The system normalizes all upstream provider errors into a specific set of `Error
 
 ---
 
-## 2. Background Worker ("The Keeper")
+## 2. Keeper
 
-The Background Worker's job is to validate API keys proactively. It classifies errors into three distinct categories to decide whether to ban a key, retry the check, or temporarily pause it.
+The Keeper's job is to validate API keys proactively. It classifies errors into three distinct categories to decide whether to ban a key, retry the check, or temporarily pause it.
 
 This logic is defined in `src/services/probes/key_probe.py` and configured via `worker_health_policy`.
 

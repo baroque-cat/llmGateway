@@ -18,7 +18,7 @@ import pytest
 from src.core.accessor import ConfigAccessor
 from src.core.interfaces import ProviderKeyState
 from src.db.database import DatabaseManager
-from src.services.background_worker import _setup_directories
+from src.services.keeper import _setup_directories
 from src.services.synchronizers.key_sync import KeySyncer, read_keys_from_directory
 
 # ---------------------------------------------------------------------------

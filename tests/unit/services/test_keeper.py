@@ -10,8 +10,8 @@ from src.config.schemas import (
 )
 from src.core.constants import ErrorReason
 from src.core.models import CheckResult
-from src.services.background_worker import run_worker
-from src.services.probes.key_probe import KeyProbe
+from src.services.keeper import run_keeper
+from src.services.key_probe import KeyProbe
 
 
 # Mock for asyncio.sleep to avoid waiting in tests
@@ -32,8 +32,8 @@ def mock_accessor():
         provider_type="openai_like"
     )
     accessor.get_provider.return_value = ProviderConfig(provider_type="openai_like")
-    # Mock worker concurrency for semaphore init
-    accessor.get_worker_concurrency.return_value = 10
+    # Mock keeper concurrency for semaphore init
+    accessor.get_keeper_concurrency.return_value = 10
     # KeyProbe.__init__ now calls accessor.get_database_config().retry
     accessor.get_database_config.return_value = DatabaseConfig(
         retry=DatabaseRetryConfig(
@@ -78,9 +78,7 @@ async def test_fast_fail_fatal_error(key_probe):
         return_value=CheckResult.fail(ErrorReason.INVALID_KEY, "Invalid Key")
     )
 
-    with patch(
-        "src.services.probes.key_probe.get_provider", return_value=provider_instance
-    ):
+    with patch("src.services.key_probe.get_provider", return_value=provider_instance):
         resource = {
             "key_id": 1,
             "key_value": "sk-test",
@@ -115,9 +113,7 @@ async def test_verification_recovery(key_probe):
     )
 
     with (
-        patch(
-            "src.services.probes.key_probe.get_provider", return_value=provider_instance
-        ),
+        patch("src.services.key_probe.get_provider", return_value=provider_instance),
         patch("asyncio.sleep", side_effect=mock_sleep) as slept,
     ):
         resource = {
@@ -156,9 +152,7 @@ async def test_verification_death_confirmation(key_probe):
     key_probe.accessor.get_health_policy.return_value.verification_attempts = 3
 
     with (
-        patch(
-            "src.services.probes.key_probe.get_provider", return_value=provider_instance
-        ),
+        patch("src.services.key_probe.get_provider", return_value=provider_instance),
         patch("asyncio.sleep", side_effect=mock_sleep) as slept,
     ):
         resource = {
@@ -198,9 +192,7 @@ async def test_verification_fatal_interruption(key_probe):
     )
 
     with (
-        patch(
-            "src.services.probes.key_probe.get_provider", return_value=provider_instance
-        ),
+        patch("src.services.key_probe.get_provider", return_value=provider_instance),
         patch("asyncio.sleep", side_effect=mock_sleep) as slept,
     ):
         resource = {
@@ -239,7 +231,7 @@ def test_run_sync_cycle_uses_computed_path():
 
 
 def _make_scheduler_mocks() -> tuple[MagicMock, MagicMock, MagicMock]:
-    """Create the common mock objects for run_worker() scheduler tests.
+    """Create the common mock objects for run_keeper() scheduler tests.
 
     Returns (mock_scheduler, mock_accessor, mock_db_manager).
     """
@@ -267,43 +259,43 @@ def _make_scheduler_mocks() -> tuple[MagicMock, MagicMock, MagicMock]:
     return mock_scheduler, mock_accessor, mock_db_manager
 
 
-async def _run_worker_with_mocks(mock_scheduler, mock_accessor, mock_db_manager):
-    """Patch all dependencies and run run_worker(), returning the mock scheduler."""
+async def _run_keeper_with_mocks(mock_scheduler, mock_accessor, mock_db_manager):
+    """Patch all dependencies and run run_keeper(), returning the mock scheduler."""
     mock_hcf = MagicMock()
     mock_hcf.return_value.close_all = AsyncMock()
 
     with (
         patch(
-            "src.services.background_worker.AsyncIOScheduler",
+            "src.services.keeper.AsyncIOScheduler",
             return_value=mock_scheduler,
         ),
-        patch("src.services.background_worker.load_config", return_value=MagicMock()),
+        patch("src.services.keeper.load_config", return_value=MagicMock()),
         patch(
-            "src.services.background_worker.ConfigAccessor",
+            "src.services.keeper.ConfigAccessor",
             return_value=mock_accessor,
         ),
-        patch("src.services.background_worker.setup_logging"),
-        patch("src.services.background_worker._setup_directories"),
+        patch("src.services.keeper.setup_logging"),
+        patch("src.services.keeper._setup_directories"),
         patch(
-            "src.services.background_worker.database.init_db_pool",
+            "src.services.keeper.database.init_db_pool",
             new_callable=AsyncMock,
         ),
         patch(
-            "src.services.background_worker.DatabaseManager",
+            "src.services.keeper.DatabaseManager",
             return_value=mock_db_manager,
         ),
-        patch("src.services.background_worker.HttpClientFactory", mock_hcf),
-        patch("src.services.background_worker.run_sync_cycle", new_callable=AsyncMock),
-        patch("src.services.background_worker.get_all_probes", return_value=[]),
-        patch("src.services.background_worker.get_all_syncers", return_value=[]),
-        patch("src.services.background_worker.KeyInventoryExporter"),
+        patch("src.services.keeper.HttpClientFactory", mock_hcf),
+        patch("src.services.keeper.run_sync_cycle", new_callable=AsyncMock),
+        patch("src.services.keeper.get_all_probes", return_value=[]),
+        patch("src.services.keeper.get_all_syncers", return_value=[]),
+        patch("src.services.keeper.KeyInventoryExporter"),
         patch(
-            "src.services.background_worker.database.close_db_pool",
+            "src.services.keeper.database.close_db_pool",
             new_callable=AsyncMock,
         ),
         patch("asyncio.sleep", new_callable=AsyncMock, side_effect=KeyboardInterrupt),
     ):
-        await run_worker()
+        await run_keeper()
 
     return mock_scheduler
 
@@ -313,9 +305,9 @@ async def _run_worker_with_mocks(mock_scheduler, mock_accessor, mock_db_manager)
 
 @pytest.mark.asyncio
 async def test_no_run_periodic_vacuum_job_registered() -> None:
-    """M18: 'run_periodic_vacuum' is NOT in scheduler jobs after worker setup."""
+    """M18: 'run_periodic_vacuum' is NOT in scheduler jobs after keeper setup."""
     mock_scheduler, mock_accessor, mock_db_manager = _make_scheduler_mocks()
-    scheduler = await _run_worker_with_mocks(
+    scheduler = await _run_keeper_with_mocks(
         mock_scheduler, mock_accessor, mock_db_manager
     )
 
@@ -334,7 +326,7 @@ async def test_no_run_periodic_vacuum_job_registered() -> None:
 async def test_key_purge_cron_job_registered() -> None:
     """M19: Worker registers cron job 'key_purge' with day_of_week='sun', hour=4, minute=0."""
     mock_scheduler, mock_accessor, mock_db_manager = _make_scheduler_mocks()
-    scheduler = await _run_worker_with_mocks(
+    scheduler = await _run_keeper_with_mocks(
         mock_scheduler, mock_accessor, mock_db_manager
     )
 
@@ -359,7 +351,7 @@ async def test_key_purge_cron_job_registered() -> None:
 async def test_smart_vacuum_interval_job_registered() -> None:
     """M20: Worker registers interval job 'smart_vacuum' with minutes=60."""
     mock_scheduler, mock_accessor, mock_db_manager = _make_scheduler_mocks()
-    scheduler = await _run_worker_with_mocks(
+    scheduler = await _run_keeper_with_mocks(
         mock_scheduler, mock_accessor, mock_db_manager
     )
 

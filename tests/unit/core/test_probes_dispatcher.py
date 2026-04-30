@@ -47,7 +47,7 @@ class ConcreteTestProbe(IResourceProbe):
 def mock_dependencies():
     """Create mocked dependencies for ConcreteTestProbe."""
     mock_accessor = MagicMock()
-    mock_accessor.get_worker_concurrency.return_value = 10
+    mock_accessor.get_keeper_concurrency.return_value = 10
     mock_db = MagicMock()
     mock_client_factory = MagicMock()
     return mock_accessor, mock_db, mock_client_factory

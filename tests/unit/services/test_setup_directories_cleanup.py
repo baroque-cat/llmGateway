@@ -1,9 +1,9 @@
-"""Tests for _setup_directories trash cleanup in background_worker.py (Group 7)."""
+"""Tests for _setup_directories trash cleanup in keeper.py (Group 7)."""
 
 import logging
 from unittest.mock import MagicMock
 
-from src.services.background_worker import _setup_directories
+from src.services.keeper import _setup_directories
 
 
 def test_setup_directories_cleans_trash_with_leftover_files(

@@ -8,12 +8,12 @@ def test_default_config_keys_and_values():
 
     Note: The YAML files include a 'metrics' top-level key, but get_default_config()
     does not yet include 'metrics' in its defaults (see comment in defaults.py).
-    The canonical key order in defaults is: logging, gateway, worker, database, providers.
+    The canonical key order in defaults is: logging, gateway, keeper, database, providers.
     """
     defaults = get_default_config()
 
     # Verify top-level key order (metrics is not in defaults yet)
-    expected_keys = ["logging", "gateway", "worker", "database", "providers"]
+    expected_keys = ["logging", "gateway", "keeper", "database", "providers"]
     actual_keys = list(defaults.keys())
     assert (
         actual_keys == expected_keys

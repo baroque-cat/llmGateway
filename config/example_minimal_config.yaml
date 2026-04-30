@@ -9,8 +9,8 @@ metrics:
   # Set to empty string to disable metrics endpoint even if enabled=true
   access_token: "${METRICS_ACCESS_TOKEN}"
 
-# --- WORKER SETTINGS ---
-worker:
+# --- KEEPER SETTINGS ---
+keeper:
   max_concurrent_providers: 5
 
 # --- DATABASE SETTINGS ---

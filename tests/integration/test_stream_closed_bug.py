@@ -125,7 +125,7 @@ async def test_stream_closed_bug(
     After the fix in _send_proxy_request: for 400 without matching rules,
     the stream is NOT closed, so aread() succeeds and returns the original body.
     """
-    from src.services.gateway_service import (
+    from src.services.gateway.gateway_service import (
         _handle_buffered_retryable_request,  # type: ignore
     )
 
@@ -198,7 +198,7 @@ async def test_no_bug_when_error_parsing_rule_matches():
     When error parsing rule matches the response body, the provider reads the body,
     so the stream is not closed. This scenario should work without StreamClosed.
     """
-    from src.services.gateway_service import (
+    from src.services.gateway.gateway_service import (
         _handle_buffered_retryable_request,  # type: ignore
     )
 

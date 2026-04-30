@@ -60,7 +60,7 @@ async def test_gateway_dispatcher_routing_debug_mode():
     based on provider configuration (debug mode).
     When debug mode is enabled, the request should be routed to _handle_buffered_request.
     """
-    from src.services.gateway_service import create_app
+    from src.services.gateway.gateway_service import create_app
 
     # Create a mock accessor with debug mode enabled
     accessor = MagicMock()
@@ -72,19 +72,24 @@ async def test_gateway_dispatcher_routing_debug_mode():
     # Mock database initialization to avoid real DB calls
     with (
         patch(
-            "src.services.gateway_service.database.init_db_pool", new_callable=AsyncMock
+            "src.services.gateway.gateway_service.database.init_db_pool",
+            new_callable=AsyncMock,
         ) as mock_init_db,  # noqa: F841
         patch(
-            "src.services.gateway_service.database.close_db_pool",
+            "src.services.gateway.gateway_service.database.close_db_pool",
             new_callable=AsyncMock,
         ) as mock_close_db,  # noqa: F841
-        patch("src.services.gateway_service.DatabaseManager") as MockDatabaseManager,
         patch(
-            "src.services.gateway_service.HttpClientFactory"
+            "src.services.gateway.gateway_service.DatabaseManager"
+        ) as MockDatabaseManager,
+        patch(
+            "src.services.gateway.gateway_service.HttpClientFactory"
         ) as MockHttpClientFactory,
-        patch("src.services.gateway_service.GatewayCache") as MockGatewayCache,
-        patch("src.services.gateway_service._get_token_from_headers") as mock_get_token,
-        patch("src.services.gateway_service.get_provider") as mock_get_provider,
+        patch("src.services.gateway.gateway_service.GatewayCache") as MockGatewayCache,
+        patch(
+            "src.services.gateway.gateway_service._get_token_from_headers"
+        ) as mock_get_token,
+        patch("src.services.gateway.gateway_service.get_provider") as mock_get_provider,
     ):
         # Setup mock instances
         mock_db_manager = MagicMock()
@@ -112,13 +117,13 @@ async def test_gateway_dispatcher_routing_debug_mode():
         # Patch the handlers to track which one is called
         with (
             patch(
-                "src.services.gateway_service._handle_buffered_request"
+                "src.services.gateway.gateway_service._handle_buffered_request"
             ) as mock_buffered_handler,
             patch(
-                "src.services.gateway_service._handle_buffered_retryable_request"
+                "src.services.gateway.gateway_service._handle_buffered_retryable_request"
             ) as mock_retry_handler,
             patch(
-                "src.services.gateway_service._handle_full_stream_request"
+                "src.services.gateway.gateway_service._handle_full_stream_request"
             ) as mock_full_stream_handler,
         ):
             # Set return values for handlers
@@ -199,7 +204,7 @@ async def test_gateway_dispatcher_routing(
     Parameterized integration test verifying catch_all_endpoint routes to the correct handler
     based on provider configuration.
     """
-    from src.services.gateway_service import create_app
+    from src.services.gateway.gateway_service import create_app
 
     # Create a mock accessor with the specified provider config
     accessor = MagicMock()
@@ -211,19 +216,24 @@ async def test_gateway_dispatcher_routing(
     # Mock database initialization and other dependencies
     with (
         patch(
-            "src.services.gateway_service.database.init_db_pool", new_callable=AsyncMock
+            "src.services.gateway.gateway_service.database.init_db_pool",
+            new_callable=AsyncMock,
         ) as mock_init_db,  # noqa: F841
         patch(
-            "src.services.gateway_service.database.close_db_pool",
+            "src.services.gateway.gateway_service.database.close_db_pool",
             new_callable=AsyncMock,
         ) as mock_close_db,  # noqa: F841
-        patch("src.services.gateway_service.DatabaseManager") as MockDatabaseManager,
         patch(
-            "src.services.gateway_service.HttpClientFactory"
+            "src.services.gateway.gateway_service.DatabaseManager"
+        ) as MockDatabaseManager,
+        patch(
+            "src.services.gateway.gateway_service.HttpClientFactory"
         ) as MockHttpClientFactory,
-        patch("src.services.gateway_service.GatewayCache") as MockGatewayCache,
-        patch("src.services.gateway_service._get_token_from_headers") as mock_get_token,
-        patch("src.services.gateway_service.get_provider") as mock_get_provider,
+        patch("src.services.gateway.gateway_service.GatewayCache") as MockGatewayCache,
+        patch(
+            "src.services.gateway.gateway_service._get_token_from_headers"
+        ) as mock_get_token,
+        patch("src.services.gateway.gateway_service.get_provider") as mock_get_provider,
     ):
         # Setup mock instances
         mock_db_manager = MagicMock()
@@ -251,13 +261,13 @@ async def test_gateway_dispatcher_routing(
         # Patch the handlers to track which one is called
         with (
             patch(
-                "src.services.gateway_service._handle_buffered_request"
+                "src.services.gateway.gateway_service._handle_buffered_request"
             ) as mock_buffered_handler,
             patch(
-                "src.services.gateway_service._handle_buffered_retryable_request"
+                "src.services.gateway.gateway_service._handle_buffered_retryable_request"
             ) as mock_retry_handler,
             patch(
-                "src.services.gateway_service._handle_full_stream_request"
+                "src.services.gateway.gateway_service._handle_full_stream_request"
             ) as mock_full_stream_handler,
         ):
             # Set return values for handlers
@@ -302,7 +312,7 @@ async def test_gateway_dispatcher_routing_full_body_regression():
     Regression test: verify that DebugMode.FULL_BODY still routes to
     _handle_buffered_request (not retry or full-stream handlers).
     """
-    from src.services.gateway_service import create_app
+    from src.services.gateway.gateway_service import create_app
 
     accessor = MagicMock()
     provider_config = create_mock_provider_config(debug_mode=DebugMode.FULL_BODY)
@@ -312,19 +322,24 @@ async def test_gateway_dispatcher_routing_full_body_regression():
 
     with (
         patch(
-            "src.services.gateway_service.database.init_db_pool", new_callable=AsyncMock
-        ),
-        patch(
-            "src.services.gateway_service.database.close_db_pool",
+            "src.services.gateway.gateway_service.database.init_db_pool",
             new_callable=AsyncMock,
         ),
-        patch("src.services.gateway_service.DatabaseManager") as MockDatabaseManager,
         patch(
-            "src.services.gateway_service.HttpClientFactory"
+            "src.services.gateway.gateway_service.database.close_db_pool",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "src.services.gateway.gateway_service.DatabaseManager"
+        ) as MockDatabaseManager,
+        patch(
+            "src.services.gateway.gateway_service.HttpClientFactory"
         ) as MockHttpClientFactory,
-        patch("src.services.gateway_service.GatewayCache") as MockGatewayCache,
-        patch("src.services.gateway_service._get_token_from_headers") as mock_get_token,
-        patch("src.services.gateway_service.get_provider") as mock_get_provider,
+        patch("src.services.gateway.gateway_service.GatewayCache") as MockGatewayCache,
+        patch(
+            "src.services.gateway.gateway_service._get_token_from_headers"
+        ) as mock_get_token,
+        patch("src.services.gateway.gateway_service.get_provider") as mock_get_provider,
     ):
         mock_db_manager = MagicMock()
         mock_db_manager.wait_for_schema_ready = AsyncMock()
@@ -345,13 +360,13 @@ async def test_gateway_dispatcher_routing_full_body_regression():
 
         with (
             patch(
-                "src.services.gateway_service._handle_buffered_request"
+                "src.services.gateway.gateway_service._handle_buffered_request"
             ) as mock_buffered_handler,
             patch(
-                "src.services.gateway_service._handle_buffered_retryable_request"
+                "src.services.gateway.gateway_service._handle_buffered_retryable_request"
             ) as mock_retry_handler,
             patch(
-                "src.services.gateway_service._handle_full_stream_request"
+                "src.services.gateway.gateway_service._handle_full_stream_request"
             ) as mock_full_stream_handler,
         ):
             from fastapi.responses import JSONResponse
@@ -380,7 +395,7 @@ async def test_debug_mode_forces_buffered_response_no_streaming():
     the gateway must call aread() (not StreamMonitor) and return a non-streaming
     Response. Debug mode forces buffered response regardless of content-type.
     """
-    from src.services.gateway_service import (
+    from src.services.gateway.gateway_service import (
         _debug_and_respond,
     )
 

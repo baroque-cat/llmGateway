@@ -21,9 +21,9 @@ from src.core.policy_utils import compute_next_check_time
 from src.db import database
 from src.db.database import DatabaseManager
 from src.providers import get_provider
-from src.services.gateway_cache import GatewayCache
+from src.services.gateway.gateway_cache import GatewayCache
+from src.services.gateway.sanitize_content import redact_content
 from src.services.metrics_exporter import MetricsService
-from src.services.sanitize_content import redact_content
 
 # --- Dependency Injection Helpers ---
 # These functions provide a typed and safe way to access app state,

@@ -40,7 +40,7 @@ async def test_gateway_request_logging():
     """
     E2E test: make a request to the gateway and verify the GATEWAY_ACCESS log format.
     """
-    from src.services.gateway_service import create_app
+    from src.services.gateway.gateway_service import create_app
 
     # Create a mock accessor with a single provider instance
     accessor = MagicMock()
@@ -53,20 +53,22 @@ async def test_gateway_request_logging():
     # Mock database initialization
     with (
         patch(
-            "src.services.gateway_service.database.init_db_pool",
+            "src.services.gateway.gateway_service.database.init_db_pool",
             new_callable=AsyncMock,
         ) as mock_init_db,
         patch(
-            "src.services.gateway_service.database.close_db_pool",
+            "src.services.gateway.gateway_service.database.close_db_pool",
             new_callable=AsyncMock,
         ) as mock_close_db,
-        patch("src.services.gateway_service.DatabaseManager") as MockDatabaseManager,
-        patch("src.services.gateway_service.GatewayCache") as MockGatewayCache,
         patch(
-            "src.services.gateway_service.HttpClientFactory"
+            "src.services.gateway.gateway_service.DatabaseManager"
+        ) as MockDatabaseManager,
+        patch("src.services.gateway.gateway_service.GatewayCache") as MockGatewayCache,
+        patch(
+            "src.services.gateway.gateway_service.HttpClientFactory"
         ) as MockHttpClientFactory,
-        patch("src.services.gateway_service.get_provider") as mock_get_provider,
-        patch("src.services.gateway_service.logger") as mock_logger,
+        patch("src.services.gateway.gateway_service.get_provider") as mock_get_provider,
+        patch("src.services.gateway.gateway_service.logger") as mock_logger,
     ):
         # Mock cache behavior
         mock_cache = MagicMock()

@@ -67,7 +67,7 @@ async def test_server_retry_fail_then_new_key():
     """
     Test 1: Server Retry Fail -> New Key. (500 x N) -> (New Key) -> 200.
     """
-    from src.services.gateway_service import _handle_buffered_retryable_request
+    from src.services.gateway.gateway_service import _handle_buffered_retryable_request
 
     req = make_mock_request()
     provider = MagicMock()
@@ -142,7 +142,7 @@ async def test_key_storm_protection():
     """
     Test 2: Key Storm Protection. Check backoff during key rotation.
     """
-    from src.services.gateway_service import _handle_buffered_retryable_request
+    from src.services.gateway.gateway_service import _handle_buffered_retryable_request
 
     req = make_mock_request()
     provider = MagicMock()
@@ -200,7 +200,7 @@ async def test_unsafe_400_fatal():
     """
     Test 3: Unsafe 400 Fatal. 400 mapped to Invalid Key -> Penalty -> New Key.
     """
-    from src.services.gateway_service import _handle_buffered_retryable_request
+    from src.services.gateway.gateway_service import _handle_buffered_retryable_request
 
     req = make_mock_request()
     provider = MagicMock()
@@ -273,7 +273,7 @@ async def test_debug_and_respond_exists_and_used_at_5_sites():
     defines the _debug_and_respond function and that the 5 handler locations
     that previously had inline debug blocks now call it.
     """
-    import src.services.gateway_service as gw_mod
+    import src.services.gateway.gateway_service as gw_mod
 
     # 1. Verify the function exists and is async
     func = getattr(gw_mod, "_debug_and_respond", None)
@@ -299,7 +299,7 @@ async def test_debug_and_respond_pre_sanitizes_body():
     before logging, so _log_debug_info receives redacted bodies with "***"
     replacing content fields.
     """
-    from src.services.gateway_service import _debug_and_respond
+    from src.services.gateway.gateway_service import _debug_and_respond
 
     upstream_response = MagicMock()
     upstream_response.status_code = 200
@@ -321,7 +321,9 @@ async def test_debug_and_respond_pre_sanitizes_body():
         {"messages": [{"role": "user", "content": "secret prompt"}]}
     ).encode()
 
-    with patch("src.services.gateway_service._log_debug_info") as mock_log_debug_info:
+    with patch(
+        "src.services.gateway.gateway_service._log_debug_info"
+    ) as mock_log_debug_info:
         _response = await _debug_and_respond(
             upstream_response=upstream_response,
             debug_mode="no_content",
@@ -353,7 +355,7 @@ async def test_log_debug_info_exception_does_not_block_response():
     Mock _log_debug_info to raise an exception → verify response is still
     returned to client. Debug logging failures must never block the response.
     """
-    from src.services.gateway_service import _debug_and_respond
+    from src.services.gateway.gateway_service import _debug_and_respond
 
     upstream_response = MagicMock()
     upstream_response.status_code = 200
@@ -370,7 +372,7 @@ async def test_log_debug_info_exception_does_not_block_response():
     request_body = b'{"model": "gpt-4"}'
 
     with patch(
-        "src.services.gateway_service._log_debug_info",
+        "src.services.gateway.gateway_service._log_debug_info",
         side_effect=RuntimeError("Logging crashed!"),
     ):
         response = await _debug_and_respond(
@@ -394,7 +396,7 @@ async def test_aread_exception_does_not_block_response():
     Mock upstream_response.aread() to raise → verify client still gets a
     response (with empty body). The aread failure must not crash the handler.
     """
-    from src.services.gateway_service import _debug_and_respond
+    from src.services.gateway.gateway_service import _debug_and_respond
 
     upstream_response = MagicMock()
     upstream_response.status_code = 200
@@ -435,7 +437,7 @@ async def test_end_to_end_no_content_with_openai_like():
     no_content debug mode logs metadata + redacted content, and the client
     gets the full (un-redacted) response.
     """
-    from src.services.gateway_service import create_app
+    from src.services.gateway.gateway_service import create_app
 
     accessor = MagicMock()
     provider_config = ProviderConfig(provider_type="openai_like")
@@ -476,21 +478,31 @@ async def test_end_to_end_no_content_with_openai_like():
 
     with (
         patch(
-            "src.services.gateway_service.database.init_db_pool", new_callable=AsyncMock
-        ),
-        patch(
-            "src.services.gateway_service.database.close_db_pool",
+            "src.services.gateway.gateway_service.database.init_db_pool",
             new_callable=AsyncMock,
         ),
-        patch("src.services.gateway_service.DatabaseManager") as MockDatabaseManager,
         patch(
-            "src.services.gateway_service.HttpClientFactory",
+            "src.services.gateway.gateway_service.database.close_db_pool",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "src.services.gateway.gateway_service.DatabaseManager"
+        ) as MockDatabaseManager,
+        patch(
+            "src.services.gateway.gateway_service.HttpClientFactory",
             return_value=mock_http_factory,
         ),
-        patch("src.services.gateway_service.GatewayCache") as MockGatewayCache,
-        patch("src.services.gateway_service._get_token_from_headers") as mock_get_token,
-        patch("src.services.gateway_service.get_provider", return_value=mock_provider),
-        patch("src.services.gateway_service._log_debug_info") as mock_log_debug_info,
+        patch("src.services.gateway.gateway_service.GatewayCache") as MockGatewayCache,
+        patch(
+            "src.services.gateway.gateway_service._get_token_from_headers"
+        ) as mock_get_token,
+        patch(
+            "src.services.gateway.gateway_service.get_provider",
+            return_value=mock_provider,
+        ),
+        patch(
+            "src.services.gateway.gateway_service._log_debug_info"
+        ) as mock_log_debug_info,
     ):
         mock_db_manager = MagicMock()
         mock_db_manager.wait_for_schema_ready = AsyncMock()
@@ -570,7 +582,7 @@ async def test_startup_warning_debug_plus_retry(caplog):
     Config with debug_mode != "disabled" AND retry.enabled: true →
     startup logs WARNING with provider name and debug mode.
     """
-    from src.services.gateway_service import create_app
+    from src.services.gateway.gateway_service import create_app
 
     accessor = MagicMock()
     provider_config = ProviderConfig(provider_type="openai_like")
@@ -590,17 +602,20 @@ async def test_startup_warning_debug_plus_retry(caplog):
 
     with (
         patch(
-            "src.services.gateway_service.database.init_db_pool", new_callable=AsyncMock
-        ),
-        patch(
-            "src.services.gateway_service.database.close_db_pool",
+            "src.services.gateway.gateway_service.database.init_db_pool",
             new_callable=AsyncMock,
         ),
-        patch("src.services.gateway_service.DatabaseManager") as MockDatabaseManager,
         patch(
-            "src.services.gateway_service.HttpClientFactory"
+            "src.services.gateway.gateway_service.database.close_db_pool",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "src.services.gateway.gateway_service.DatabaseManager"
+        ) as MockDatabaseManager,
+        patch(
+            "src.services.gateway.gateway_service.HttpClientFactory"
         ) as MockHttpClientFactory,
-        patch("src.services.gateway_service.GatewayCache") as MockGatewayCache,
+        patch("src.services.gateway.gateway_service.GatewayCache") as MockGatewayCache,
     ):
         mock_db_manager = MagicMock()
         mock_db_manager.wait_for_schema_ready = AsyncMock()
@@ -612,7 +627,9 @@ async def test_startup_warning_debug_plus_retry(caplog):
         mock_cache.populate_caches = AsyncMock()
         MockGatewayCache.return_value = mock_cache
 
-        with caplog.at_level(logging.WARNING, logger="src.services.gateway_service"):
+        with caplog.at_level(
+            logging.WARNING, logger="src.services.gateway.gateway_service"
+        ):
             app = create_app(accessor)
             # The lifespan startup runs when TestClient enters the context
             with TestClient(app):
@@ -636,7 +653,7 @@ async def test_no_warning_debug_without_retry(caplog):
     debug_mode: "no_content" + retry.enabled: false → no WARNING about
     retry being ignored.
     """
-    from src.services.gateway_service import create_app
+    from src.services.gateway.gateway_service import create_app
 
     accessor = MagicMock()
     provider_config = ProviderConfig(provider_type="openai_like")
@@ -652,17 +669,20 @@ async def test_no_warning_debug_without_retry(caplog):
 
     with (
         patch(
-            "src.services.gateway_service.database.init_db_pool", new_callable=AsyncMock
-        ),
-        patch(
-            "src.services.gateway_service.database.close_db_pool",
+            "src.services.gateway.gateway_service.database.init_db_pool",
             new_callable=AsyncMock,
         ),
-        patch("src.services.gateway_service.DatabaseManager") as MockDatabaseManager,
         patch(
-            "src.services.gateway_service.HttpClientFactory"
+            "src.services.gateway.gateway_service.database.close_db_pool",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "src.services.gateway.gateway_service.DatabaseManager"
+        ) as MockDatabaseManager,
+        patch(
+            "src.services.gateway.gateway_service.HttpClientFactory"
         ) as MockHttpClientFactory,
-        patch("src.services.gateway_service.GatewayCache") as MockGatewayCache,
+        patch("src.services.gateway.gateway_service.GatewayCache") as MockGatewayCache,
     ):
         mock_db_manager = MagicMock()
         mock_db_manager.wait_for_schema_ready = AsyncMock()
@@ -674,7 +694,9 @@ async def test_no_warning_debug_without_retry(caplog):
         mock_cache.populate_caches = AsyncMock()
         MockGatewayCache.return_value = mock_cache
 
-        with caplog.at_level(logging.WARNING, logger="src.services.gateway_service"):
+        with caplog.at_level(
+            logging.WARNING, logger="src.services.gateway.gateway_service"
+        ):
             app = create_app(accessor)
             # Trigger lifespan startup via TestClient
             with TestClient(app):
@@ -698,7 +720,7 @@ async def test_no_warning_retry_without_debug(caplog):
     debug_mode: "disabled" + retry.enabled: true → no WARNING about
     debug mode.
     """
-    from src.services.gateway_service import create_app
+    from src.services.gateway.gateway_service import create_app
 
     accessor = MagicMock()
     provider_config = ProviderConfig(provider_type="openai_like")
@@ -718,17 +740,20 @@ async def test_no_warning_retry_without_debug(caplog):
 
     with (
         patch(
-            "src.services.gateway_service.database.init_db_pool", new_callable=AsyncMock
-        ),
-        patch(
-            "src.services.gateway_service.database.close_db_pool",
+            "src.services.gateway.gateway_service.database.init_db_pool",
             new_callable=AsyncMock,
         ),
-        patch("src.services.gateway_service.DatabaseManager") as MockDatabaseManager,
         patch(
-            "src.services.gateway_service.HttpClientFactory"
+            "src.services.gateway.gateway_service.database.close_db_pool",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "src.services.gateway.gateway_service.DatabaseManager"
+        ) as MockDatabaseManager,
+        patch(
+            "src.services.gateway.gateway_service.HttpClientFactory"
         ) as MockHttpClientFactory,
-        patch("src.services.gateway_service.GatewayCache") as MockGatewayCache,
+        patch("src.services.gateway.gateway_service.GatewayCache") as MockGatewayCache,
     ):
         mock_db_manager = MagicMock()
         mock_db_manager.wait_for_schema_ready = AsyncMock()
@@ -740,7 +765,9 @@ async def test_no_warning_retry_without_debug(caplog):
         mock_cache.populate_caches = AsyncMock()
         MockGatewayCache.return_value = mock_cache
 
-        with caplog.at_level(logging.WARNING, logger="src.services.gateway_service"):
+        with caplog.at_level(
+            logging.WARNING, logger="src.services.gateway.gateway_service"
+        ):
             app = create_app(accessor)
             # Trigger lifespan startup via TestClient
             with TestClient(app):
@@ -795,7 +822,7 @@ async def test_IT1_handle_full_stream_request_400_client_gets_original_body():
     called in finally, client gets Response(400) with original body,
     NOT synthetic placeholder.
     """
-    from src.services.gateway_service import _handle_full_stream_request
+    from src.services.gateway.gateway_service import _handle_full_stream_request
 
     req = make_mock_request()
     provider = MagicMock()
@@ -841,7 +868,7 @@ async def test_IT2_handle_buffered_request_400_client_gets_original_body():
     Same as IT-1 but through _handle_buffered_request.
     Verify: client gets original error body, hop-by-hop headers filtered.
     """
-    from src.services.gateway_service import _handle_buffered_request
+    from src.services.gateway.gateway_service import _handle_buffered_request
 
     req = make_mock_request()
     provider = MagicMock()
@@ -906,7 +933,7 @@ async def test_IT3_handle_buffered_retryable_request_400_retry_aborted_key_not_r
     aread() reads body, client gets Response(400) with original body,
     key NOT marked as failed, remove_key_from_pool NOT called for this key.
     """
-    from src.services.gateway_service import _handle_buffered_retryable_request
+    from src.services.gateway.gateway_service import _handle_buffered_retryable_request
 
     req = make_mock_request()
     provider = MagicMock()
@@ -981,7 +1008,7 @@ async def test_IT4_handle_buffered_retryable_request_401_existing_behavior_regre
     original 401 body (stream closed by provider, aread fails → synthetic
     placeholder).
     """
-    from src.services.gateway_service import _handle_buffered_retryable_request
+    from src.services.gateway.gateway_service import _handle_buffered_retryable_request
 
     req = make_mock_request()
     provider = MagicMock()
@@ -1061,7 +1088,7 @@ async def test_IT5_handle_full_stream_request_500_existing_behavior_regression()
     Verify: gateway enters Case 3 (upstream/key error), key marked failed,
     client gets empty/synthetic body (503 JSONResponse).
     """
-    from src.services.gateway_service import _handle_full_stream_request
+    from src.services.gateway.gateway_service import _handle_full_stream_request
 
     req = make_mock_request()
     provider = MagicMock()
@@ -1119,7 +1146,7 @@ async def test_IT6_handle_buffered_request_400_content_type_preserved():
     Verify: client response has media_type="application/json" and original body
     unchanged.
     """
-    from src.services.gateway_service import _handle_buffered_request
+    from src.services.gateway.gateway_service import _handle_buffered_request
 
     req = make_mock_request()
     provider = MagicMock()
@@ -1177,7 +1204,7 @@ async def test_IT7_handle_buffered_retryable_request_400_debug_mode_priority():
     Verify: _debug_and_respond is called instead of direct aread(),
     client gets response through debug path.
     """
-    from src.services.gateway_service import _handle_buffered_retryable_request
+    from src.services.gateway.gateway_service import _handle_buffered_retryable_request
 
     req = make_mock_request()
     provider = MagicMock()
@@ -1216,7 +1243,7 @@ async def test_IT7_handle_buffered_retryable_request_400_debug_mode_priority():
     )
 
     with patch(
-        "src.services.gateway_service._debug_and_respond",
+        "src.services.gateway.gateway_service._debug_and_respond",
         new_callable=AsyncMock,
     ) as mock_debug_and_respond:
         # Configure the mock to return a proper Response
@@ -1250,7 +1277,7 @@ async def test_SEC1_aclose_called_in_finally_for_400():
     finally block of gateway handler. Mock both calls, verify aclose
     called exactly once after aread.
     """
-    from src.services.gateway_service import _handle_full_stream_request
+    from src.services.gateway.gateway_service import _handle_full_stream_request
 
     req = make_mock_request()
     provider = MagicMock()
@@ -1298,7 +1325,7 @@ async def test_SEC2_aread_fails_for_non_400_finally_still_calls_aclose():
     Verify: except block generates synthetic body, finally calls aclose(),
     client gets Response(401) with synthetic body. No connection leak.
     """
-    from src.services.gateway_service import _handle_full_stream_request
+    from src.services.gateway.gateway_service import _handle_full_stream_request
 
     req = make_mock_request()
     provider = MagicMock()
@@ -1359,7 +1386,7 @@ async def test_6_2_handle_full_stream_request_read_error_intercepted():
     raises GatewayStreamError with provider_name and model_name.
     The handler returns StreamingResponse; the error surfaces during stream iteration.
     """
-    from src.services.gateway_service import (
+    from src.services.gateway.gateway_service import (
         GatewayStreamError,
         _handle_full_stream_request,
     )
@@ -1416,7 +1443,7 @@ async def test_6_3_handle_buffered_request_read_error_intercepted():
     Mock aiter_bytes() raises httpx.ReadError → StreamMonitor catches it,
     raises GatewayStreamError with provider_name and model_name.
     """
-    from src.services.gateway_service import (
+    from src.services.gateway.gateway_service import (
         GatewayStreamError,
         _handle_buffered_request,
     )
@@ -1476,7 +1503,7 @@ async def test_6_4_handle_buffered_retryable_request_read_error_first_attempt():
     First proxy_request returns success, but aiter_bytes() raises httpx.ReadError.
     StreamMonitor catches it and raises GatewayStreamError.
     """
-    from src.services.gateway_service import (
+    from src.services.gateway.gateway_service import (
         GatewayStreamError,
         _handle_buffered_retryable_request,
     )
@@ -1547,7 +1574,7 @@ async def test_6_5_handle_buffered_retryable_request_read_error_on_retry():
     First attempt: server error → retry → second attempt: aiter_bytes() raises
     httpx.ReadError. StreamMonitor catches it and raises GatewayStreamError.
     """
-    from src.services.gateway_service import (
+    from src.services.gateway.gateway_service import (
         GatewayStreamError,
         _handle_buffered_retryable_request,
     )
@@ -1636,7 +1663,7 @@ async def test_6_6_read_error_log_contains_provider_and_model(caplog):
     StreamMonitor.__anext__() catches httpx.ReadError and logs a WARNING
     with provider_name and model_name before raising GatewayStreamError.
     """
-    from src.services.gateway_service import (
+    from src.services.gateway.gateway_service import (
         GatewayStreamError,
         _handle_full_stream_request,
     )
@@ -1667,7 +1694,9 @@ async def test_6_6_read_error_log_contains_provider_and_model(caplog):
         CheckResult.success(100),
     )
 
-    with caplog.at_level(logging.WARNING, logger="src.services.gateway_service"):
+    with caplog.at_level(
+        logging.WARNING, logger="src.services.gateway.gateway_service"
+    ):
         response = await _handle_full_stream_request(
             req, provider, instance_name, model_name
         )
@@ -1703,7 +1732,7 @@ async def test_SEC3_read_error_does_not_bubble_as_unhandled_500():
     For full SEC-3 compliance, the handler should catch GatewayStreamError
     and return a controlled HTTP error response (e.g., 503).
     """
-    from src.services.gateway_service import (
+    from src.services.gateway.gateway_service import (
         GatewayStreamError,
         _handle_full_stream_request,
     )

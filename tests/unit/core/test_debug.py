@@ -3,13 +3,13 @@ from unittest.mock import patch
 import pytest
 
 from src.core.constants import DebugMode
-from src.services.gateway_service import _log_debug_info
+from src.services.gateway.gateway_service import _log_debug_info
 
 
 @pytest.mark.asyncio
 async def test_debug_logging_function():
     """Test that the debug logging function works as expected."""
-    with patch("src.services.gateway_service.logger") as mock_logger:
+    with patch("src.services.gateway.gateway_service.logger") as mock_logger:
         # Test no_content mode (replaces headers_only; now also logs body)
         _log_debug_info(
             debug_mode="no_content",
@@ -63,7 +63,7 @@ async def test_log_debug_info_bytes_formatting():
     Test: verify that the fixed implementation logs bytes as decoded strings,
     no_content mode applies redaction, and newlines are collapsed.
     """
-    with patch("src.services.gateway_service.logger") as mock_logger:
+    with patch("src.services.gateway.gateway_service.logger") as mock_logger:
         # --- full_body mode: basic decoding ---
         _log_debug_info(
             debug_mode="full_body",
@@ -99,7 +99,7 @@ async def test_log_debug_info_bytes_formatting():
         mock_logger.info.reset_mock()
 
     # --- no_content mode: body is logged (with redaction applied upstream) ---
-    with patch("src.services.gateway_service.logger") as mock_logger:
+    with patch("src.services.gateway.gateway_service.logger") as mock_logger:
         _log_debug_info(
             debug_mode="no_content",
             instance_name="test_provider",
@@ -125,7 +125,7 @@ async def test_log_debug_info_bytes_formatting():
         mock_logger.info.reset_mock()
 
     # --- newline collapse: \n → \\n in body strings ---
-    with patch("src.services.gateway_service.logger") as mock_logger:
+    with patch("src.services.gateway.gateway_service.logger") as mock_logger:
         _log_debug_info(
             debug_mode="full_body",
             instance_name="test_provider",

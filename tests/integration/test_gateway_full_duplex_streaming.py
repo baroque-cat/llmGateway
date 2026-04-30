@@ -57,7 +57,7 @@ async def test_gateway_routes_to_full_stream_handler_when_auto_with_eligible_pro
     for eligible provider configurations, where request bodies are streamed directly
     without buffering.
     """
-    from src.services.gateway_service import create_app
+    from src.services.gateway.gateway_service import create_app
 
     # Create a mock accessor with a single-model provider and auto streaming mode
     accessor = MagicMock()
@@ -74,19 +74,24 @@ async def test_gateway_routes_to_full_stream_handler_when_auto_with_eligible_pro
     # Mock database initialization to avoid real DB calls
     with (
         patch(
-            "src.services.gateway_service.database.init_db_pool", new_callable=AsyncMock
+            "src.services.gateway.gateway_service.database.init_db_pool",
+            new_callable=AsyncMock,
         ) as _mock_init_db,
         patch(
-            "src.services.gateway_service.database.close_db_pool",
+            "src.services.gateway.gateway_service.database.close_db_pool",
             new_callable=AsyncMock,
         ) as _mock_close_db,
-        patch("src.services.gateway_service.DatabaseManager") as MockDatabaseManager,
         patch(
-            "src.services.gateway_service.HttpClientFactory"
+            "src.services.gateway.gateway_service.DatabaseManager"
+        ) as MockDatabaseManager,
+        patch(
+            "src.services.gateway.gateway_service.HttpClientFactory"
         ) as MockHttpClientFactory,
-        patch("src.services.gateway_service.GatewayCache") as MockGatewayCache,
-        patch("src.services.gateway_service._get_token_from_headers") as mock_get_token,
-        patch("src.services.gateway_service.get_provider") as mock_get_provider,
+        patch("src.services.gateway.gateway_service.GatewayCache") as MockGatewayCache,
+        patch(
+            "src.services.gateway.gateway_service._get_token_from_headers"
+        ) as mock_get_token,
+        patch("src.services.gateway.gateway_service.get_provider") as mock_get_provider,
     ):
         # Setup mock instances
         mock_db_manager = MagicMock()
@@ -135,10 +140,10 @@ async def test_gateway_routes_to_full_stream_handler_when_auto_with_eligible_pro
         # Patch buffered handlers to verify they are not called
         with (
             patch(
-                "src.services.gateway_service._handle_buffered_request"
+                "src.services.gateway.gateway_service._handle_buffered_request"
             ) as mock_buffered_handler,
             patch(
-                "src.services.gateway_service._handle_buffered_retryable_request"
+                "src.services.gateway.gateway_service._handle_buffered_retryable_request"
             ) as mock_retry_handler,
         ):
             # Set return values for buffered handlers (they shouldn't be called)
@@ -192,7 +197,7 @@ async def test_gateway_routes_to_full_stream_handler_for_gemini_provider():
     for Gemini provider configurations, where request bodies are streamed directly
     without buffering, and the model is parsed from the URL path.
     """
-    from src.services.gateway_service import create_app
+    from src.services.gateway.gateway_service import create_app
 
     # Create a mock accessor with a Gemini provider and auto streaming mode
     accessor = MagicMock()
@@ -213,19 +218,24 @@ async def test_gateway_routes_to_full_stream_handler_for_gemini_provider():
     # Mock database initialization to avoid real DB calls
     with (
         patch(
-            "src.services.gateway_service.database.init_db_pool", new_callable=AsyncMock
+            "src.services.gateway.gateway_service.database.init_db_pool",
+            new_callable=AsyncMock,
         ) as _mock_init_db,
         patch(
-            "src.services.gateway_service.database.close_db_pool",
+            "src.services.gateway.gateway_service.database.close_db_pool",
             new_callable=AsyncMock,
         ) as _mock_close_db,
-        patch("src.services.gateway_service.DatabaseManager") as MockDatabaseManager,
         patch(
-            "src.services.gateway_service.HttpClientFactory"
+            "src.services.gateway.gateway_service.DatabaseManager"
+        ) as MockDatabaseManager,
+        patch(
+            "src.services.gateway.gateway_service.HttpClientFactory"
         ) as MockHttpClientFactory,
-        patch("src.services.gateway_service.GatewayCache") as MockGatewayCache,
-        patch("src.services.gateway_service._get_token_from_headers") as mock_get_token,
-        patch("src.services.gateway_service.get_provider") as mock_get_provider,
+        patch("src.services.gateway.gateway_service.GatewayCache") as MockGatewayCache,
+        patch(
+            "src.services.gateway.gateway_service._get_token_from_headers"
+        ) as mock_get_token,
+        patch("src.services.gateway.gateway_service.get_provider") as mock_get_provider,
     ):
         # Setup mock instances
         mock_db_manager = MagicMock()
@@ -284,10 +294,10 @@ async def test_gateway_routes_to_full_stream_handler_for_gemini_provider():
         # Patch buffered handlers to verify they are not called
         with (
             patch(
-                "src.services.gateway_service._handle_buffered_request"
+                "src.services.gateway.gateway_service._handle_buffered_request"
             ) as mock_buffered_handler,
             patch(
-                "src.services.gateway_service._handle_buffered_retryable_request"
+                "src.services.gateway.gateway_service._handle_buffered_retryable_request"
             ) as mock_retry_handler,
         ):
             # Set return values for buffered handlers (they shouldn't be called)
@@ -354,7 +364,7 @@ async def test_gateway_full_stream_read_error_converted_to_gateway_stream_error(
     3. GatewayStreamError carries provider_name and model_name
     4. The raw httpx.ReadError does NOT reach the caller directly
     """
-    from src.services.gateway_service import (
+    from src.services.gateway.gateway_service import (
         GatewayStreamError,
         _handle_full_stream_request,
     )

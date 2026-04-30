@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from prometheus_client import CONTENT_TYPE_LATEST
 
 from src.config.schemas import MetricsConfig
-from src.services.gateway_service import create_app
+from src.services.gateway.gateway_service import create_app
 
 
 @pytest.fixture
@@ -28,7 +28,7 @@ def mock_accessor():
     # Default provider config for other endpoints
     accessor.get_enabled_providers.return_value = {}
     accessor.get_health_policy.return_value = MagicMock()
-    accessor.get_worker_concurrency.return_value = 10
+    accessor.get_keeper_concurrency.return_value = 10
     accessor.get_logging_config.return_value = MagicMock()
 
     return accessor
@@ -56,7 +56,7 @@ def mock_metrics_service():
 @pytest.fixture
 def gateway_app(mock_accessor, mock_db_manager, mock_metrics_service):
     """Create gateway app with mocked dependencies."""
-    with patch("src.services.gateway_service.DatabaseManager") as mock_db_cls:
+    with patch("src.services.gateway.gateway_service.DatabaseManager") as mock_db_cls:
         mock_db_cls.return_value = mock_db_manager
 
         # Create app with mocked accessor
@@ -205,7 +205,7 @@ class TestMetricsEndpoint:
         self, mock_accessor, mock_db_manager
     ):
         """Test integration of metrics cache update loop with mocked dependencies."""
-        from src.services.gateway_service import _metrics_cache_update_loop
+        from src.services.gateway.gateway_service import _metrics_cache_update_loop
         from src.services.metrics_exporter import MetricsService
 
         # Create real MetricsService with mocked DB

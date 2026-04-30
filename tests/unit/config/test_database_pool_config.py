@@ -20,8 +20,8 @@ from pydantic import ValidationError
 from src.config.loader import ConfigLoader
 from src.config.schemas import (
     Config,
-    DatabasePoolConfig,
     DatabaseConfig,
+    DatabasePoolConfig,
     VacuumPolicyConfig,
 )
 

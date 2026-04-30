@@ -69,7 +69,7 @@ def _make_probe(
     The accessor's get_health_policy returns *policy* for any provider name.
     """
     mock_accessor = MagicMock()
-    mock_accessor.get_worker_concurrency.return_value = concurrency
+    mock_accessor.get_keeper_concurrency.return_value = concurrency
     mock_accessor.get_health_policy.return_value = policy
     mock_db = MagicMock()
     mock_client_factory = MagicMock()
@@ -769,7 +769,7 @@ async def test_ic16_multiple_providers_separate_controllers():
     policy_gemini = _default_policy(start_batch_size=10, start_batch_delay_sec=30.0)
 
     mock_accessor = MagicMock()
-    mock_accessor.get_worker_concurrency.return_value = 10
+    mock_accessor.get_keeper_concurrency.return_value = 10
 
     def get_policy(name: str) -> HealthPolicyConfig | None:
         if name == "openai":

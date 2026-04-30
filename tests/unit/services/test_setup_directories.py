@@ -1,8 +1,8 @@
-"""Tests for _setup_directories in background_worker.py."""
+"""Tests for _setup_directories in keeper.py."""
 
 from unittest.mock import MagicMock, patch
 
-from src.services.background_worker import _setup_directories
+from src.services.keeper import _setup_directories
 
 
 def test_setup_directories_creates_data_name_raw():
@@ -13,7 +13,7 @@ def test_setup_directories_creates_data_name_raw():
     mock_accessor.get_all_providers.return_value = {"test-provider": mock_provider}
     mock_accessor.get_proxy_config.return_value = None  # no stealth proxy
 
-    with patch("src.services.background_worker.os.makedirs") as mock_makedirs:
+    with patch("src.services.keeper.os.makedirs") as mock_makedirs:
         _setup_directories(mock_accessor)
 
     mock_makedirs.assert_any_call("data/test-provider/raw", exist_ok=True)
@@ -27,7 +27,7 @@ def test_setup_directories_existing_directory_no_error():
     mock_accessor.get_all_providers.return_value = {"test-provider": mock_provider}
     mock_accessor.get_proxy_config.return_value = None
 
-    with patch("src.services.background_worker.os.makedirs") as mock_makedirs:
+    with patch("src.services.keeper.os.makedirs") as mock_makedirs:
         _setup_directories(mock_accessor)
 
     # Should still be called with exist_ok=True
@@ -43,7 +43,7 @@ def test_setup_directories_does_not_use_keys_path():
     mock_accessor.get_all_providers.return_value = {"test-provider": mock_provider}
     mock_accessor.get_proxy_config.return_value = None
 
-    with patch("src.services.background_worker.os.makedirs"):
+    with patch("src.services.keeper.os.makedirs"):
         _setup_directories(mock_accessor)
 
     # provider.keys_path should never be accessed
@@ -60,7 +60,7 @@ def test_setup_directories_skips_disabled_providers():
     mock_accessor.get_all_providers.return_value = {"disabled-provider": mock_provider}
     mock_accessor.get_proxy_config.return_value = None
 
-    with patch("src.services.background_worker.os.makedirs") as mock_makedirs:
+    with patch("src.services.keeper.os.makedirs") as mock_makedirs:
         _setup_directories(mock_accessor)
 
     # No makedirs should be called for disabled providers

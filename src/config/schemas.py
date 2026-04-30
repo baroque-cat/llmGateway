@@ -676,8 +676,8 @@ class DatabaseConfig(BaseModel):
         return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.dbname}"
 
 
-class WorkerConfig(BaseModel):
-    """Global settings specifically for the background worker service."""
+class KeeperConfig(BaseModel):
+    """Global settings specifically for the keeper service."""
 
     # The maximum number of provider instances to check concurrently.
     max_concurrent_providers: int = Field(default=10, gt=0)
@@ -728,7 +728,7 @@ class Config(BaseModel):
 
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
-    worker: WorkerConfig = Field(default_factory=WorkerConfig)
+    keeper: KeeperConfig = Field(default_factory=KeeperConfig)
     metrics: MetricsConfig = Field(default_factory=MetricsConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     # A dictionary mapping the unique instance name to its full configuration.

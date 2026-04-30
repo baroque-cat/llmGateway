@@ -1,31 +1,48 @@
-#!/usr/bin/env python3
+"""Tests verifying maintenance.py deletion and absorption into service classes."""
 
-"""Tests for maintenance module removal verification — N52.
+import importlib
 
-Verifies that ``run_periodic_vacuum`` has been removed from the
-maintenance module, while ``run_purge_stopped_keys`` and
-``run_conditional_vacuum`` remain.
-"""
-
-from src.services import maintenance
+import pytest
 
 
-def test_run_periodic_vacuum_removed_from_maintenance_module() -> None:
-    """N52: ``run_periodic_vacuum`` no longer exists in the maintenance module."""
-    assert (
-        hasattr(maintenance, "run_periodic_vacuum") is False
-    ), "run_periodic_vacuum should have been removed from the maintenance module"
+class TestMaintenanceModuleRemoval:
+    """Verify the maintenance module no longer exists."""
+
+    def test_maintenance_module_import_fails(self) -> None:
+        """Importing src.services.maintenance should raise ImportError."""
+        with pytest.raises(ImportError):
+            importlib.import_module("src.services.maintenance")
 
 
-def test_run_purge_stopped_keys_exists_in_maintenance_module() -> None:
-    """N52 (supplementary): ``run_purge_stopped_keys`` still exists."""
-    assert (
-        hasattr(maintenance, "run_purge_stopped_keys") is True
-    ), "run_purge_stopped_keys must exist in the maintenance module"
+class TestKeyPurgerRunScheduled:
+    """Verify KeyPurger.run_scheduled exists as a static method."""
+
+    def test_run_scheduled_is_static_method(self) -> None:
+        """KeyPurger.run_scheduled should be a static method."""
+        from src.services.key_purger import KeyPurger
+
+        assert hasattr(
+            KeyPurger, "run_scheduled"
+        ), "KeyPurger.run_scheduled should exist"
+        # getattr unwraps staticmethod descriptors, so check __dict__ directly
+        method = KeyPurger.__dict__["run_scheduled"]
+        assert isinstance(
+            method, staticmethod
+        ), "KeyPurger.run_scheduled should be a static method"
 
 
-def test_run_conditional_vacuum_exists_in_maintenance_module() -> None:
-    """N52 (supplementary): ``run_conditional_vacuum`` still exists."""
-    assert (
-        hasattr(maintenance, "run_conditional_vacuum") is True
-    ), "run_conditional_vacuum must exist in the maintenance module"
+class TestDatabaseMaintainerRunScheduled:
+    """Verify DatabaseMaintainer.run_scheduled exists as a static method."""
+
+    def test_run_scheduled_is_static_method(self) -> None:
+        """DatabaseMaintainer.run_scheduled should be a static method."""
+        from src.services.db_maintainer import DatabaseMaintainer
+
+        assert hasattr(
+            DatabaseMaintainer, "run_scheduled"
+        ), "DatabaseMaintainer.run_scheduled should exist"
+        # getattr unwraps staticmethod descriptors, so check __dict__ directly
+        method = DatabaseMaintainer.__dict__["run_scheduled"]
+        assert isinstance(
+            method, staticmethod
+        ), "DatabaseMaintainer.run_scheduled should be a static method"

@@ -16,8 +16,8 @@ from src.config import load_config
 from src.config.logging_config import setup_logging
 from src.config.schemas import Config
 from src.core.accessor import ConfigAccessor
-from src.services.background_worker import run_worker
-from src.services.gateway_service import create_app
+from src.services.keeper import run_keeper
+from src.services.gateway.gateway_service import create_app
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ def validate_pool_sizing(config: Config) -> None:
     """
     pool_max = config.database.pool.max_size
     gw_workers = config.gateway.workers
-    processes = gw_workers + 1  # +1 for the Keeper worker
+    processes = gw_workers + 1  # +1 for the Keeper
     worst_case = processes * pool_max
     pg_limit = 97  # 100 - 3 superuser reserve
 
@@ -123,10 +123,10 @@ def _start_gateway_service(args: argparse.Namespace):
         sys.exit(1)
 
 
-async def _start_worker_service():
+async def _start_keeper_service():
     """
-    Initializes and starts the background worker service.
-    This function is asynchronous as the worker is a pure asyncio application.
+    Initializes and starts the keeper service.
+    This function is asynchronous as the keeper is a pure asyncio application.
     """
     try:
         print("Initializing configuration...")
@@ -135,12 +135,12 @@ async def _start_worker_service():
         # Pre-startup pool sizing validation.
         validate_pool_sizing(config)
 
-        print("Starting the background worker service...")
-        await run_worker()
+        print("Starting the keeper service...")
+        await run_keeper()
     except FileNotFoundError as e:
         print(f"\n[ERROR] {e}", file=sys.stderr)
         print(
-            "Please create a configuration file before running the worker.",
+            "Please create a configuration file before running the keeper.",
             file=sys.stderr,
         )
         print(
@@ -153,7 +153,7 @@ async def _start_worker_service():
         sys.exit(1)
     except Exception as e:
         print(
-            f"\n[CRITICAL] A critical error prevented the worker from starting: {e}",
+            f"\n[CRITICAL] A critical error prevented the keeper from starting: {e}",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -174,9 +174,9 @@ def main():
         dest="service", required=True, help="The service to run"
     )
 
-    # --- Command to run the background worker ---
+    # --- Command to run the keeper ---
     subparsers.add_parser(
-        "worker", help="Run the background worker for health checks, sync, and stats."
+        "keeper", help="Run the keeper for health checks, sync, and stats."
     )
 
     # --- Command to run the API Gateway ---
@@ -205,8 +205,8 @@ def main():
     args = parser.parse_args()
 
     # --- Main Application Logic (Dispatcher) ---
-    if args.service == "worker":
-        asyncio.run(_start_worker_service())
+    if args.service == "keeper":
+        asyncio.run(_start_keeper_service())
 
     elif args.service == "gateway":
         _start_gateway_service(args)

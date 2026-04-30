@@ -33,7 +33,7 @@ async def test_report_key_failure_integration_next_check_from_policy() -> None:
     3. compute_next_check_time(policy, reason) is called
     4. db_manager.keys.update_status() receives the computed next_check_time
     """
-    from src.services.gateway_service import _report_key_failure
+    from src.services.gateway.gateway_service import _report_key_failure
 
     # --- Setup ---
     db_manager = MagicMock()

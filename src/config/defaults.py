@@ -21,9 +21,9 @@ def get_default_config() -> dict[str, Any]:
             "port": 55300,
             "workers": 4,
         },
-        # --- WORKER SETTINGS ---
-        "worker": {
-            # Concurrency limit for the background worker's probes.
+        # --- KEEPER SETTINGS ---
+        "keeper": {
+            # Concurrency limit for the keeper's probes.
             "max_concurrent_providers": 10,
         },
         # --- DATABASE SETTINGS ---

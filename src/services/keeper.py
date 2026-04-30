@@ -1,4 +1,4 @@
-# src/services/background_worker.py
+# src/services/keeper.py
 
 import asyncio
 import logging
@@ -17,10 +17,11 @@ from src.core.http_client_factory import HttpClientFactory
 from src.core.interfaces import IResourceSyncer, ProviderKeyState, ProviderProxyState
 from src.db import database
 from src.db.database import DatabaseManager
-from src.services import maintenance
+from src.services.db_maintainer import DatabaseMaintainer
 from src.services.inventory_exporter import KeyInventoryExporter
+from src.services.key_probe import get_all_probes
+from src.services.key_purger import KeyPurger
 from src.services.metrics_exporter import update_adaptive_controller_state
-from src.services.probes import get_all_probes
 from src.services.synchronizers import get_all_syncers
 from src.services.synchronizers.key_sync import read_keys_from_directory
 from src.services.synchronizers.proxy_sync import read_proxies_from_directory
@@ -202,9 +203,9 @@ async def run_sync_cycle(
     logger.debug("Synchronization cycle finished.")
 
 
-async def run_worker() -> None:
+async def run_keeper() -> None:
     """
-    The main async function for the background worker service.
+    The main async function for the keeper service.
     Orchestrates all background tasks using the new accessor-based architecture.
     """
     scheduler = None
@@ -220,7 +221,7 @@ async def run_worker() -> None:
         setup_logging(accessor)
         logger = logging.getLogger(__name__)
 
-        logger.info("--- Starting LLM Gateway Background Worker (Async) ---")
+        logger.info("--- Starting LLM Gateway Keeper (Async) ---")
 
         # Step 3: Setup Directories.
         _setup_directories(accessor)
@@ -279,7 +280,7 @@ async def run_worker() -> None:
         # --- Database maintenance scheduler jobs ---
         # Key purge: weekly cron (Sunday 04:00 UTC).
         scheduler.add_job(  # type: ignore
-            maintenance.run_purge_stopped_keys,
+            KeyPurger.run_scheduled,
             "cron",
             day_of_week="sun",
             hour=4,
@@ -291,7 +292,7 @@ async def run_worker() -> None:
         # Smart vacuum: interval-based, reads interval from config.
         vacuum_interval = accessor.get_database_config().vacuum_policy.interval_minutes
         scheduler.add_job(  # type: ignore
-            maintenance.run_conditional_vacuum,
+            DatabaseMaintainer.run_scheduled,
             "interval",
             minutes=vacuum_interval,
             id="smart_vacuum",
@@ -358,7 +359,7 @@ async def run_worker() -> None:
     except Exception as e:
         if logger:
             logger.critical(
-                f"A critical error occurred during worker setup or runtime: {e}",
+                f"A critical error occurred during keeper setup or runtime: {e}",
                 exc_info=True,
             )
         else:
@@ -377,4 +378,4 @@ async def run_worker() -> None:
             await client_factory.close_all()
 
         await database.close_db_pool()
-        shutdown_logger.info("Worker has been shut down gracefully.")
+        shutdown_logger.info("Keeper has been shut down gracefully.")

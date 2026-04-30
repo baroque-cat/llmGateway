@@ -17,6 +17,7 @@ MOCK_ENV = {
     "GEMINI_MINIMAL_TOKEN": "test_token_minimal",
     "DEEPSEEK_TOKEN": "test_token_deepseek",
     "ANTHROPIC_TOKEN": "test_token_anthropic",
+    "ANTHROPIC_HOME_TOKEN": "test_token_anthropic_home",
     "METRICS_ACCESS_TOKEN": "test_metrics_token",
     # Additional env vars required by config/providers.yaml
     "GEMINI_PRO_HOME_TOKEN": "test_token_pro_home",
@@ -40,7 +41,7 @@ def test_load_full_config_example(mock_env):
     config = loader.load()
 
     assert config.database.password == "test_password"
-    assert config.worker.max_concurrent_providers == 10
+    assert config.keeper.max_concurrent_providers == 10
 
     # Check Providers
     assert "gemini-production" in config.providers
@@ -109,16 +110,15 @@ def test_providers_yaml_database_pool(mock_env):
 
 
 def test_providers_yaml_key_order():
-    """IT-Y03: Read providers.yaml as dict → keys in order: logging, metrics, gateway, worker, database, providers."""
+    """IT-Y03: Read providers.yaml as dict → keys in order: keeper, database, logging, metrics, providers."""
     yaml = YAML()
     with open("config/providers.yaml", encoding="utf-8") as f:
         data = yaml.load(f)
     expected_order = [
+        "keeper",
+        "database",
         "logging",
         "metrics",
-        "gateway",
-        "worker",
-        "database",
         "providers",
     ]
     assert list(data.keys()) == expected_order
@@ -145,7 +145,7 @@ def test_full_config_key_order():
         "logging",
         "metrics",
         "gateway",
-        "worker",
+        "keeper",
         "database",
         "providers",
     ]

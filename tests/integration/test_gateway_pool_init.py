@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 
 from src.config.schemas import Config
 from src.core.accessor import ConfigAccessor
-from src.services.gateway_service import create_app
+from src.services.gateway.gateway_service import create_app
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -51,22 +51,22 @@ async def test_gateway_pool_init_custom_params():
 
     with (
         patch(
-            "src.services.gateway_service.database.init_db_pool",
+            "src.services.gateway.gateway_service.database.init_db_pool",
             new_callable=AsyncMock,
         ) as mock_init_pool,
         patch(
-            "src.services.gateway_service.database.close_db_pool",
+            "src.services.gateway.gateway_service.database.close_db_pool",
             new_callable=AsyncMock,
         ),
-        patch("src.services.gateway_service.DatabaseManager") as mock_dm_cls,
-        patch("src.services.gateway_service.GatewayCache") as mock_gc_cls,
-        patch("src.services.gateway_service.HttpClientFactory") as mock_hcf_cls,
+        patch("src.services.gateway.gateway_service.DatabaseManager") as mock_dm_cls,
+        patch("src.services.gateway.gateway_service.GatewayCache") as mock_gc_cls,
+        patch("src.services.gateway.gateway_service.HttpClientFactory") as mock_hcf_cls,
         patch(
-            "src.services.gateway_service._cache_refresh_loop",
+            "src.services.gateway.gateway_service._cache_refresh_loop",
             new_callable=AsyncMock,
         ) as mock_refresh_loop,
         patch(
-            "src.services.gateway_service.MetricsService",
+            "src.services.gateway.gateway_service.MetricsService",
         ) as mock_metrics_cls,
     ):
         # Configure DatabaseManager mock

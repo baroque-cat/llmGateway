@@ -3,8 +3,9 @@
 """Key purging service — removes stopped keys and deleted provider data."""
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
+from src.core.accessor import ConfigAccessor
 from src.core.interfaces import IKeyPurger
 from src.db.database import DatabaseManager, get_pool
 from src.services.db_maintainer import record_purged_keys
@@ -108,3 +109,59 @@ class KeyPurger(IKeyPurger):
                 )
             record_purged_keys(provider_name, purged_count)
             return purged_count
+
+    @staticmethod
+    async def run_scheduled(
+        accessor: ConfigAccessor, db_manager: DatabaseManager
+    ) -> None:
+        """Purge permanently stopped keys for each enabled provider.
+
+        Iterates over all enabled providers and deletes keys that have been in
+        a stopped state beyond ``purge.after_days``.  Called weekly by the
+        scheduler (Sunday 04:00 UTC).
+
+        Args:
+            accessor: Configuration accessor for reading purge policy settings.
+            db_manager: Database manager for executing queries.
+        """
+        purger = KeyPurger()
+        now = datetime.now(UTC)
+
+        for provider_name, provider_config in accessor.get_all_providers().items():
+            if not provider_config.enabled:
+                continue
+
+            health_policy = provider_config.worker_health_policy
+            purge_config = health_policy.purge
+            cutoff = now - timedelta(days=purge_config.after_days)
+
+            provider_id_map = await db_manager.providers.get_id_map()
+            provider_id = provider_id_map.get(provider_name)
+            if provider_id is None:
+                logger.debug(
+                    "PURGE SKIP '%s': not found in provider_id_map.", provider_name
+                )
+                continue
+
+            try:
+                deleted = await purger.purge_stopped_keys(
+                    provider_name=provider_name,
+                    provider_id=provider_id,
+                    cutoff=cutoff,
+                    db_manager=db_manager,
+                )
+                if deleted:
+                    logger.info(
+                        "PURGE '%s': %d keys purged (cutoff=%s, after_days=%d).",
+                        provider_name,
+                        deleted,
+                        cutoff.isoformat(),
+                        purge_config.after_days,
+                    )
+            except Exception as e:
+                logger.error(
+                    "PURGE '%s': failed to purge stopped keys: %s",
+                    provider_name,
+                    e,
+                    exc_info=True,
+                )

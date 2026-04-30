@@ -29,7 +29,7 @@ from src.core.constants import ErrorReason
 from src.core.models import CheckResult
 from src.core.probes import IResourceProbe
 from src.core.retry import AsyncRetrier
-from src.services.probes.key_probe import KeyProbe
+from src.services.key_probe import KeyProbe
 
 # ── Shared fixtures ──────────────────────────────────────────────────────────
 
@@ -43,7 +43,7 @@ def mock_dependencies():
     mock_http = MagicMock()
     mock_http.get_client_for_provider = AsyncMock()
     mock_accessor = MagicMock()
-    mock_accessor.get_worker_concurrency.return_value = 10
+    mock_accessor.get_keeper_concurrency.return_value = 10
     # KeyProbe.__init__ now calls accessor.get_database_config().retry
     mock_accessor.get_database_config.return_value = DatabaseConfig(
         retry=DatabaseRetryConfig(
@@ -252,7 +252,7 @@ async def test_ut_g01_init_creates_async_retrier_from_config():
     UT-G01: KeyProbe.__init__ creates AsyncRetrier from accessor.get_database_config().retry
     """
     mock_accessor = MagicMock()
-    mock_accessor.get_worker_concurrency.return_value = 10
+    mock_accessor.get_keeper_concurrency.return_value = 10
     custom_retry = DatabaseRetryConfig(
         max_attempts=5,
         base_delay_sec=2.0,
@@ -425,7 +425,7 @@ def test_ut_g07_keyprobe_init_no_retrier_parameter():
 
     # Verify that _db_retrier is created internally from accessor config
     mock_accessor = MagicMock()
-    mock_accessor.get_worker_concurrency.return_value = 10
+    mock_accessor.get_keeper_concurrency.return_value = 10
     mock_accessor.get_database_config.return_value = DatabaseConfig()
     mock_db = MagicMock()
     mock_http = MagicMock()
@@ -489,9 +489,7 @@ async def test_int01_full_cycle_transient_db_error(mock_dependencies, health_pol
         return_value=CheckResult.fail(ErrorReason.INVALID_KEY, "Invalid key")
     )
 
-    with patch(
-        "src.services.probes.key_probe.get_provider", return_value=provider_instance
-    ):
+    with patch("src.services.key_probe.get_provider", return_value=provider_instance):
         check_result = await probe._check_resource(resources[0])
 
     assert check_result.ok is False

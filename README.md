@@ -6,7 +6,7 @@
 
 The system consists of two core, independent components:
 
-1.  **Background Worker ("Keeper"):** Proactively probes the health of API keys and proxies, synchronizes them with on-disk files, and keeps the internal database up-to-date.
+1.  **Keeper:** Proactively probes the health of API keys and proxies, synchronizes them with on-disk files, and keeps the internal database up-to-date.
 2.  **API Gateway ("Conductor"):** Reactively handles incoming requests in real-time, selects the most suitable healthy key, and proxies the request to the target LLM API.
 
 ## Key Features
@@ -53,7 +53,7 @@ The project follows a clean, modular design with a clear separation of concerns.
 │   │       └── openai_like.py  # OpenAI-compatible API adapter
 │   └── services/               # Business logic and orchestration
 │       ├── __init__.py
-│       ├── background_worker.py # Background task orchestrator (Keeper)
+│       ├── keeper.py # Background task orchestrator (Keeper)
 │       ├── gateway_cache.py    # Cache for keys and models (fixes shared-key bug)
 │       ├── gateway_service.py  # Main API Gateway service (Conductor)
 │       ├── maintenance.py      # Database maintenance services
@@ -110,7 +110,7 @@ The easiest and most robust way to run `llmGateway` is with `docker-compose`.
     docker-compose up --build -d
     ```
 
-This will start three services: a PostgreSQL database, the API Gateway, and the Background Worker.
+This will start three services: a PostgreSQL database, the API Gateway, and the Keeper.
 
 ### Running from Source (Development)
 
@@ -120,7 +120,7 @@ If you prefer to run the application directly from source (e.g., for development
     ```bash
     poetry run python main.py gateway --host 0.0.0.0 --port 8000
     ```
-*   **Start the Background Worker:**
+*   **Start the Keeper:**
     ```bash
     poetry run python main.py worker
     ```
@@ -166,5 +166,5 @@ The ``database.retry`` section configures automatic retry for transient database
 
 ## Project Status
 
-*   ✅ **Implemented:** Gateway, Background Worker, Retry Policy, Key Probing, Smart Caching.
+*   ✅ **Implemented:** Gateway, Keeper, Retry Policy, Key Probing, Smart Caching.
 *   🚧 **Planned / Not Implemented:** Circuit Breaker functionality.

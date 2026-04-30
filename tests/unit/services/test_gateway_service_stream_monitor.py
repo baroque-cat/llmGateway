@@ -9,7 +9,7 @@ import pytest
 
 from src.core.constants import ALL_MODELS_MARKER, ErrorReason
 from src.core.models import CheckResult
-from src.services.gateway_service import GatewayStreamError, StreamMonitor
+from src.services.gateway.gateway_service import GatewayStreamError, StreamMonitor
 
 
 class TestStreamMonitor:
@@ -28,7 +28,7 @@ class TestStreamMonitor:
     @pytest.fixture
     def mock_logger(self):
         """Mock the module logger."""
-        with patch("src.services.gateway_service.logger") as mock:
+        with patch("src.services.gateway.gateway_service.logger") as mock:
             yield mock
 
     @pytest.mark.asyncio

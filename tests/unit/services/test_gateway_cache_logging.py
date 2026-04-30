@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from src.services.gateway_cache import GatewayCache
+from src.services.gateway.gateway_cache import GatewayCache
 
 
 class TestGatewayCacheLogging:
@@ -42,7 +42,7 @@ class TestGatewayCacheLogging:
                 }
             ]
         )
-        with patch("src.services.gateway_cache.logger") as mock_logger:
+        with patch("src.services.gateway.gateway_cache.logger") as mock_logger:
             await cache.refresh_key_pool()
             # Collect all calls to logger methods
             print(f"All calls: {mock_logger.method_calls}")
@@ -67,7 +67,7 @@ class TestGatewayCacheLogging:
         mock_accessor.get_provider.return_value = mock_provider_config
         # Pre-populate a key in the pool
         cache._key_pool["openai:__ALL_MODELS__"] = [(1, "sk-xxx")]
-        with patch("src.services.gateway_cache.logger") as mock_logger:
+        with patch("src.services.gateway.gateway_cache.logger") as mock_logger:
             await cache.remove_key_from_pool("openai", "gpt-4", 1)
             # Should log DEBUG about removing shared key (no INFO logs)
             mock_logger.info.assert_not_called()
@@ -88,7 +88,7 @@ class TestGatewayCacheLogging:
         mock_provider_config.shared_key_status = False
         mock_accessor.get_provider.return_value = mock_provider_config
         cache._key_pool["openai:gpt-4"] = [(1, "sk-xxx")]
-        with patch("src.services.gateway_cache.logger") as mock_logger:
+        with patch("src.services.gateway.gateway_cache.logger") as mock_logger:
             await cache.remove_key_from_pool("openai", "gpt-4", 1)
             # Should log DEBUG about removing from specific pool (no INFO logs)
             mock_logger.info.assert_not_called()

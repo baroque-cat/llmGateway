@@ -135,7 +135,7 @@ async def test_catch_all_rule_specific_match():
     """
     Scenario A: Specific rule matches (Access denied message) -> maps to invalid_key.
     """
-    from src.services.gateway_service import (
+    from src.services.gateway.gateway_service import (
         _handle_buffered_retryable_request,  # type: ignore
     )
 
@@ -193,7 +193,7 @@ async def test_catch_all_rule_catch_all_match():
     """
     Scenario B: Specific rule does NOT match, catch-all rule matches -> maps to server_error.
     """
-    from src.services.gateway_service import (
+    from src.services.gateway.gateway_service import (
         _handle_buffered_retryable_request,  # type: ignore
     )
 
@@ -243,7 +243,7 @@ async def test_no_stream_closed_with_catch_all_rule():
     Scenario C: Ensure no httpx.StreamClosed crash when retry enabled and error parsing configured.
     This is a regression test for the StreamClosed bug.
     """
-    from src.services.gateway_service import (
+    from src.services.gateway.gateway_service import (
         _handle_buffered_retryable_request,  # type: ignore
     )
 

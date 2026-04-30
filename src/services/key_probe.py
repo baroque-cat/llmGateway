@@ -9,11 +9,13 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.config.schemas import HealthPolicyConfig
+from src.core.accessor import ConfigAccessor
 from src.core.constants import ALL_MODELS_MARKER, ErrorReason
+from src.core.http_client_factory import HttpClientFactory
 from src.core.models import CheckResult
-from src.core.probes import IResourceProbe
+from src.core.probes import BatchCallback, IResourceProbe
 from src.core.retry import AsyncRetrier
-from src.db.database import KeyToCheck
+from src.db.database import DatabaseManager, KeyToCheck
 from src.providers import get_provider
 
 logger = logging.getLogger(__name__)
@@ -333,3 +335,51 @@ class KeyProbe(IResourceProbe):
             return now + timedelta(minutes=policy.on_server_error_min)
         else:  # Covers UNKNOWN, BAD_REQUEST, etc.
             return now + timedelta(hours=policy.on_other_error_hr)
+
+
+# A registry to map probe type names to their classes.
+_PROBE_CLASSES: dict[str, type[IResourceProbe]] = {
+    "keys": KeyProbe,
+}
+
+
+def get_all_probes(
+    accessor: ConfigAccessor,
+    db_manager: DatabaseManager,
+    client_factory: HttpClientFactory,
+    on_batch_complete: BatchCallback | None = None,
+) -> list[IResourceProbe]:
+    """
+    Factory function to create instances of all registered probes.
+
+    This function iterates through the probe registry, instantiates each probe
+    with all necessary dependencies (accessor, db_manager, client_factory), and
+    returns them as a list.
+
+    Args:
+        accessor: An instance of ConfigAccessor for safe config access.
+        db_manager: An instance of the DatabaseManager.
+        client_factory: A factory for creating and managing httpx.AsyncClient instances.
+        on_batch_complete: Optional callback passed to each probe's constructor for
+            batch-completion notifications.
+
+    Returns:
+        A list of initialized probe instances.
+    """
+    all_probes: list[IResourceProbe] = []
+    for probe_name, probe_class in _PROBE_CLASSES.items():
+        try:
+            instance = probe_class(
+                accessor=accessor,
+                db_manager=db_manager,
+                client_factory=client_factory,
+                on_batch_complete=on_batch_complete,
+            )
+            all_probes.append(instance)
+            logger.debug(f"Successfully initialized probe: '{probe_name}'")
+        except Exception as e:
+            logger.error(
+                f"Failed to initialize probe '{probe_name}': {e}", exc_info=True
+            )
+
+    return all_probes

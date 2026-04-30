@@ -780,7 +780,7 @@ def test_sec02_callback_is_private_attribute() -> None:
             pass
 
     accessor = MagicMock(spec=ConfigAccessor)
-    accessor.get_worker_concurrency.return_value = 5
+    accessor.get_keeper_concurrency.return_value = 5
     db_manager = MagicMock()
     client_factory = MagicMock()
 
@@ -839,9 +839,11 @@ def test_sec04_no_metrics_exporter_import_in_probes() -> None:
 
 
 def test_sec05_reexport_points_to_core() -> None:
-    """Verify that the services re-export is the same class as the core class."""
-    from src.core.batching import AdaptiveBatchController as CoreController
-    from src.services.batching import AdaptiveBatchController as ServiceController
+    """Verify that AdaptiveBatchController can be imported from src.core.batching
+    and its __module__ attribute starts with 'src.core.batching'."""
+    from src.core.batching import AdaptiveBatchController
 
-    # They must be the exact same class object (not a copy or subclass)
-    assert CoreController is ServiceController
+    # The class must be importable from src.core.batching
+    assert AdaptiveBatchController is not None
+    # Its __module__ must start with src.core.batching (not src.services.batching)
+    assert AdaptiveBatchController.__module__.startswith("src.core.batching")

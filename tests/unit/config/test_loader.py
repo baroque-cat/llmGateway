@@ -20,7 +20,7 @@ def test_config_loader_load_success():
   host: localhost
   port: 5432
   password: test_password
-worker:
+keeper:
   max_concurrent_providers: 5
 providers:
   test_provider:
@@ -44,7 +44,7 @@ providers:
         # Verify basic structure
         assert config.database.host == "localhost"
         assert config.database.port == 5432
-        assert config.worker.max_concurrent_providers == 5
+        assert config.keeper.max_concurrent_providers == 5
         assert "test_provider" in config.providers
         provider = config.providers["test_provider"]
         assert provider.enabled is True
@@ -85,7 +85,7 @@ def test_config_loader_amnesty_threshold_field():
   host: localhost
   port: 5432
   password: test_password
-worker:
+keeper:
   max_concurrent_providers: 5
 providers:
   test_provider:
@@ -125,7 +125,7 @@ def test_config_loader_task_timeout_field():
   host: localhost
   port: 5432
   password: test_password
-worker:
+keeper:
   max_concurrent_providers: 5
 providers:
   test_provider:

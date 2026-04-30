@@ -12,7 +12,7 @@ import inspect
 import pytest
 
 from src.core.constants import ErrorReason
-from src.services.gateway_service import GatewayStreamError
+from src.services.gateway.gateway_service import GatewayStreamError
 
 # ---------------------------------------------------------------------------
 # 6.1  GatewayStreamError — domain exception
@@ -134,7 +134,7 @@ class TestStreamReadErrorProtection:
     @pytest.fixture
     def gateway_source(self) -> str:
         """Get the source code of the gateway_service module."""
-        import src.services.gateway_service as mod
+        import src.services.gateway.gateway_service as mod
 
         return inspect.getsource(mod)
 

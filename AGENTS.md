@@ -17,7 +17,7 @@ poetry install --with dev
 
 ### Running
 ```bash
-# Run the background worker ("Keeper")
+# Run the keeper ("Keeper")
 poetry run python main.py worker
 
 # Run the API Gateway ("Conductor")

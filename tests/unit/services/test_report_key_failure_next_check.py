@@ -116,7 +116,7 @@ class TestReportKeyFailureNextCheck:
         hardcoding +1 minute.  We patch compute_next_check_time and verify it is
         called with the provider's HealthPolicyConfig and the result's ErrorReason.
         """
-        from src.services.gateway_service import _report_key_failure
+        from src.services.gateway.gateway_service import _report_key_failure
 
         # --- Setup mocks ---
         db_manager = MagicMock()
@@ -140,7 +140,7 @@ class TestReportKeyFailureNextCheck:
 
         # Patch compute_next_check_time to track the call
         with patch(
-            "src.services.gateway_service.compute_next_check_time",
+            "src.services.gateway.gateway_service.compute_next_check_time",
             side_effect=compute_next_check_time,
         ) as mock_compute:
             await _report_key_failure(
@@ -182,7 +182,7 @@ class TestReportKeyFailureNextCheck:
         SVC-8: _report_key_failure with NO_QUOTA produces a next_check_time
         significantly longer than 1 minute (default on_no_quota_hr=6 >> 1 min).
         """
-        from src.services.gateway_service import _report_key_failure
+        from src.services.gateway.gateway_service import _report_key_failure
 
         db_manager = MagicMock()
         db_manager.keys.update_status = AsyncMock()

@@ -3,7 +3,7 @@
 
 Test IDs:
   IT-D01 – services.gateway.command == ["python", "main.py", "gateway"]
-  IT-D02 – services.worker.command == ["python", "main.py", "worker"]
+  IT-D02 – services.worker.command == ["python", "main.py", "keeper"]
 """
 
 from pathlib import Path
@@ -43,11 +43,11 @@ def test_it_d01_gateway_command():
 
 
 def test_it_d02_worker_command():
-    """IT-D02: services.worker.command == ["python", "main.py", "worker"] (unchanged)"""
+    """IT-D02: services.worker.command == ["python", "main.py", "keeper"] (unchanged)"""
     data = _load_compose()
     worker_command = list(data["services"]["worker"]["command"])
     assert worker_command == [
         "python",
         "main.py",
-        "worker",
-    ], f"worker command should be exactly ['python', 'main.py', 'worker']; got {worker_command}"
+        "keeper",
+    ], f"worker command should be exactly ['python', 'main.py', 'keeper']; got {worker_command}"

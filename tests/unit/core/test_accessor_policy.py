@@ -6,7 +6,7 @@ import pytest
 from src.config.schemas import HealthPolicyConfig
 from src.core.constants import ErrorReason
 from src.core.models import CheckResult
-from src.services.probes.key_probe import KeyProbe
+from src.services.key_probe import KeyProbe
 
 
 @pytest.mark.asyncio
@@ -19,7 +19,7 @@ async def test_network_error_uses_server_error_policy():
     mock_db = MagicMock()
     mock_http = MagicMock()
     mock_accessor = MagicMock()
-    mock_accessor.get_worker_concurrency.return_value = (
+    mock_accessor.get_keeper_concurrency.return_value = (
         10  # Required for Semaphore init
     )
 

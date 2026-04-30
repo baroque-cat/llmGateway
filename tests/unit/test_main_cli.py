@@ -10,7 +10,7 @@ Test IDs:
   UT-CLI06 – CLI --port overrides config
   UT-CLI07 – uvicorn.run receives config values after overrides
   IT-S03  – validate_pool_sizing called before uvicorn.run in gateway
-  IT-S04  – validate_pool_sizing called before run_worker in worker
+  IT-S04  – validate_pool_sizing called before run_keeper in keeper
   SEC-07  – argparse default=None, not old argparse default (8000)
 """
 
@@ -226,30 +226,30 @@ def test_it_s03_validate_before_uvicorn():
 
 
 def test_it_s04_validate_before_worker():
-    """IT-S04: Mock validate_pool_sizing → _start_worker_service calls validate_pool_sizing(config) before run_worker"""
+    """IT-S04: Mock validate_pool_sizing → _start_keeper_service calls validate_pool_sizing(config) before run_keeper"""
     call_order: list[str] = []
     config = Config()
 
     def track_validate(c: Config) -> None:
         call_order.append("validate")
 
-    async def track_run_worker() -> None:
-        call_order.append("run_worker")
+    async def track_run_keeper() -> None:
+        call_order.append("run_keeper")
 
     with (
         patch("main.load_config", return_value=config),
         patch("main.validate_pool_sizing") as mock_validate,
-        patch("main.run_worker", new_callable=AsyncMock) as mock_run_worker,
+        patch("main.run_keeper", new_callable=AsyncMock) as mock_run_keeper,
     ):
         mock_validate.side_effect = track_validate
-        mock_run_worker.side_effect = track_run_worker
+        mock_run_keeper.side_effect = track_run_keeper
 
-        asyncio.run(main._start_worker_service())
+        asyncio.run(main._start_keeper_service())
 
     assert call_order == [
         "validate",
-        "run_worker",
-    ], f"validate_pool_sizing must be called before run_worker; got {call_order}"
+        "run_keeper",
+    ], f"validate_pool_sizing must be called before run_keeper; got {call_order}"
 
 
 # ---------------------------------------------------------------------------

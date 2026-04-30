@@ -3,7 +3,7 @@
 """
 Integration test for APScheduler + KeyInventoryExporter end-to-end.
 
-Verifies that the background worker correctly registers export jobs with
+Verifies that the keeper correctly registers export jobs with
 the scheduler, that disabled exports produce no jobs, and that executing
 the export jobs creates NDJSON files on disk.
 
@@ -19,8 +19,8 @@ import pytest
 from apscheduler.triggers.interval import IntervalTrigger
 
 from src.config.schemas import Config
-from src.services.background_worker import run_worker
 from src.services.inventory_exporter import KeyInventoryExporter
+from src.services.keeper import run_keeper
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -59,7 +59,7 @@ def _make_config_with_export_disabled() -> Config:
 
     With ``KeyExportConfig(enabled=False)`` and default sub-settings
     (snapshot_interval_hours=0, inventory.enabled=False), no export
-    jobs should be registered by the worker.
+    jobs should be registered by the keeper.
     """
     return Config.model_validate(
         {
@@ -98,33 +98,33 @@ async def _mock_pool_acquire(conn: AsyncMock):
 
 @pytest.mark.asyncio
 async def test_scheduler_registers_snapshot_and_inventory_jobs():
-    """When ``run_worker()`` is called with both snapshot and inventory export
+    """When ``run_keeper()`` is called with both snapshot and inventory export
     enabled, the scheduler should contain both jobs with correct intervals."""
 
     cfg = _make_config_with_export_enabled()
 
     with (
-        patch("src.services.background_worker.load_config", return_value=cfg),
-        patch("src.services.background_worker.setup_logging"),
-        patch("src.services.background_worker._setup_directories"),
+        patch("src.services.keeper.load_config", return_value=cfg),
+        patch("src.services.keeper.setup_logging"),
+        patch("src.services.keeper._setup_directories"),
         patch(
-            "src.services.background_worker.database.init_db_pool",
+            "src.services.keeper.database.init_db_pool",
             new_callable=AsyncMock,
         ),
         patch(
-            "src.services.background_worker.database.close_db_pool",
+            "src.services.keeper.database.close_db_pool",
             new_callable=AsyncMock,
         ),
-        patch("src.services.background_worker.DatabaseManager") as mock_dm_cls,
-        patch("src.services.background_worker.HttpClientFactory") as mock_hcf_cls,
-        patch("src.services.background_worker.get_all_probes", return_value=[]),
-        patch("src.services.background_worker.get_all_syncers", return_value=[]),
+        patch("src.services.keeper.DatabaseManager") as mock_dm_cls,
+        patch("src.services.keeper.HttpClientFactory") as mock_hcf_cls,
+        patch("src.services.keeper.get_all_probes", return_value=[]),
+        patch("src.services.keeper.get_all_syncers", return_value=[]),
         patch(
-            "src.services.background_worker.run_sync_cycle",
+            "src.services.keeper.run_sync_cycle",
             new_callable=AsyncMock,
         ),
         patch(
-            "src.services.background_worker.AsyncIOScheduler",
+            "src.services.keeper.AsyncIOScheduler",
         ) as mock_scheduler_cls,
         patch(
             "asyncio.sleep",
@@ -153,8 +153,8 @@ async def test_scheduler_registers_snapshot_and_inventory_jobs():
         mock_scheduler_instance.print_jobs = MagicMock()
         mock_scheduler_cls.return_value = mock_scheduler_instance
 
-        # Run the worker (KeyboardInterrupt breaks the infinite loop)
-        await run_worker()
+        # Run the keeper (KeyboardInterrupt breaks the infinite loop)
+        await run_keeper()
 
         # Inspect all add_job calls recorded on the mock scheduler
         add_job_calls = mock_scheduler_instance.add_job.call_args_list
@@ -202,27 +202,27 @@ async def test_scheduler_no_jobs_when_export_disabled():
     cfg = _make_config_with_export_disabled()
 
     with (
-        patch("src.services.background_worker.load_config", return_value=cfg),
-        patch("src.services.background_worker.setup_logging"),
-        patch("src.services.background_worker._setup_directories"),
+        patch("src.services.keeper.load_config", return_value=cfg),
+        patch("src.services.keeper.setup_logging"),
+        patch("src.services.keeper._setup_directories"),
         patch(
-            "src.services.background_worker.database.init_db_pool",
+            "src.services.keeper.database.init_db_pool",
             new_callable=AsyncMock,
         ),
         patch(
-            "src.services.background_worker.database.close_db_pool",
+            "src.services.keeper.database.close_db_pool",
             new_callable=AsyncMock,
         ),
-        patch("src.services.background_worker.DatabaseManager") as mock_dm_cls,
-        patch("src.services.background_worker.HttpClientFactory") as mock_hcf_cls,
-        patch("src.services.background_worker.get_all_probes", return_value=[]),
-        patch("src.services.background_worker.get_all_syncers", return_value=[]),
+        patch("src.services.keeper.DatabaseManager") as mock_dm_cls,
+        patch("src.services.keeper.HttpClientFactory") as mock_hcf_cls,
+        patch("src.services.keeper.get_all_probes", return_value=[]),
+        patch("src.services.keeper.get_all_syncers", return_value=[]),
         patch(
-            "src.services.background_worker.run_sync_cycle",
+            "src.services.keeper.run_sync_cycle",
             new_callable=AsyncMock,
         ),
         patch(
-            "src.services.background_worker.AsyncIOScheduler",
+            "src.services.keeper.AsyncIOScheduler",
         ) as mock_scheduler_cls,
         patch(
             "asyncio.sleep",
@@ -251,7 +251,7 @@ async def test_scheduler_no_jobs_when_export_disabled():
         mock_scheduler_instance.print_jobs = MagicMock()
         mock_scheduler_cls.return_value = mock_scheduler_instance
 
-        await run_worker()
+        await run_keeper()
 
         add_job_calls = mock_scheduler_instance.add_job.call_args_list
 

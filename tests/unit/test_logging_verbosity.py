@@ -11,7 +11,8 @@ import pytest
 from src.config.schemas import DatabaseConfig, DatabaseRetryConfig
 from src.core.constants import ALL_MODELS_MARKER, ErrorReason
 from src.core.models import CheckResult
-from src.services.probes.key_probe import KeyProbe
+from src.services.gateway.gateway_cache import GatewayCache
+from src.services.key_probe import KeyProbe
 
 
 class TestGatewayCacheLoggingVerbosity:
@@ -47,7 +48,7 @@ class TestGatewayCacheLoggingVerbosity:
                 }
             ]
         )
-        with patch("src.services.gateway_cache.logger") as mock_logger:
+        with patch("src.services.gateway.gateway_cache.logger") as mock_logger:
             await cache.refresh_key_pool()
             # Both start and success messages should be at DEBUG level
             assert mock_logger.debug.call_count >= 2
@@ -78,7 +79,7 @@ class TestGatewayCacheLoggingVerbosity:
         mock_accessor.get_provider.return_value = mock_provider_config
         # Pre-populate a key in the pool with __ALL_MODELS__ marker
         cache._key_pool[f"openai:{ALL_MODELS_MARKER}"] = [(1, "sk-xxx")]
-        with patch("src.services.gateway_cache.logger") as mock_logger:
+        with patch("src.services.gateway.gateway_cache.logger") as mock_logger:
             await cache.remove_key_from_pool("openai", "gpt-4", 1)
             # Should log DEBUG about removing shared key
             mock_logger.info.assert_not_called()
@@ -102,7 +103,7 @@ class TestKeyProbeLoggingVerbosity:
     def mock_dependencies(self):
         """Create mocked dependencies for KeyProbe."""
         mock_accessor = Mock()
-        mock_accessor.get_worker_concurrency.return_value = 10
+        mock_accessor.get_keeper_concurrency.return_value = 10
         mock_accessor.get_database_config.return_value = DatabaseConfig(
             password="test", retry=DatabaseRetryConfig()
         )
@@ -145,7 +146,7 @@ class TestKeyProbeLoggingVerbosity:
         mock_client = AsyncMock()
         mock_client_factory.get_client_for_provider.return_value = mock_client
         # Mock the provider instance to return a fatal error
-        with patch("src.services.probes.key_probe.get_provider") as mock_get_provider:
+        with patch("src.services.key_probe.get_provider") as mock_get_provider:
             mock_provider_instance = Mock()
             mock_provider_instance.check = AsyncMock(
                 return_value=CheckResult.fail(ErrorReason.INVALID_KEY, "Invalid key")
@@ -164,7 +165,7 @@ class TestKeyProbeLoggingVerbosity:
                 "failing_since": None,
                 "next_check_time": now - timedelta(minutes=5),  # slightly overdue
             }
-            with patch("src.services.probes.key_probe.logger") as mock_logger:
+            with patch("src.services.key_probe.logger") as mock_logger:
                 result = await probe._check_resource(resource)
                 # Verify that the fatal error was logged at DEBUG level
                 fatal_debug_found = any(

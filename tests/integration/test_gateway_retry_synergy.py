@@ -56,7 +56,7 @@ async def test_retry_synergy_server_error_then_fatal_then_server_exhaustion():
         assume policy is 2) -> key_error_attempts becomes 2.
     Assert exactly 4 requests made, correct transitions occur, and limits are respected.
     """
-    from src.services.gateway_service import _handle_buffered_retryable_request
+    from src.services.gateway.gateway_service import _handle_buffered_retryable_request
 
     req = make_mock_request()
     provider = MagicMock()

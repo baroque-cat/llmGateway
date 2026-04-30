@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from src.core.constants import ALL_MODELS_MARKER
-from src.services.gateway_cache import GatewayCache
+from src.services.gateway.gateway_cache import GatewayCache
 
 
 def test_constants_defined():

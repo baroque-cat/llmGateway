@@ -10,13 +10,13 @@ from src.config.schemas import (
     DatabasePoolConfig,
     GatewayConfig,
     HealthPolicyConfig,
+    KeeperConfig,
     LoggingConfig,
     MetricsConfig,
     ModelInfo,
     ProviderConfig,
     ProxyConfig,
     TimeoutConfig,
-    WorkerConfig,
 )
 
 
@@ -53,13 +53,13 @@ class ConfigAccessor:
         """
         return self._config.database.to_dsn()
 
-    def get_worker_config(self) -> WorkerConfig:
-        """Returns the complete background worker configuration object."""
-        return self._config.worker
+    def get_keeper_config(self) -> KeeperConfig:
+        """Returns the complete keeper configuration object."""
+        return self._config.keeper
 
-    def get_worker_concurrency(self) -> int:
-        """Returns the maximum number of concurrent provider checks for the worker."""
-        return self._config.worker.max_concurrent_providers
+    def get_keeper_concurrency(self) -> int:
+        """Returns the maximum number of concurrent provider checks for the keeper."""
+        return self._config.keeper.max_concurrent_providers
 
     def get_logging_config(self) -> LoggingConfig:
         """Returns the complete logging configuration object."""

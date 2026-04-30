@@ -1,8 +1,8 @@
-"""Tests for APScheduler export job registration in background_worker.run_worker().
+"""Tests for APScheduler export job registration in keeper.run_keeper().
 
-Group 8 from test-plan.md: Services — APScheduler jobs (background_worker)
+Group 8 from test-plan.md: Services — APScheduler jobs (keeper)
 
-Verifies that run_worker() correctly registers snapshot and inventory export
+Verifies that run_keeper() correctly registers snapshot and inventory export
 jobs on the APScheduler based on provider key_export configuration.
 """
 
@@ -44,13 +44,13 @@ def _make_provider(
     )
 
 
-async def _run_worker_capture_scheduler(
+async def _run_keeper_capture_scheduler(
     providers: dict[str, ProviderConfig],
 ) -> MagicMock:
-    """Run run_worker() with all deps mocked; return the scheduler mock for inspection.
+    """Run run_keeper() with all deps mocked; return the scheduler mock for inspection.
 
     Mocks all infrastructure (config, DB, HTTP, probes, syncers) so that
-    run_worker() reaches the export-job registration section.  Breaks execution
+    run_keeper() reaches the export-job registration section.  Breaks execution
     at scheduler.start() via KeyboardInterrupt to avoid the infinite sleep loop.
     """
     mock_accessor = MagicMock()
@@ -84,55 +84,55 @@ async def _run_worker_capture_scheduler(
 
     with (
         patch(
-            "src.services.background_worker.load_config",
+            "src.services.keeper.load_config",
             return_value=MagicMock(),
         ),
         patch(
-            "src.services.background_worker.ConfigAccessor",
+            "src.services.keeper.ConfigAccessor",
             return_value=mock_accessor,
         ),
-        patch("src.services.background_worker.setup_logging"),
-        patch("src.services.background_worker._setup_directories"),
+        patch("src.services.keeper.setup_logging"),
+        patch("src.services.keeper._setup_directories"),
         patch(
-            "src.services.background_worker.database.init_db_pool",
+            "src.services.keeper.database.init_db_pool",
             new_callable=AsyncMock,
         ),
         patch(
-            "src.services.background_worker.database.close_db_pool",
+            "src.services.keeper.database.close_db_pool",
             new_callable=AsyncMock,
         ),
         patch(
-            "src.services.background_worker.DatabaseManager",
+            "src.services.keeper.DatabaseManager",
             return_value=mock_db_manager,
         ),
         patch(
-            "src.services.background_worker.HttpClientFactory",
+            "src.services.keeper.HttpClientFactory",
             return_value=mock_client_factory,
         ),
         patch(
-            "src.services.background_worker.get_all_syncers",
+            "src.services.keeper.get_all_syncers",
             return_value=[],
         ),
         patch(
-            "src.services.background_worker.run_sync_cycle",
+            "src.services.keeper.run_sync_cycle",
             new_callable=AsyncMock,
         ),
         patch(
-            "src.services.background_worker.get_all_probes",
+            "src.services.keeper.get_all_probes",
             return_value=[],
         ),
         patch(
-            "src.services.background_worker.AsyncIOScheduler",
+            "src.services.keeper.AsyncIOScheduler",
             return_value=mock_scheduler,
         ),
         patch(
-            "src.services.background_worker.KeyInventoryExporter",
+            "src.services.keeper.KeyInventoryExporter",
             return_value=mock_exporter,
         ),
     ):
-        from src.services.background_worker import run_worker
+        from src.services.keeper import run_keeper
 
-        await run_worker()
+        await run_keeper()
 
     return mock_scheduler
 
@@ -154,7 +154,7 @@ def _export_add_job_calls(scheduler: MagicMock) -> list:
 async def test_snapshot_job_added_when_interval_gt_zero():
     """snapshot_interval_hours=24 → scheduler.add_job with IntervalTrigger(hours=24)."""
     providers = {"openai": _make_provider(snapshot_interval_hours=24)}
-    scheduler = await _run_worker_capture_scheduler(providers)
+    scheduler = await _run_keeper_capture_scheduler(providers)
 
     export_calls = _export_add_job_calls(scheduler)
     assert len(export_calls) == 1
@@ -170,7 +170,7 @@ async def test_snapshot_job_added_when_interval_gt_zero():
 async def test_no_snapshot_job_when_interval_zero():
     """snapshot_interval_hours=0 → no snapshot job added."""
     providers = {"openai": _make_provider(snapshot_interval_hours=0)}
-    scheduler = await _run_worker_capture_scheduler(providers)
+    scheduler = await _run_keeper_capture_scheduler(providers)
 
     export_calls = _export_add_job_calls(scheduler)
     snapshot_calls = [
@@ -189,7 +189,7 @@ async def test_inventory_job_added_when_enabled():
             inventory_statuses=[Status.VALID],
         )
     }
-    scheduler = await _run_worker_capture_scheduler(providers)
+    scheduler = await _run_keeper_capture_scheduler(providers)
 
     export_calls = _export_add_job_calls(scheduler)
     inventory_calls = [
@@ -207,7 +207,7 @@ async def test_inventory_job_added_when_enabled():
 async def test_no_inventory_job_when_disabled():
     """inventory.enabled=False → no inventory job added."""
     providers = {"openai": _make_provider(inventory_enabled=False)}
-    scheduler = await _run_worker_capture_scheduler(providers)
+    scheduler = await _run_keeper_capture_scheduler(providers)
 
     export_calls = _export_add_job_calls(scheduler)
     inventory_calls = [
@@ -227,7 +227,7 @@ async def test_both_jobs_added_when_both_enabled():
             inventory_statuses=[Status.VALID],
         )
     }
-    scheduler = await _run_worker_capture_scheduler(providers)
+    scheduler = await _run_keeper_capture_scheduler(providers)
 
     export_calls = _export_add_job_calls(scheduler)
     assert len(export_calls) == 2
@@ -248,7 +248,7 @@ async def test_export_jobs_not_added_for_disabled_provider():
             inventory_statuses=[Status.VALID],
         )
     }
-    scheduler = await _run_worker_capture_scheduler(providers)
+    scheduler = await _run_keeper_capture_scheduler(providers)
 
     export_calls = _export_add_job_calls(scheduler)
     assert len(export_calls) == 0
@@ -258,7 +258,7 @@ async def test_export_jobs_not_added_for_disabled_provider():
 async def test_snapshot_job_id_includes_provider_name():
     """Snapshot job_id format includes provider name for uniqueness."""
     providers = {"my_special_provider": _make_provider(snapshot_interval_hours=12)}
-    scheduler = await _run_worker_capture_scheduler(providers)
+    scheduler = await _run_keeper_capture_scheduler(providers)
 
     export_calls = _export_add_job_calls(scheduler)
     assert len(export_calls) == 1
@@ -275,7 +275,7 @@ async def test_inventory_job_id_includes_provider_name():
             inventory_statuses=[Status.VALID, Status.NO_QUOTA],
         )
     }
-    scheduler = await _run_worker_capture_scheduler(providers)
+    scheduler = await _run_keeper_capture_scheduler(providers)
 
     export_calls = _export_add_job_calls(scheduler)
     inventory_calls = [

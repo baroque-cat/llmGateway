@@ -8,7 +8,7 @@ from src.config.schemas import ModelInfo, ProviderConfig
 from src.core.accessor import ConfigAccessor
 from src.core.constants import ALL_MODELS_MARKER
 from src.db.database import DatabaseManager
-from src.services.gateway_cache import GatewayCache
+from src.services.gateway.gateway_cache import GatewayCache
 
 
 @pytest.mark.asyncio
