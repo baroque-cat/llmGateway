@@ -248,6 +248,38 @@ class AdaptiveBatchingConfig(BaseModel):
         )
 
 
+class PurgeConfig(BaseModel):
+    """
+    Configuration for purging stopped keys from the database.
+
+    Controls automatic removal of API keys that have been in a permanently
+    stopped state (failing for an extended period).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Number of days after which a permanently stopped key is purged.
+    after_days: int = Field(default=180, ge=1)
+
+
+class VacuumPolicyConfig(BaseModel):
+    """
+    Configuration for the smart VACUUM policy on database tables.
+
+    Controls the interval-based conditional VACUUM ANALYZE that replaces
+    the old ritual weekly VACUUM. VACUUM is triggered only when dead tuple
+    ratio exceeds the configured threshold.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Interval between vacuum health checks, in minutes.
+    interval_minutes: int = Field(default=60, ge=1)
+    # Dead tuple ratio threshold above which VACUUM ANALYZE is triggered.
+    # Must be strictly between 0.0 and 1.0.
+    dead_tuple_ratio_threshold: float = Field(default=0.3, gt=0.0, lt=1.0)
+
+
 class HealthPolicyConfig(BaseModel):
     """
     Defines the policy for the background worker's health checks.
@@ -301,6 +333,10 @@ class HealthPolicyConfig(BaseModel):
     # Hard delay between verification attempts (seconds). Should be >60 seconds to survive minute-based rate limits.
     verification_delay_sec: int = Field(default=65, ge=60)
 
+    # --- Purge Configuration ---
+    # Controls automatic removal of keys in the permanently stopped state.
+    purge: PurgeConfig = Field(default_factory=PurgeConfig)
+
     @model_validator(mode="after")
     def check_quarantine_logic(self) -> "HealthPolicyConfig":
         """Enforce quarantine_after_days <= stop_checking_after_days."""
@@ -331,6 +367,18 @@ class HealthPolicyConfig(BaseModel):
             raise ValueError(
                 f"quarantine_recheck_interval_days ({self.quarantine_recheck_interval_days}) "
                 f"must be less than stop_checking_after_days ({self.stop_checking_after_days})"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def check_purge_after_days_minimum(self) -> "HealthPolicyConfig":
+        """Validate purge.after_days >= stop_checking_after_days + amnesty_threshold_days + 7."""
+        min_purge = self.stop_checking_after_days + self.amnesty_threshold_days + 7
+        if self.purge.after_days < min_purge:
+            raise ValueError(
+                f"purge.after_days ({self.purge.after_days}) must be >= "
+                f"stop_checking_after_days ({self.stop_checking_after_days}) + "
+                f"amnesty_threshold_days ({self.amnesty_threshold_days}) + 7 = {min_purge}"
             )
         return self
 
@@ -615,6 +663,8 @@ class DatabaseConfig(BaseModel):
     retry: DatabaseRetryConfig = Field(default_factory=DatabaseRetryConfig)
     # PostgreSQL connection pool settings.
     pool: DatabasePoolConfig = Field(default_factory=DatabasePoolConfig)
+    # Smart vacuum policy for conditional VACUUM ANALYZE based on dead tuple metrics.
+    vacuum_policy: VacuumPolicyConfig = Field(default_factory=VacuumPolicyConfig)
 
     def to_dsn(self) -> str:
         """

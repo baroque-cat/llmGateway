@@ -5,6 +5,7 @@
 from datetime import UTC, datetime, timedelta
 
 from src.core.constants import ErrorReason
+from src.core.models import DatabaseTableHealth
 
 
 def compute_next_check_time(
@@ -88,3 +89,23 @@ def compute_next_check_time(
 
     # UNKNOWN, BAD_REQUEST, and everything else
     return now + timedelta(hours=on_other_error_hr)
+
+
+def should_vacuum(health: DatabaseTableHealth, threshold: float) -> bool:
+    """Determine whether a table should be vacuumed based on dead tuple ratio.
+
+    A table qualifies for ``VACUUM ANALYZE`` when its ``dead_tuple_ratio``
+    exceeds *threshold* **and** the absolute number of dead tuples is above
+    the minimum guard (100 rows).  The absolute guard prevents vacuuming
+    tables with trivially few dead rows (e.g. a 3-row ``proxies`` table
+    where one row is dead → 33% ratio).
+
+    Args:
+        health: Table health statistics from ``pg_stat_user_tables``.
+        threshold: Dead tuple ratio above which vacuum is triggered
+            (e.g. 0.3 means 30 %).
+
+    Returns:
+        ``True`` if the table should be vacuumed, ``False`` otherwise.
+    """
+    return health.dead_tuple_ratio > threshold and health.n_dead_tup > 100

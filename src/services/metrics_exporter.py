@@ -3,6 +3,11 @@ Prometheus metrics exporter service for the LLM Gateway.
 
 This module provides a service to collect and format key status metrics
 from the database in a format compatible with Prometheus.
+
+Additional metrics are defined in:
+- ``src/services/db_maintainer.py``: ``llm_gateway_db_dead_tuples``,
+  ``llm_gateway_db_dead_ratio``, ``llm_gateway_db_vacuum_count``,
+  ``llm_gateway_purged_keys_total``
 """
 
 import logging

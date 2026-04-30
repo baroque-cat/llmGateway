@@ -12,13 +12,14 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, TypedDict
 
 import httpx
 
 # Import the necessary data models and dependencies for type hints.
 from src.core.accessor import ConfigAccessor
-from src.core.models import CheckResult, RequestDetails
+from src.core.models import CheckResult, DatabaseTableHealth, RequestDetails
 
 if TYPE_CHECKING:
     from src.db.database import DatabaseManager
@@ -246,5 +247,105 @@ class IKeyInventoryExporter(ABC):
             provider_name: The unique instance name of the provider.
             db_manager: The database manager for executing queries.
             statuses: List of status strings to export as separate groups.
+        """
+        raise NotImplementedError
+
+
+class IKeyPurger(ABC):
+    """
+    Contract for purging stopped API keys and deleted provider data.
+
+    Implementations are responsible for safely deleting keys that have been
+    in a permanently stopped state, and for removing all key data when a
+    provider is removed from configuration.
+    """
+
+    @abstractmethod
+    async def purge_provider(
+        self, provider_id: int, db_manager: DatabaseManager
+    ) -> int:
+        """Delete all key data for a provider that was removed from configuration.
+
+        Args:
+            provider_id: The database ID of the provider to purge.
+            db_manager: The database manager for executing queries.
+
+        Returns:
+            The number of API keys deleted (via CASCADE).
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    async def purge_stopped_keys(
+        self,
+        provider_name: str,
+        provider_id: int,
+        cutoff: datetime,
+        db_manager: DatabaseManager,
+    ) -> int:
+        """Delete keys that have been in a stopped state beyond the cutoff.
+
+        A key is considered stopped when its ``failing_since`` is before
+        *cutoff* and its ``next_check_time`` is far in the future
+        (more than 300 days from now), indicating the system has given up
+        on re-checking it.
+
+        Args:
+            provider_name: The unique instance name of the provider.
+            provider_id: The database ID of the provider.
+            cutoff: Keys with ``failing_since`` before this UTC datetime
+                are eligible for deletion.
+            db_manager: The database manager for executing queries.
+
+        Returns:
+            The number of API keys deleted.
+        """
+        raise NotImplementedError
+
+
+class IDatabaseMaintainer(ABC):
+    """
+    Contract for database maintenance operations based on health metrics.
+
+    Implementations query ``pg_stat_user_tables`` and perform conditional
+    ``VACUUM ANALYZE`` operations on tables whose dead-tuple ratio exceeds
+    a configured threshold.
+    """
+
+    @abstractmethod
+    async def get_table_health(
+        self, db_manager: DatabaseManager
+    ) -> list[DatabaseTableHealth]:
+        """Retrieve health statistics for all user tables.
+
+        Queries ``pg_stat_user_tables`` and returns a list of
+        ``DatabaseTableHealth`` records, one per table.
+
+        Args:
+            db_manager: The database manager for executing queries.
+
+        Returns:
+            A list of health records.  May be empty if the database
+            version does not support ``pg_stat_user_tables`` or if
+            the user lacks the required permissions.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    async def run_conditional_vacuum(
+        self, tables: list[DatabaseTableHealth], db_manager: DatabaseManager
+    ) -> int:
+        """Run ``VACUUM ANALYZE`` on tables that exceed the dead tuple threshold.
+
+        Iterates over *tables*, calls ``should_vacuum()`` for each one
+        against the configured threshold, and issues ``VACUUM ANALYZE``
+        for qualifying tables.
+
+        Args:
+            tables: Health records from ``get_table_health()``.
+            db_manager: The database manager for executing queries.
+
+        Returns:
+            The number of tables that were vacuumed.
         """
         raise NotImplementedError

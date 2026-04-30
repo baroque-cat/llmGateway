@@ -50,6 +50,11 @@ database:
     base_delay_sec: 1.0 # Delay before first retry in seconds
     backoff_factor: 2.0 # Exponential backoff multiplier (>= 1.0)
     jitter: true # Add random ±50% jitter to prevent thundering herd
+  # Smart vacuum policy — replaces the old ritual weekly VACUUM
+  # with interval-based conditional VACUUM ANALYZE.
+  vacuum_policy:
+    interval_minutes: 60 # Interval between vacuum health checks (minutes)
+    dead_tuple_ratio_threshold: 0.3 # Trigger VACUUM when dead ratio exceeds 30%
 
 # --- PROVIDER SETTINGS ---
 providers:
@@ -157,6 +162,9 @@ providers:
       # How many times to re-verify a key after a retryable error (e.g., rate limit).
       verification_attempts: 3
       verification_delay_sec: 65
+      # Purge Configuration — automatic removal of permanently stopped keys
+      purge:
+        after_days: 180
 
     # --- Key Export Configuration ---
     # Export current key state to NDJSON files.

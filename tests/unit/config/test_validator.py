@@ -29,6 +29,7 @@ from src.config.schemas import (
     HealthPolicyConfig,
     ProviderConfig,
     ProxyConfig,
+    PurgeConfig,
     RetryOnErrorConfig,
     TimeoutConfig,
 )
@@ -1045,3 +1046,53 @@ def test_keys_path_attribute_does_not_exist():
 
     provider = ProviderConfig(provider_type="gemini")
     assert not hasattr(provider, "keys_path")
+
+
+# ==============================================================================
+# M5..M7: HealthPolicyConfig — purge default factory and YAML override
+# ==============================================================================
+
+
+def test_health_policy_purge_default_factory():
+    """
+    M5: HealthPolicyConfig() → purge is a PurgeConfig instance with after_days=180.
+    """
+    policy = HealthPolicyConfig()
+    assert isinstance(policy.purge, PurgeConfig)
+    assert policy.purge.after_days == 180
+
+
+def test_health_policy_purge_override_via_yaml():
+    """
+    M6: YAML with worker_health_policy.purge.after_days: 365 → purge.after_days == 365.
+    """
+    mock_yaml_content = """providers:
+  test_provider:
+    enabled: true
+    provider_type: "openai_like"
+    api_base_url: "https://api.test.com/v1"
+    access_control:
+      gateway_access_token: "test_token"
+    worker_health_policy:
+      purge:
+        after_days: 365
+"""
+
+    with (
+        patch("os.path.exists", return_value=True),
+        patch("builtins.open", mock_open(read_data=mock_yaml_content)),
+    ):
+        loader = ConfigLoader(path="dummy.yaml")
+        config = loader.load()
+
+        provider = config.providers["test_provider"]
+        assert provider.worker_health_policy.purge.after_days == 365
+
+
+def test_health_policy_purge_always_present_never_none():
+    """
+    M7: HealthPolicyConfig() → purge is not None and is an instance of PurgeConfig.
+    """
+    policy = HealthPolicyConfig()
+    assert policy.purge is not None
+    assert isinstance(policy.purge, PurgeConfig)

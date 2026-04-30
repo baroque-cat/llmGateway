@@ -18,7 +18,12 @@ import pytest
 from pydantic import ValidationError
 
 from src.config.loader import ConfigLoader
-from src.config.schemas import Config, DatabasePoolConfig
+from src.config.schemas import (
+    Config,
+    DatabasePoolConfig,
+    DatabaseConfig,
+    VacuumPolicyConfig,
+)
 
 # ==============================================================================
 # UT-P01..UT-P04: Default values and basic construction
@@ -209,3 +214,58 @@ class TestDatabasePoolConfigSecurity:
         assert config.database.pool.min_size == 3
         assert config.database.pool.max_size == 10
         # unknown_field is silently dropped — not stored, not rejected
+
+
+# ==============================================================================
+# M8..M11: DatabaseConfig — vacuum_policy default factory and YAML override
+# ==============================================================================
+
+
+def test_database_config_vacuum_policy_default_factory():
+    """M8: DatabaseConfig() → vacuum_policy is VacuumPolicyConfig with defaults."""
+    db_config = DatabaseConfig()
+    assert isinstance(db_config.vacuum_policy, VacuumPolicyConfig)
+    assert db_config.vacuum_policy.interval_minutes == 60
+    assert db_config.vacuum_policy.dead_tuple_ratio_threshold == 0.3
+
+
+def test_database_config_vacuum_policy_always_present():
+    """M9: vacuum_policy is not None and is an instance of VacuumPolicyConfig."""
+    db_config = DatabaseConfig()
+    assert db_config.vacuum_policy is not None
+    assert isinstance(db_config.vacuum_policy, VacuumPolicyConfig)
+
+
+def test_database_config_vacuum_policy_yaml_override():
+    """M10: YAML with database.vacuum_policy.interval_minutes: 30 → interval_minutes == 30."""
+    yaml_content = """database:
+  host: localhost
+  password: test_password
+  vacuum_policy:
+    interval_minutes: 30
+"""
+    with (
+        patch("os.path.exists", return_value=True),
+        patch("builtins.open", mock_open(read_data=yaml_content)),
+    ):
+        loader = ConfigLoader(path="dummy.yaml")
+        config = loader.load()
+
+        assert config.database.vacuum_policy.interval_minutes == 30
+
+
+def test_database_config_vacuum_policy_yaml_without_section():
+    """M11: YAML without vacuum_policy section → defaults apply (60, 0.3)."""
+    yaml_content = """database:
+  host: localhost
+  password: test_password
+"""
+    with (
+        patch("os.path.exists", return_value=True),
+        patch("builtins.open", mock_open(read_data=yaml_content)),
+    ):
+        loader = ConfigLoader(path="dummy.yaml")
+        config = loader.load()
+
+        assert config.database.vacuum_policy.interval_minutes == 60
+        assert config.database.vacuum_policy.dead_tuple_ratio_threshold == 0.3

@@ -48,6 +48,12 @@ def get_default_config() -> dict[str, Any]:
                 "backoff_factor": 2.0,
                 "jitter": True,
             },
+            # Smart vacuum policy — replaces the old ritual weekly VACUUM
+            # with interval-based conditional VACUUM ANALYZE.
+            "vacuum_policy": {
+                "interval_minutes": 60,
+                "dead_tuple_ratio_threshold": 0.3,
+            },
         },
         # --- PROVIDER-SPECIFIC SETTINGS ---
         # This section serves as a generic template for any new provider instance.
@@ -119,6 +125,10 @@ def get_default_config() -> dict[str, Any]:
                     # Verification Loop Configuration
                     "verification_attempts": 3,
                     "verification_delay_sec": 65,
+                    # Purge Configuration — automatic removal of permanently stopped keys
+                    "purge": {
+                        "after_days": 180,
+                    },
                 },
                 # Configuration for parsing error responses to refine error classification
                 # This enables distinguishing between different error types with the same HTTP status code

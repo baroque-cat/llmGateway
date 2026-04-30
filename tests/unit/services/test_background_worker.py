@@ -10,6 +10,7 @@ from src.config.schemas import (
 )
 from src.core.constants import ErrorReason
 from src.core.models import CheckResult
+from src.services.background_worker import run_worker
 from src.services.probes.key_probe import KeyProbe
 
 
@@ -230,3 +231,145 @@ def test_run_sync_cycle_uses_computed_path():
     provider_name = "gemini-pro-home"
     expected = os.path.join("data", provider_name, "raw")
     assert expected == "data/gemini-pro-home/raw"
+
+
+# ---------------------------------------------------------------------------
+# M18-M20: Scheduler job registration tests
+# ---------------------------------------------------------------------------
+
+
+def _make_scheduler_mocks() -> tuple[MagicMock, MagicMock, MagicMock]:
+    """Create the common mock objects for run_worker() scheduler tests.
+
+    Returns (mock_scheduler, mock_accessor, mock_db_manager).
+    """
+    mock_scheduler = MagicMock()
+    mock_scheduler.start = MagicMock()
+    mock_scheduler.running = True
+    mock_scheduler.shutdown = MagicMock()
+    mock_scheduler.print_jobs = MagicMock()
+
+    mock_accessor = MagicMock()
+    mock_accessor.get_all_providers.return_value = {}
+    mock_accessor.get_enabled_providers.return_value = {}
+    mock_accessor.get_database_dsn.return_value = (
+        "postgresql://test:test@localhost:5432/testdb"
+    )
+    mock_accessor.get_pool_config.return_value = MagicMock(min_size=1, max_size=5)
+    mock_db_config = MagicMock()
+    mock_db_config.vacuum_policy.interval_minutes = 60
+    mock_accessor.get_database_config.return_value = mock_db_config
+
+    mock_db_manager = MagicMock()
+    mock_db_manager.initialize_schema = AsyncMock()
+    mock_db_manager.providers.sync = AsyncMock()
+
+    return mock_scheduler, mock_accessor, mock_db_manager
+
+
+async def _run_worker_with_mocks(mock_scheduler, mock_accessor, mock_db_manager):
+    """Patch all dependencies and run run_worker(), returning the mock scheduler."""
+    mock_hcf = MagicMock()
+    mock_hcf.return_value.close_all = AsyncMock()
+
+    with (
+        patch(
+            "src.services.background_worker.AsyncIOScheduler",
+            return_value=mock_scheduler,
+        ),
+        patch("src.services.background_worker.load_config", return_value=MagicMock()),
+        patch(
+            "src.services.background_worker.ConfigAccessor",
+            return_value=mock_accessor,
+        ),
+        patch("src.services.background_worker.setup_logging"),
+        patch("src.services.background_worker._setup_directories"),
+        patch(
+            "src.services.background_worker.database.init_db_pool",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "src.services.background_worker.DatabaseManager",
+            return_value=mock_db_manager,
+        ),
+        patch("src.services.background_worker.HttpClientFactory", mock_hcf),
+        patch("src.services.background_worker.run_sync_cycle", new_callable=AsyncMock),
+        patch("src.services.background_worker.get_all_probes", return_value=[]),
+        patch("src.services.background_worker.get_all_syncers", return_value=[]),
+        patch("src.services.background_worker.KeyInventoryExporter"),
+        patch(
+            "src.services.background_worker.database.close_db_pool",
+            new_callable=AsyncMock,
+        ),
+        patch("asyncio.sleep", new_callable=AsyncMock, side_effect=KeyboardInterrupt),
+    ):
+        await run_worker()
+
+    return mock_scheduler
+
+
+# --- M18 ---
+
+
+@pytest.mark.asyncio
+async def test_no_run_periodic_vacuum_job_registered() -> None:
+    """M18: 'run_periodic_vacuum' is NOT in scheduler jobs after worker setup."""
+    mock_scheduler, mock_accessor, mock_db_manager = _make_scheduler_mocks()
+    scheduler = await _run_worker_with_mocks(
+        mock_scheduler, mock_accessor, mock_db_manager
+    )
+
+    # Verify no job with id "run_periodic_vacuum" was added
+    for call in scheduler.add_job.call_args_list:
+        job_id = call[1].get("id")
+        assert (
+            job_id != "run_periodic_vacuum"
+        ), "run_periodic_vacuum job should NOT be registered"
+
+
+# --- M19 ---
+
+
+@pytest.mark.asyncio
+async def test_key_purge_cron_job_registered() -> None:
+    """M19: Worker registers cron job 'key_purge' with day_of_week='sun', hour=4, minute=0."""
+    mock_scheduler, mock_accessor, mock_db_manager = _make_scheduler_mocks()
+    scheduler = await _run_worker_with_mocks(
+        mock_scheduler, mock_accessor, mock_db_manager
+    )
+
+    # Find the key_purge job among add_job calls
+    key_purge_call = None
+    for call in scheduler.add_job.call_args_list:
+        if call[1].get("id") == "key_purge":
+            key_purge_call = call
+            break
+
+    assert key_purge_call is not None, "key_purge job should be registered"
+    kwargs = key_purge_call[1]
+    assert kwargs["day_of_week"] == "sun"
+    assert kwargs["hour"] == 4
+    assert kwargs["minute"] == 0
+
+
+# --- M20 ---
+
+
+@pytest.mark.asyncio
+async def test_smart_vacuum_interval_job_registered() -> None:
+    """M20: Worker registers interval job 'smart_vacuum' with minutes=60."""
+    mock_scheduler, mock_accessor, mock_db_manager = _make_scheduler_mocks()
+    scheduler = await _run_worker_with_mocks(
+        mock_scheduler, mock_accessor, mock_db_manager
+    )
+
+    # Find the smart_vacuum job among add_job calls
+    smart_vacuum_call = None
+    for call in scheduler.add_job.call_args_list:
+        if call[1].get("id") == "smart_vacuum":
+            smart_vacuum_call = call
+            break
+
+    assert smart_vacuum_call is not None, "smart_vacuum job should be registered"
+    kwargs = smart_vacuum_call[1]
+    assert kwargs["minutes"] == 60

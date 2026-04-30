@@ -1,5 +1,7 @@
 # src/db/database.py
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import random
@@ -11,7 +13,8 @@ from asyncpg import Pool
 
 from src.core.accessor import ConfigAccessor
 from src.core.constants import ALL_MODELS_MARKER, Status
-from src.core.models import CheckResult
+from src.core.interfaces import IKeyPurger
+from src.core.models import CheckResult, DatabaseTableHealth
 
 
 class KeyToCheck(TypedDict):
@@ -174,17 +177,30 @@ class ProviderRepository:
     Manages data access for the 'providers' table.
     """
 
-    def __init__(self, pool: Pool):
+    def __init__(self, pool: Pool, key_purger: IKeyPurger):
         self._pool = pool
+        self._key_purger = key_purger
 
-    async def sync(self, provider_names_from_config: list[str]) -> None:
-        """Ensures the providers table is in sync with the configuration."""
+    async def sync(
+        self,
+        provider_names_from_config: list[str],
+        db_manager: DatabaseManager,
+    ) -> None:
+        """Ensures the providers table is in sync with the configuration.
+
+        Uses ``KeyPurger.purge_provider()`` for deletion so that the purge
+        can emit metrics and follow the same code path as scheduled purges.
+        """
         async with self._pool.acquire() as conn, conn.transaction():
-            rows = await conn.fetch("SELECT name FROM providers")
-            providers_in_db = {row["name"] for row in rows}
+            rows = await conn.fetch("SELECT name, id FROM providers")
+            providers_in_db = {row["name"]: row["id"] for row in rows}
 
-            new_providers = set(provider_names_from_config) - providers_in_db
-            obsolete_providers = providers_in_db - set(provider_names_from_config)
+            new_providers = set(provider_names_from_config) - set(
+                providers_in_db.keys()
+            )
+            obsolete_providers = set(providers_in_db.keys()) - set(
+                provider_names_from_config
+            )
 
             if new_providers:
                 to_insert = [(name,) for name in new_providers]
@@ -192,20 +208,23 @@ class ProviderRepository:
                     "providers", records=to_insert, columns=["name"]
                 )
                 logger.info(
-                    f"SYNC: Added {len(new_providers)} new providers to the database: {new_providers}"
+                    "SYNC: Added %d new providers to the database: %s",
+                    len(new_providers),
+                    new_providers,
                 )
 
             if obsolete_providers:
-                # Delete obsolete providers. CASCADE will automatically remove
-                # all associated api_keys and key_model_status records.
-                placeholders = ", ".join(
-                    f"${i + 1}" for i in range(len(obsolete_providers))
-                )
-                query = f"DELETE FROM providers WHERE name IN ({placeholders})"
-                await conn.execute(query, *list(obsolete_providers))
-                logger.info(
-                    f"SYNC: Removed {len(obsolete_providers)} obsolete providers from the database: {obsolete_providers}"
-                )
+                for name in obsolete_providers:
+                    provider_id = providers_in_db[name]
+                    deleted = await self._key_purger.purge_provider(
+                        provider_id, db_manager
+                    )
+                    logger.info(
+                        "SYNC: Removed provider '%s' (id=%d) — %d keys deleted.",
+                        name,
+                        provider_id,
+                        deleted,
+                    )
 
     async def get_id_map(self) -> dict[str, int]:
         """Fetches a mapping of all provider names to their database IDs."""
@@ -616,8 +635,11 @@ class DatabaseManager:
     """
 
     def __init__(self, accessor: ConfigAccessor):
+        from src.services.key_purger import KeyPurger
+
         pool = get_pool()
-        self.providers = ProviderRepository(pool)
+        self._key_purger = KeyPurger()
+        self.providers = ProviderRepository(pool, self._key_purger)
         self.keys = KeyRepository(pool, accessor)
         self.proxies = ProxyRepository(pool)
 
@@ -684,11 +706,52 @@ class DatabaseManager:
                 logger.debug(f"Temporary error while checking schema: {e}. Retrying...")
                 await asyncio.sleep(2)
 
-    async def run_vacuum(self) -> None:
-        """Executes the VACUUM command to optimize the database."""
-        pool = get_pool()
-        async with pool.acquire() as conn:
-            logger.info("MAINTENANCE: Starting database VACUUM operation...")
-            # Using non-transactional block for VACUUM
-            await conn.execute("VACUUM;")
-            logger.info("MAINTENANCE: Database VACUUM completed successfully.")
+    async def get_table_health(self) -> list[DatabaseTableHealth]:
+        """Retrieve health statistics for all public user tables.
+
+        Queries ``pg_stat_user_tables`` to collect live/dead tuple counts,
+        last vacuum/analyze timestamps, and the dead tuple ratio for every
+        user table in the ``public`` schema.  The dead tuple ratio is
+        computed in SQL with a division-by-zero guard.
+
+        Returns:
+            A list of ``DatabaseTableHealth`` records, one per table.
+            Returns an empty list if ``pg_stat_user_tables`` is inaccessible
+            (old PostgreSQL, insufficient privileges).
+        """
+        try:
+            pool = get_pool()
+            async with pool.acquire() as conn:
+                rows = await conn.fetch("""
+                    SELECT
+                        schemaname || '.' || relname AS table_name,
+                        n_dead_tup::bigint AS n_dead_tup,
+                        n_live_tup::bigint AS n_live_tup,
+                        last_vacuum,
+                        last_analyze,
+                        CASE
+                            WHEN n_dead_tup + n_live_tup = 0 THEN 0.0
+                            ELSE n_dead_tup::float8 / (n_dead_tup + n_live_tup)
+                        END AS dead_tuple_ratio
+                    FROM pg_stat_user_tables
+                    WHERE schemaname = 'public'
+                    ORDER BY relname
+                    """)
+        except Exception:
+            logger.warning(
+                "Cannot access pg_stat_user_tables (old PostgreSQL or insufficient "
+                "privileges). Skipping table health check."
+            )
+            return []
+
+        return [
+            DatabaseTableHealth(
+                table_name=row["table_name"],
+                n_dead_tup=row["n_dead_tup"],
+                n_live_tup=row["n_live_tup"],
+                last_vacuum=row["last_vacuum"],
+                last_analyze=row["last_analyze"],
+                dead_tuple_ratio=row["dead_tuple_ratio"],
+            )
+            for row in rows
+        ]

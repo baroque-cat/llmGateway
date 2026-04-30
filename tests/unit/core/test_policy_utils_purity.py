@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 
 """Tests for policy_utils purity — compute_next_check_time accepts keyword-only
-params and has no config/db imports."""
+params, has no config/db imports, and should_vacuum pure function logic."""
 
 import ast
+import importlib
+import pathlib
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from src.core.constants import ErrorReason
-from src.core.policy_utils import compute_next_check_time
+from src.core.models import DatabaseTableHealth
+from src.core.policy_utils import compute_next_check_time, should_vacuum
 
 # ---------------------------------------------------------------------------
 # 2.1-a: Keyword-only parameter acceptance
@@ -140,9 +143,91 @@ def test_compute_next_check_time_bad_request_uses_on_other_error_hr() -> None:
 
 def test_policy_utils_no_config_imports() -> None:
     """policy_utils.py does not import from src.config or src.db."""
-    import importlib
-    import pathlib
+    source_path = pathlib.Path(importlib.util.find_spec("src.core.policy_utils").origin)
+    source_text = source_path.read_text()
+    tree = ast.parse(source_text)
 
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            module_name = getattr(node, "module", "") or ""
+            if module_name.startswith("src.config") or module_name.startswith("src.db"):
+                pytest.fail(
+                    f"policy_utils.py imports from config/db layer: {module_name}"
+                )
+
+
+# ---------------------------------------------------------------------------
+# M12–M17: should_vacuum pure function tests
+# ---------------------------------------------------------------------------
+
+
+def test_should_vacuum_high_ratio_triggers() -> None:
+    """should_vacuum returns True when dead_tuple_ratio exceeds threshold and n_dead_tup > 100."""
+    health = DatabaseTableHealth(
+        table_name="public.api_keys",
+        n_dead_tup=500,
+        n_live_tup=1000,
+        last_vacuum=None,
+        last_analyze=None,
+        dead_tuple_ratio=0.5,
+    )
+    assert should_vacuum(health, threshold=0.3) is True
+
+
+def test_should_vacuum_low_ratio_does_not_trigger() -> None:
+    """should_vacuum returns False when dead_tuple_ratio is below threshold."""
+    health = DatabaseTableHealth(
+        table_name="public.api_keys",
+        n_dead_tup=500,
+        n_live_tup=4500,
+        last_vacuum=None,
+        last_analyze=None,
+        dead_tuple_ratio=0.1,
+    )
+    assert should_vacuum(health, threshold=0.3) is False
+
+
+def test_should_vacuum_dead_tuples_below_100_does_not_trigger() -> None:
+    """should_vacuum returns False when n_dead_tup < 100 (absolute guard)."""
+    health = DatabaseTableHealth(
+        table_name="public.proxies",
+        n_dead_tup=50,
+        n_live_tup=100,
+        last_vacuum=None,
+        last_analyze=None,
+        dead_tuple_ratio=0.5,
+    )
+    assert should_vacuum(health, threshold=0.3) is False
+
+
+def test_should_vacuum_exact_threshold_does_not_trigger() -> None:
+    """should_vacuum returns False when ratio equals threshold (strictly > required)."""
+    health = DatabaseTableHealth(
+        table_name="public.api_keys",
+        n_dead_tup=500,
+        n_live_tup=1167,
+        last_vacuum=None,
+        last_analyze=None,
+        dead_tuple_ratio=0.3,
+    )
+    assert should_vacuum(health, threshold=0.3) is False
+
+
+def test_should_vacuum_zero_dead_tuples() -> None:
+    """should_vacuum returns False when n_dead_tup=0 and ratio=0.0."""
+    health = DatabaseTableHealth(
+        table_name="public.api_keys",
+        n_dead_tup=0,
+        n_live_tup=10000,
+        last_vacuum=None,
+        last_analyze=None,
+        dead_tuple_ratio=0.0,
+    )
+    assert should_vacuum(health, threshold=0.3) is False
+
+
+def test_should_vacuum_purity_no_config_db_imports() -> None:
+    """policy_utils.py does NOT import src.config or src.db (AST check)."""
     source_path = pathlib.Path(importlib.util.find_spec("src.core.policy_utils").origin)
     source_text = source_path.read_text()
     tree = ast.parse(source_text)

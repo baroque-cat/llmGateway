@@ -241,7 +241,9 @@ async def run_worker() -> None:
         # Step 6: Initial Resource Synchronization.
         # This part is now refactored to use the new two-phase cycle function.
         logger.info("Performing initial resource synchronization...")
-        await db_manager.providers.sync(list(accessor.get_all_providers().keys()))
+        await db_manager.providers.sync(
+            list(accessor.get_all_providers().keys()), db_manager
+        )
         all_syncers = get_all_syncers(accessor, db_manager)
         await run_sync_cycle(accessor, db_manager, all_syncers)
         logger.info("Initial resource synchronization finished.")
@@ -274,13 +276,26 @@ async def run_worker() -> None:
             ],  # Pass dependencies to the scheduled job.
         )
 
+        # --- Database maintenance scheduler jobs ---
+        # Key purge: weekly cron (Sunday 04:00 UTC).
         scheduler.add_job(  # type: ignore
-            maintenance.run_periodic_vacuum,
+            maintenance.run_purge_stopped_keys,
             "cron",
             day_of_week="sun",
-            hour=5,
+            hour=4,
             minute=0,
-            args=[db_manager],
+            id="key_purge",
+            args=[accessor, db_manager],
+        )
+
+        # Smart vacuum: interval-based, reads interval from config.
+        vacuum_interval = accessor.get_database_config().vacuum_policy.interval_minutes
+        scheduler.add_job(  # type: ignore
+            maintenance.run_conditional_vacuum,
+            "interval",
+            minutes=vacuum_interval,
+            id="smart_vacuum",
+            args=[accessor, db_manager],
         )
 
         # --- Register key export jobs (snapshot + inventory) ---

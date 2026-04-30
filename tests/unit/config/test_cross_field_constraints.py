@@ -18,6 +18,7 @@ from src.config.schemas import (
     ErrorParsingConfig,
     ErrorParsingRule,
     HealthPolicyConfig,
+    PurgeConfig,
     RetryOnErrorConfig,
     RetryPolicyConfig,
 )
@@ -281,3 +282,69 @@ def test_error_parsing_config_different_status_codes_same_priority_passes():
         ]
     )
     assert len(config.rules) == 2
+
+
+# ==============================================================================
+# HealthPolicyConfig — purge.after_days minimum constraint
+#   purge.after_days >= stop_checking_after_days + amnesty_threshold_days + 7
+# ==============================================================================
+
+
+def test_health_policy_purge_after_days_meets_minimum_passes():
+    """
+    M1: purge.after_days=180, stop_checking_after_days=90, amnesty_threshold_days=2.0.
+    Minimum = 90 + 2.0 + 7 = 99.0. 180 >= 99 → passes.
+    """
+    config = HealthPolicyConfig(
+        purge=PurgeConfig(after_days=180),
+        stop_checking_after_days=90,
+        amnesty_threshold_days=2.0,
+    )
+    assert config.purge.after_days == 180
+
+
+def test_health_policy_purge_after_days_below_minimum_rejected():
+    """
+    M2: purge.after_days=90, stop_checking_after_days=90, amnesty_threshold_days=2.0.
+    Minimum = 90 + 2.0 + 7 = 99.0. 90 < 99 → rejected with ValidationError
+    containing "must be >= 99" (or equivalent message about the minimum).
+    """
+    with pytest.raises(ValidationError) as exc_info:
+        HealthPolicyConfig(
+            purge=PurgeConfig(after_days=90),
+            stop_checking_after_days=90,
+            amnesty_threshold_days=2.0,
+        )
+
+    error_message = str(exc_info.value)
+    # The validator raises ValueError with message containing the computed minimum
+    assert "99" in error_message
+
+
+def test_health_policy_purge_after_days_exact_boundary_passes():
+    """
+    M3: purge.after_days=99, stop_checking_after_days=90, amnesty_threshold_days=2.0.
+    Minimum = 90 + 2.0 + 7 = 99.0. 99 >= 99 → passes (exact boundary).
+    """
+    config = HealthPolicyConfig(
+        purge=PurgeConfig(after_days=99),
+        stop_checking_after_days=90,
+        amnesty_threshold_days=2.0,
+    )
+    assert config.purge.after_days == 99
+
+
+def test_health_policy_purge_after_days_one_below_boundary_rejected():
+    """
+    M4: purge.after_days=98, stop_checking_after_days=90, amnesty_threshold_days=2.0.
+    Minimum = 90 + 2.0 + 7 = 99.0. 98 < 99 → rejected with ValidationError.
+    """
+    with pytest.raises(ValidationError) as exc_info:
+        HealthPolicyConfig(
+            purge=PurgeConfig(after_days=98),
+            stop_checking_after_days=90,
+            amnesty_threshold_days=2.0,
+        )
+
+    error_message = str(exc_info.value)
+    assert "99" in error_message

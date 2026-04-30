@@ -22,6 +22,10 @@ database:
   user: "${DB_USER}"
   password: "${DB_PASSWORD}"
   dbname: "${DB_NAME}"
+  # Smart vacuum policy — uses defaults (interval_minutes: 60, dead_tuple_ratio_threshold: 0.3)
+  # vacuum_policy:
+  #   interval_minutes: 60
+  #   dead_tuple_ratio_threshold: 0.3
 
 # --- PROVIDER SETTINGS ---
 providers:
@@ -49,6 +53,8 @@ providers:
     #   on_success_hr: 24
     #   verification_attempts: 3
     #   verification_delay_sec: 65
+    #   purge:
+    #     after_days: 180          # Purge permanently stopped keys after 180 days
     #   adaptive_batching:           # Optional: tune adaptive batch behaviour
     #     start_batch_size: 30       # Initial batch size (default: 30)
     #     start_batch_delay_sec: 15.0  # Initial batch delay (default: 15.0)

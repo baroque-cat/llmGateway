@@ -9,6 +9,7 @@ type safety and clear contracts between different parts of the system.
 """
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from src.core.constants import ErrorReason
@@ -163,3 +164,32 @@ class KeyExportSnapshot:
     model_name: str
     status: str
     next_check_time: str
+
+
+@dataclass(frozen=True)
+class DatabaseTableHealth:
+    """
+    Health statistics for a single user table from ``pg_stat_user_tables``.
+
+    Captures the live/dead tuple counts and the most recent vacuum/analyze
+    timestamps. The ``dead_tuple_ratio`` is pre-computed by the database layer
+    to avoid division-by-zero errors.
+
+    Fields:
+        table_name: The fully-qualified table name (schema.table).
+        n_dead_tup: Estimated number of dead (obsolete) rows.
+        n_live_tup: Estimated number of live rows.
+        last_vacuum: Timestamp of the last manual vacuum on this table,
+            or ``None`` if never vacuumed.
+        last_analyze: Timestamp of the last manual analyze on this table,
+            or ``None`` if never analyzed.
+        dead_tuple_ratio: Ratio of dead to total tuples (``n_dead_tup / (n_dead_tup + n_live_tup)``).
+            Returns ``0.0`` when the table is empty.
+    """
+
+    table_name: str
+    n_dead_tup: int
+    n_live_tup: int
+    last_vacuum: datetime | None
+    last_analyze: datetime | None
+    dead_tuple_ratio: float

@@ -1,35 +1,92 @@
 # src/services/maintenance.py
 
 import logging
+from datetime import UTC, datetime, timedelta
 
+from src.core.accessor import ConfigAccessor
 from src.db.database import DatabaseManager
+from src.services.db_maintainer import DatabaseMaintainer
+from src.services.key_purger import KeyPurger
 
-# Initialize a logger for this module.
-# The output will be handled by the central logging configuration.
 logger = logging.getLogger(__name__)
 
-# REFACTORED: The run_periodic_amnesty function has been completely removed.
-# The new state-aware logic in KeyProbe and the `failing_since` mechanism
-# in the database make a separate amnesty service obsolete. The system is
-# now self-regulating.
 
+async def run_purge_stopped_keys(
+    accessor: ConfigAccessor, db_manager: DatabaseManager
+) -> None:
+    """Purge permanently stopped keys for each enabled provider.
 
-async def run_periodic_vacuum(db_manager: DatabaseManager) -> None:
-    """
-    Service-level task to perform a VACUUM operation on the database (Async Version).
-    In PostgreSQL, this complements the autovacuum daemon and is useful for reclaiming
-    storage and preventing transaction ID wraparound in high-throughput environments.
-    This function should be called infrequently (e.g., weekly).
+    Iterates over all enabled providers and deletes keys that have been in
+    a stopped state beyond ``purge.after_days``.  Called weekly by the
+    scheduler (Sunday 04:00 UTC).
 
     Args:
-        db_manager: An instance of the DatabaseManager for async DB access.
+        accessor: Configuration accessor for reading purge policy settings.
+        db_manager: Database manager for executing queries.
     """
-    logger.info("SERVICE: Running periodic task: Database VACUUM.")
-    try:
-        # This function calls the corresponding method on the DatabaseManager facade,
-        # keeping the service layer decoupled from the direct database connection logic.
-        await db_manager.run_vacuum()
-    except Exception as e:
-        logger.error(
-            "An error occurred during the VACUUM maintenance task.", exc_info=e
-        )
+    purger = KeyPurger()
+    now = datetime.now(UTC)
+
+    for provider_name, provider_config in accessor.get_all_providers().items():
+        if not provider_config.enabled:
+            continue
+
+        health_policy = provider_config.worker_health_policy
+        purge_config = health_policy.purge
+        cutoff = now - timedelta(days=purge_config.after_days)
+
+        provider_id_map = await db_manager.providers.get_id_map()
+        provider_id = provider_id_map.get(provider_name)
+        if provider_id is None:
+            logger.debug(
+                "PURGE SKIP '%s': not found in provider_id_map.", provider_name
+            )
+            continue
+
+        try:
+            deleted = await purger.purge_stopped_keys(
+                provider_name=provider_name,
+                provider_id=provider_id,
+                cutoff=cutoff,
+                db_manager=db_manager,
+            )
+            if deleted:
+                logger.info(
+                    "PURGE '%s': %d keys purged (cutoff=%s, after_days=%d).",
+                    provider_name,
+                    deleted,
+                    cutoff.isoformat(),
+                    purge_config.after_days,
+                )
+        except Exception as e:
+            logger.error(
+                "PURGE '%s': failed to purge stopped keys: %s",
+                provider_name,
+                e,
+                exc_info=True,
+            )
+
+
+async def run_conditional_vacuum(
+    accessor: ConfigAccessor, db_manager: DatabaseManager
+) -> None:
+    """Check table health and conditionally run ``VACUUM ANALYZE``.
+
+    Queries ``pg_stat_user_tables`` for dead tuple statistics and vacuums
+    tables whose dead ratio exceeds the configured threshold.  Called by
+    the scheduler every ``vacuum_policy.interval_minutes``.
+
+    Args:
+        accessor: Configuration accessor for reading vacuum policy settings.
+        db_manager: Database manager for executing queries.
+    """
+    maintainer = DatabaseMaintainer()
+    db_config = accessor.get_database_config()
+    vacuum_policy = db_config.vacuum_policy
+
+    tables = await maintainer.get_table_health(db_manager)
+    await maintainer.run_conditional_vacuum(
+        tables=tables,
+        db_manager=db_manager,
+        threshold=vacuum_policy.dead_tuple_ratio_threshold,
+    )
