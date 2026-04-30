@@ -477,9 +477,8 @@ async def test_end_to_end_no_content_with_openai_like():
             "src.services.gateway.gateway_service._log_debug_info"
         ) as mock_log_debug_info,
         patch(
-            "src.services.gateway.gateway_service._handle_buffered_request",
-            new=_handle_buffered_retryable_request,
-            create=True,
+        "src.services.gateway.gateway_service._handle_buffered_retryable_request",
+        new=_handle_buffered_retryable_request,
         ),
     ):
         mock_db_manager = MagicMock()

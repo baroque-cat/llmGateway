@@ -127,7 +127,9 @@ def _read_ndjson_file(filepath: str, all_keys: set[str]) -> None:
                 )
                 continue
 
-            raw_value: Any = obj["value"]  # pyright: ignore[reportUnknownVariableType]
+            # fmt: off
+            raw_value: str | int | float | None = obj["value"]  # pyright: ignore[reportUnknownVariableType]
+            # fmt: on
             if raw_value is None:
                 logger.warning(
                     f"Skipping null 'value' at line {line_num} in '{filepath}'"
@@ -142,8 +144,8 @@ def _read_ndjson_file(filepath: str, all_keys: set[str]) -> None:
                     f"to str at line {line_num} in '{filepath}'"
                 )
                 all_keys.add(
-                    str(raw_value)
-                )  # pyright: ignore[reportUnknownArgumentType]
+                    str(raw_value)  # pyright: ignore[reportUnknownArgumentType]
+                )
 
 
 class KeySyncer(IResourceSyncer):

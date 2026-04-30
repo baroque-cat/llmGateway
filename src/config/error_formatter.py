@@ -9,7 +9,7 @@ Python tracebacks.
 """
 
 import sys
-from typing import Any
+from typing import Any, cast
 
 from pydantic import ValidationError
 
@@ -46,10 +46,10 @@ def get_line_number(
         if (
             parent is not None
             and hasattr(parent, "lc")
-            and parent.lc.data  # type: ignore
-            and last_key in parent.lc.data  # type: ignore
+            and cast(Any, parent).lc.data
+            and last_key in cast(Any, parent).lc.data
         ):
-            return parent.lc.data[last_key][0] + 1  # type: ignore
+            return cast(Any, parent).lc.data[last_key][0] + 1
     except Exception:
         pass
 

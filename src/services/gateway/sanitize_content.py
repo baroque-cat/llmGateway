@@ -110,20 +110,22 @@ def _apply_path(current: object, segments: list[str], depth: int) -> None:
     segment = segments[depth]
     is_last = depth == len(segments) - 1
 
+    # fmt: off
     if segment == "*":
         if isinstance(current, list):
-            for i in range(len(current)):
+            for i in range(len(current)):  # pyright: ignore[reportUnknownArgumentType]  # TODO: remove after introducing JSONValue recursive type in core/models.py
                 if is_last:
-                    current[i] = _redact_leaf(current[i])
+                    current[i] = _redact_leaf(current[i])  # pyright: ignore[reportUnknownArgumentType]  # TODO: remove after introducing JSONValue recursive type in core/models.py
                 else:
-                    _apply_path(current[i], segments, depth + 1)
+                    _apply_path(current[i], segments, depth + 1)  # pyright: ignore[reportUnknownArgumentType]  # TODO: remove after introducing JSONValue recursive type in core/models.py
         return
 
     if isinstance(current, dict) and segment in current:
         if is_last:
-            current[segment] = _redact_leaf(current[segment])
+            current[segment] = _redact_leaf(current[segment])  # pyright: ignore[reportUnknownArgumentType]  # TODO: remove after introducing JSONValue recursive type in core/models.py
         else:
-            _apply_path(current[segment], segments, depth + 1)
+            _apply_path(current[segment], segments, depth + 1)  # pyright: ignore[reportUnknownArgumentType]  # TODO: remove after introducing JSONValue recursive type in core/models.py
+    # fmt: on
 
 
 def _redact_leaf(value: object) -> object:
@@ -137,18 +139,20 @@ def _redact_leaf(value: object) -> object:
         The (possibly mutated) value.  Callers must assign the result back
         into the parent container (dict key or list index).
     """
+    # fmt: off
     if isinstance(value, list):
-        for i in range(len(value)):
+        for i in range(len(value)):  # pyright: ignore[reportUnknownArgumentType]  # TODO: remove after introducing JSONValue recursive type in core/models.py
             if isinstance(value[i], (str, int, float, bool, type(None))):
                 value[i] = "***"
-        return value
+        return value  # pyright: ignore[reportUnknownVariableType]  # TODO: remove after introducing JSONValue recursive type in core/models.py
     elif isinstance(value, dict):
-        for key in value:
+        for key in value:  # pyright: ignore[reportUnknownVariableType]  # TODO: remove after introducing JSONValue recursive type in core/models.py
             if isinstance(value[key], (str, int, float, bool, type(None))):
                 value[key] = "***"
-        return value
+        return value  # pyright: ignore[reportUnknownVariableType]  # TODO: remove after introducing JSONValue recursive type in core/models.py
     else:
         return "***"
+    # fmt: on
 
 
 # ---------------------------------------------------------------------------

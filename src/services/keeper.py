@@ -3,7 +3,8 @@
 import asyncio
 import logging
 import os
-from typing import Any
+from collections.abc import Callable
+from typing import Any, cast
 
 import asyncpg
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -28,6 +29,18 @@ from src.services.synchronizers.proxy_sync import read_proxies_from_directory
 
 # The path is now defined in one place and passed to the loader.
 CONFIG_PATH = "config/providers.yaml"
+
+
+def _add_scheduler_job(
+    scheduler: AsyncIOScheduler,
+    func: Callable[..., Any],
+    *args: Any,
+    **kwargs: Any,
+) -> None:
+    """Wrapper for scheduler.add_job to avoid per-call type: ignore comments."""
+    # fmt: off
+    cast(None, scheduler.add_job(func, *args, **kwargs))  # pyright: ignore[reportUnknownMemberType]
+    # fmt: on
 
 
 def _setup_directories(accessor: ConfigAccessor) -> None:
@@ -262,10 +275,13 @@ async def run_keeper() -> None:
 
         for i, probe in enumerate(all_probes):
             job_id = f"{probe.__class__.__name__}_cycle_{i}"
-            scheduler.add_job(probe.run_cycle, "interval", minutes=1, id=job_id)  # type: ignore
+            _add_scheduler_job(
+                scheduler, probe.run_cycle, "interval", minutes=1, id=job_id
+            )
 
         # REFACTORED: Instead of scheduling each syncer, schedule the central cycle function.
-        scheduler.add_job(  # type: ignore
+        _add_scheduler_job(
+            scheduler,
             run_sync_cycle,
             "interval",
             minutes=5,
@@ -279,7 +295,8 @@ async def run_keeper() -> None:
 
         # --- Database maintenance scheduler jobs ---
         # Key purge: weekly cron (Sunday 04:00 UTC).
-        scheduler.add_job(  # type: ignore
+        _add_scheduler_job(
+            scheduler,
             KeyPurger.run_scheduled,
             "cron",
             day_of_week="sun",
@@ -291,7 +308,8 @@ async def run_keeper() -> None:
 
         # Smart vacuum: interval-based, reads interval from config.
         vacuum_interval = accessor.get_database_config().vacuum_policy.interval_minutes
-        scheduler.add_job(  # type: ignore
+        _add_scheduler_job(
+            scheduler,
             DatabaseMaintainer.run_scheduled,
             "interval",
             minutes=vacuum_interval,
@@ -313,7 +331,8 @@ async def run_keeper() -> None:
 
             # Snapshot job
             if key_export.snapshot_interval_hours > 0:
-                scheduler.add_job(  # type: ignore
+                _add_scheduler_job(
+                    scheduler,
                     exporter.export_snapshot,
                     trigger=IntervalTrigger(hours=key_export.snapshot_interval_hours),
                     id=f"snapshot_{provider_name}",
@@ -323,7 +342,8 @@ async def run_keeper() -> None:
             # Inventory job
             inventory = key_export.inventory
             if inventory.enabled and inventory.statuses:
-                scheduler.add_job(  # type: ignore
+                _add_scheduler_job(
+                    scheduler,
                     exporter.export_inventory,
                     trigger=IntervalTrigger(minutes=inventory.interval_minutes),
                     id=f"inventory_{provider_name}",
@@ -331,7 +351,7 @@ async def run_keeper() -> None:
                 )
 
         logger.info("Scheduler configured. List of jobs:")
-        scheduler.print_jobs()  # type: ignore
+        _ = scheduler.print_jobs()  # pyright: ignore[reportUnknownMemberType]
 
         # Step 9: Start Scheduler and Run Indefinitely
         scheduler.start()

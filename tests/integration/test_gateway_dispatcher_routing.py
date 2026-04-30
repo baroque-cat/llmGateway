@@ -25,7 +25,7 @@ async def test_gateway_dispatcher_routing_debug_mode():
     """
     Integration test: verify that catch_all_endpoint routes to the correct handler
     based on provider configuration (debug mode).
-    When debug mode is enabled, the request should be routed to _handle_buffered_request.
+    When debug mode is enabled, the request should be routed to _handle_buffered_retryable_request.
     """
     from src.services.gateway.gateway_service import create_app
 
@@ -84,13 +84,9 @@ async def test_gateway_dispatcher_routing_debug_mode():
         # Patch the handlers to track which one is called
         with (
             patch(
-                "src.services.gateway.gateway_service._handle_buffered_request",
+                "src.services.gateway.gateway_service._handle_buffered_retryable_request",
                 new_callable=AsyncMock,
-                create=True,
             ) as mock_buffered_handler,
-            patch(
-                "src.services.gateway.gateway_service._handle_buffered_retryable_request"
-            ) as mock_retry_handler,
             patch(
                 "src.services.gateway.gateway_service._handle_full_stream_request"
             ) as mock_full_stream_handler,
@@ -100,7 +96,6 @@ async def test_gateway_dispatcher_routing_debug_mode():
 
             mock_response = JSONResponse(content={"test": "debug"})
             mock_buffered_handler.return_value = mock_response
-            mock_retry_handler.return_value = mock_response
             mock_full_stream_handler.return_value = mock_response
 
             # Use TestClient to simulate request
@@ -112,9 +107,8 @@ async def test_gateway_dispatcher_routing_debug_mode():
                 )
 
             # Assert that the correct handler was called
-            # With debug mode enabled, should route to _handle_buffered_request
+            # With debug mode enabled, should route to _handle_buffered_retryable_request
             assert mock_buffered_handler.called
-            assert not mock_retry_handler.called
             assert not mock_full_stream_handler.called
 
             # Verify the handler was called with correct arguments
@@ -130,14 +124,14 @@ async def test_gateway_dispatcher_routing_debug_mode():
 @pytest.mark.parametrize(
     "provider_config_kwargs, expected_handler_name",
     [
-        # Debug mode enabled -> _handle_buffered_request
+        # Debug mode enabled -> _handle_buffered_retryable_request
         (
             {"debug_mode": DebugMode.NO_CONTENT},
-            "_handle_buffered_request",
+            "_handle_buffered_retryable_request",
         ),
         (
             {"debug_mode": DebugMode.FULL_BODY},
-            "_handle_buffered_request",
+            "_handle_buffered_retryable_request",
         ),
         # Retry enabled -> _handle_buffered_retryable_request
         (
@@ -154,15 +148,15 @@ async def test_gateway_dispatcher_routing_debug_mode():
             {"provider_type": "gemini"},
             "_handle_full_stream_request",
         ),
-        # Streaming mode disabled -> _handle_buffered_request (partial stream)
+        # Streaming mode disabled -> _handle_buffered_retryable_request (partial stream)
         (
             {"streaming_mode": StreamingMode.DISABLED},
-            "_handle_buffered_request",
+            "_handle_buffered_retryable_request",
         ),
-        # Default case (multi-model, non-gemini, no debug, no retry) -> _handle_buffered_request
+        # Default case (multi-model, non-gemini, no debug, no retry) -> _handle_buffered_retryable_request
         (
             {"models": {"gpt-4": ModelInfo(), "gpt-3.5-turbo": ModelInfo()}},
-            "_handle_buffered_request",
+            "_handle_buffered_retryable_request",
         ),
     ],
 )
@@ -230,13 +224,9 @@ async def test_gateway_dispatcher_routing(
         # Patch the handlers to track which one is called
         with (
             patch(
-                "src.services.gateway.gateway_service._handle_buffered_request",
+                "src.services.gateway.gateway_service._handle_buffered_retryable_request",
                 new_callable=AsyncMock,
-                create=True,
             ) as mock_buffered_handler,
-            patch(
-                "src.services.gateway.gateway_service._handle_buffered_retryable_request"
-            ) as mock_retry_handler,
             patch(
                 "src.services.gateway.gateway_service._handle_full_stream_request"
             ) as mock_full_stream_handler,
@@ -246,7 +236,6 @@ async def test_gateway_dispatcher_routing(
 
             mock_response = JSONResponse(content={"test": "routing"})
             mock_buffered_handler.return_value = mock_response
-            mock_retry_handler.return_value = mock_response
             mock_full_stream_handler.return_value = mock_response
 
             # Use TestClient to simulate request
@@ -258,19 +247,12 @@ async def test_gateway_dispatcher_routing(
                 )
 
             # Determine which handler should have been called
-            if expected_handler_name == "_handle_buffered_request":
+            if expected_handler_name == "_handle_buffered_retryable_request":
                 assert mock_buffered_handler.called
-                assert not mock_retry_handler.called
                 assert not mock_full_stream_handler.called
                 mock_buffered_handler.assert_called_once()
-            elif expected_handler_name == "_handle_buffered_retryable_request":
-                assert not mock_buffered_handler.called
-                assert mock_retry_handler.called
-                assert not mock_full_stream_handler.called
-                mock_retry_handler.assert_called_once()
             elif expected_handler_name == "_handle_full_stream_request":
                 assert not mock_buffered_handler.called
-                assert not mock_retry_handler.called
                 assert mock_full_stream_handler.called
                 mock_full_stream_handler.assert_called_once()
             else:
@@ -281,7 +263,7 @@ async def test_gateway_dispatcher_routing(
 async def test_gateway_dispatcher_routing_full_body_regression():
     """
     Regression test: verify that DebugMode.FULL_BODY still routes to
-    _handle_buffered_request (not retry or full-stream handlers).
+    _handle_buffered_retryable_request (not retry or full-stream handlers).
     """
     from src.services.gateway.gateway_service import create_app
 
@@ -331,13 +313,9 @@ async def test_gateway_dispatcher_routing_full_body_regression():
 
         with (
             patch(
-                "src.services.gateway.gateway_service._handle_buffered_request",
+                "src.services.gateway.gateway_service._handle_buffered_retryable_request",
                 new_callable=AsyncMock,
-                create=True,
             ) as mock_buffered_handler,
-            patch(
-                "src.services.gateway.gateway_service._handle_buffered_retryable_request"
-            ) as mock_retry_handler,
             patch(
                 "src.services.gateway.gateway_service._handle_full_stream_request"
             ) as mock_full_stream_handler,
@@ -346,7 +324,6 @@ async def test_gateway_dispatcher_routing_full_body_regression():
 
             mock_response = JSONResponse(content={"test": "full_body_regression"})
             mock_buffered_handler.return_value = mock_response
-            mock_retry_handler.return_value = mock_response
             mock_full_stream_handler.return_value = mock_response
 
             with TestClient(app) as client:
@@ -357,7 +334,6 @@ async def test_gateway_dispatcher_routing_full_body_regression():
                 )
 
             assert mock_buffered_handler.called
-            assert not mock_retry_handler.called
             assert not mock_full_stream_handler.called
 
 

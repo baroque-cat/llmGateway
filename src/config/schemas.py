@@ -477,7 +477,9 @@ class ErrorParsingConfig(BaseModel):
     enabled: bool = False
 
     # List of error parsing rules to apply
-    rules: list[ErrorParsingRule] = Field(default_factory=list)
+    # fmt: off
+    rules: list[ErrorParsingRule] = Field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]  # Pydantic Field(default_factory=list) loses generic parameter — known limitation
+    # fmt: on
 
     @model_validator(mode="after")
     def check_unique_priorities(self) -> "ErrorParsingConfig":

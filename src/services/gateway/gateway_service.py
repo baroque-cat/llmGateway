@@ -1146,7 +1146,7 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
     app = FastAPI(title="llmGateway - API Gateway Service", lifespan=lifespan)
 
     @app.get("/metrics")
-    async def metrics_endpoint(  # pyright: ignore[reportUnusedFunction]
+    async def metrics_endpoint(
         request: Request, authorization: Annotated[str | None, Header()] = None
     ) -> Response:
         """
@@ -1162,8 +1162,10 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
         metrics_data, content_type = metrics_service.get_metrics()
         return Response(content=metrics_data, media_type=content_type)
 
+    _ = metrics_endpoint
+
     @app.api_route("/{full_path:path}", methods=["GET", "POST", "PUT", "DELETE"])
-    async def catch_all_endpoint(request: Request) -> Response:  # type: ignore
+    async def catch_all_endpoint(request: Request) -> Response:
         """
         This endpoint acts as a lean dispatcher. It authenticates the request
         and routes it to the correct specialized handler based on pre-calculated logic.
@@ -1202,9 +1204,10 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
 
         # Dispatch to the correct handler based on pre-calculated logic.
         # Debug mode has highest priority and forces buffered requests.
-        if effective_debug_mode != "disabled":
-            return await _handle_buffered_request(request, provider, instance_name)
-        elif provider_config.gateway_policy.retry.enabled:
+        if (
+            effective_debug_mode != "disabled"
+            or provider_config.gateway_policy.retry.enabled
+        ):
             return await _handle_buffered_retryable_request(
                 request, provider, instance_name
             )
@@ -1235,6 +1238,10 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
                 )
 
         # The default case for multi-model, non-Gemini providers: buffer request, stream response.
-        return await _handle_buffered_request(request, provider, instance_name)
+        return await _handle_buffered_retryable_request(
+            request, provider, instance_name
+        )
+
+    _ = catch_all_endpoint
 
     return app

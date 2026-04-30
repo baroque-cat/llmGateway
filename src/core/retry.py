@@ -27,14 +27,15 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 if _has_asyncpg:
+    assert asyncpg is not None  # narrow type for pyright
     # Set of transient asyncpg exceptions worth retrying.
     # Fixed tuple — not configurable via YAML so users don't need
     # to know about internal driver classes.
     _db_retryable = (
-        asyncpg.exceptions.ConnectionDoesNotExistError,  # type: ignore[union-attr]
-        asyncpg.exceptions.InterfaceError,  # type: ignore[union-attr]
-        asyncpg.exceptions.TooManyConnectionsError,  # type: ignore[union-attr]
-        asyncpg.exceptions.DeadlockDetectedError,  # type: ignore[union-attr]
+        asyncpg.exceptions.ConnectionDoesNotExistError,
+        asyncpg.exceptions.InterfaceError,
+        asyncpg.exceptions.TooManyConnectionsError,
+        asyncpg.exceptions.DeadlockDetectedError,
     )
 else:
     _db_retryable = ()

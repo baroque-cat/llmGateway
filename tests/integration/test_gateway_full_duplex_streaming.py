@@ -104,23 +104,18 @@ async def test_gateway_routes_to_full_stream_handler_when_auto_with_eligible_pro
         # Create the app with mocked dependencies
         app = create_app(accessor)
 
-        # Patch buffered handlers to verify they are not called
+        # Patch buffered handler to verify it is not called
         with (
             patch(
-                "src.services.gateway.gateway_service._handle_buffered_request",
-                new_callable=AsyncMock,
-                create=True,
-            ) as mock_buffered_handler,
-            patch(
                 "src.services.gateway.gateway_service._handle_buffered_retryable_request"
-            ) as mock_retry_handler,
+            ) as mock_buffered_handler,
         ):
-            # Set return values for buffered handlers (they shouldn't be called)
+            # Set return values for buffered handler (it shouldn't be called)
             from fastapi.responses import JSONResponse
 
             mock_response = JSONResponse(content={"test": "streaming"})
             mock_buffered_handler.return_value = mock_response
-            mock_retry_handler.return_value = mock_response
+            mock_buffered_handler.return_value = mock_response
 
             # Use TestClient to simulate request
             with TestClient(app) as client:
@@ -132,7 +127,7 @@ async def test_gateway_routes_to_full_stream_handler_when_auto_with_eligible_pro
 
             # Verify that buffered handlers were NOT called
             assert not mock_buffered_handler.called
-            assert not mock_retry_handler.called
+            assert not mock_buffered_handler.called
 
             # Verify that provider.proxy_request was called exactly once
             mock_provider.proxy_request.assert_called_once()
@@ -260,23 +255,18 @@ async def test_gateway_routes_to_full_stream_handler_for_gemini_provider():
         # Create the app with mocked dependencies
         app = create_app(accessor)
 
-        # Patch buffered handlers to verify they are not called
+        # Patch buffered handler to verify it is not called
         with (
             patch(
-                "src.services.gateway.gateway_service._handle_buffered_request",
-                new_callable=AsyncMock,
-                create=True,
-            ) as mock_buffered_handler,
-            patch(
                 "src.services.gateway.gateway_service._handle_buffered_retryable_request"
-            ) as mock_retry_handler,
+            ) as mock_buffered_handler,
         ):
-            # Set return values for buffered handlers (they shouldn't be called)
+            # Set return values for buffered handler (it shouldn't be called)
             from fastapi.responses import JSONResponse
 
             mock_response = JSONResponse(content={"test": "streaming"})
             mock_buffered_handler.return_value = mock_response
-            mock_retry_handler.return_value = mock_response
+            mock_buffered_handler.return_value = mock_response
 
             # Use TestClient to simulate request
             with TestClient(app) as client:
@@ -289,7 +279,7 @@ async def test_gateway_routes_to_full_stream_handler_for_gemini_provider():
 
             # Verify that buffered handlers were NOT called
             assert not mock_buffered_handler.called
-            assert not mock_retry_handler.called
+            assert not mock_buffered_handler.called
 
             # Verify that provider.proxy_request was called exactly once
             mock_provider.proxy_request.assert_called_once()

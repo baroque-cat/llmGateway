@@ -59,7 +59,9 @@ class ConfigLoader:
             logger.info("Loaded environment variables from .env file.")
 
         with open(self.config_path, encoding="utf-8") as f:
-            user_config_raw = cast(dict[str, Any], self.yaml.load(f) or {})  # type: ignore
+            # fmt: off
+            user_config_raw = cast(dict[str, Any], self.yaml.load(f) or {})  # pyright: ignore[reportUnknownMemberType]
+            # fmt: on
 
         # Step 2: Resolve environment variables (Plan Step 3.2)
         user_config_resolved = self._resolve_env_vars(user_config_raw)
@@ -88,10 +90,14 @@ class ConfigLoader:
         addresses a potential error scenario from the analysis.
         """
         if isinstance(config_value, dict):
-            return {k: self._resolve_env_vars(v) for k, v in config_value.items()}  # type: ignore
+            # fmt: off
+            return {k: self._resolve_env_vars(v) for k, v in config_value.items()}  # pyright: ignore[reportUnknownVariableType]
+            # fmt: on
 
         if isinstance(config_value, list):
-            return [self._resolve_env_vars(item) for item in config_value]  # type: ignore
+            # fmt: off
+            return [self._resolve_env_vars(item) for item in config_value]  # pyright: ignore[reportUnknownVariableType]
+            # fmt: on
 
         if isinstance(config_value, str):
             match = ENV_VAR_PATTERN.match(config_value)
