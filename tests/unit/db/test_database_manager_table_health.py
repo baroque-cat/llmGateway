@@ -5,6 +5,9 @@
 Verifies that get_table_health() queries pg_stat_user_tables, returns
 list[DatabaseTableHealth] with correct field values, and handles empty
 databases gracefully.
+
+Also includes regression guard tests (N53) verifying that run_vacuum
+has been removed from DatabaseManager.
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -25,10 +28,6 @@ def _make_mock_pool_and_conn(
     mock_pool = MagicMock()
     mock_conn = MagicMock()
 
-    # Make mock_conn work as async context manager
-    mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-    mock_conn.__aexit__ = AsyncMock(return_value=None)
-
     if fetch_return is None:
         fetch_return = [
             {
@@ -43,8 +42,8 @@ def _make_mock_pool_and_conn(
 
     mock_conn.fetch = AsyncMock(return_value=fetch_return)
 
-    # pool.acquire() returns mock_conn directly
-    mock_pool.acquire = MagicMock(return_value=mock_conn)
+    # pool.acquire() returns async context manager → conn
+    mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
 
     return mock_pool, mock_conn
 
@@ -99,3 +98,16 @@ async def test_get_table_health_queries_pg_stat_user_tables():
     query = call_args[0][0]
     assert "pg_stat_user_tables" in query
     assert "public" in query
+
+
+# --- Regression guard: run_vacuum removed, get_table_health present ---
+
+
+def test_database_manager_run_vacuum_removed():
+    """N53: DatabaseManager no longer has a run_vacuum method."""
+    assert hasattr(DatabaseManager, "run_vacuum") is False
+
+
+def test_database_manager_has_get_table_health():
+    """Verify that DatabaseManager still has get_table_health method."""
+    assert hasattr(DatabaseManager, "get_table_health") is True

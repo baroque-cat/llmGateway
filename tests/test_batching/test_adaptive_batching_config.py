@@ -22,17 +22,8 @@ from src.config.schemas import AdaptiveBatchingConfig, HealthPolicyConfig
 from src.core.batching.adaptive import AdaptiveBatchController
 
 # ---------------------------------------------------------------------------
-# UT-A01: start_batch_size and start_batch_delay_sec defaults
+# UT-A01 merged into UC-33 (both test default values of AdaptiveBatchingConfig)
 # ---------------------------------------------------------------------------
-
-
-def test_ut_a01_start_defaults():
-    """
-    UT-A01: start_batch_size defaults to 30 and start_batch_delay_sec defaults to 15.0.
-    """
-    cfg = AdaptiveBatchingConfig()
-    assert cfg.start_batch_size == 30
-    assert cfg.start_batch_delay_sec == 15.0
 
 
 # ---------------------------------------------------------------------------
@@ -259,8 +250,9 @@ def test_uc33_valid_config_with_defaults():
     Creating AdaptiveBatchingConfig() without args should populate all 13
     fields with their documented default values.
 
-    UT-H03: Added checks for start_batch_size == 30 and
-    start_batch_delay_sec == 15.0.
+    Merged UT-A01: start_batch_size defaults to 30 and
+    start_batch_delay_sec defaults to 15.0 are now verified here
+    alongside all other defaults, eliminating the separate UT-A01 test.
     """
     cfg = AdaptiveBatchingConfig()
 

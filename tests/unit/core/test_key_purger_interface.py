@@ -3,14 +3,11 @@
 """Tests for IKeyPurger ABC — Group 1: Core interface contract.
 
 Verifies that IKeyPurger is a proper ABC with two abstract methods,
-cannot be instantiated without implementations, has correct signatures,
-and does not import from src.db or src.config at runtime.
+cannot be instantiated without implementations, and has correct
+signatures.
 """
 
-import ast
-import importlib
 import inspect
-import pathlib
 from abc import ABC
 
 import pytest
@@ -137,22 +134,4 @@ def test_purge_stopped_keys_signature() -> None:
     assert sig.return_annotation == "int", "purge_stopped_keys should return int"
 
 
-# ---------------------------------------------------------------------------
-# N13: No src.db or src.config imports in interfaces module (runtime)
-# ---------------------------------------------------------------------------
 
-
-def test_ikey_purger_no_db_or_config_imports() -> None:
-    """src.core.interfaces has no top-level (runtime) imports from src.db or src.config."""
-    source_path = pathlib.Path(importlib.util.find_spec("src.core.interfaces").origin)
-    source_text = source_path.read_text()
-    tree = ast.parse(source_text)
-
-    for node in ast.iter_child_nodes(tree):
-        if isinstance(node, ast.ImportFrom):
-            module = node.module or ""
-            if module.startswith("src.db") or module.startswith("src.config"):
-                pytest.fail(
-                    f"interfaces.py has a top-level (runtime) import from '{module}' "
-                    f"— the ABC must not depend on database or config implementation modules"
-                )

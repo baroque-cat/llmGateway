@@ -15,9 +15,10 @@ Test IDs:
 """
 
 import argparse
-import asyncio
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 import main
 from src.config.schemas import Config
@@ -225,7 +226,8 @@ def test_it_s03_validate_before_uvicorn():
 # ---------------------------------------------------------------------------
 
 
-def test_it_s04_validate_before_worker():
+@pytest.mark.asyncio
+async def test_it_s04_validate_before_worker():
     """IT-S04: Mock validate_pool_sizing → _start_keeper_service calls validate_pool_sizing(config) before run_keeper"""
     call_order: list[str] = []
     config = Config()
@@ -244,7 +246,7 @@ def test_it_s04_validate_before_worker():
         mock_validate.side_effect = track_validate
         mock_run_keeper.side_effect = track_run_keeper
 
-        asyncio.run(main._start_keeper_service())
+        await main._start_keeper_service()
 
     assert call_order == [
         "validate",

@@ -14,53 +14,16 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 
-from src.config.schemas import (
-    ErrorParsingConfig,
-    GatewayPolicyConfig,
-    ModelInfo,
-    ProviderConfig,
-)
 from src.core.models import CheckResult
-from src.providers.impl.anthropic import AnthropicProvider
 
 
 class TestAnthropicProxy:
     """Test suite for Anthropic provider proxy_request and inspect methods."""
 
-    def create_mock_provider(
-        self, models: dict[str, ModelInfo] | None = None
-    ) -> AnthropicProvider:
-        """Helper to create a mock AnthropicProvider with given configuration."""
-        from unittest.mock import MagicMock
-
-        mock_config = MagicMock(spec=ProviderConfig)
-        mock_config.gateway_policy = MagicMock(spec=GatewayPolicyConfig)
-        mock_config.error_parsing = ErrorParsingConfig(enabled=False, rules=[])
-        mock_config.gateway_policy.debug_mode = "none"
-        mock_config.provider_type = "anthropic"
-        mock_config.api_base_url = "https://api.anthropic.com"
-        mock_config.default_model = "claude-3-opus-20240229"
-        if models is None:
-            models = {
-                "claude-3-opus-20240229": MagicMock(spec=ModelInfo),
-                "claude-3-sonnet-20240229": MagicMock(spec=ModelInfo),
-                "claude-3-haiku-20240307": MagicMock(spec=ModelInfo),
-            }
-        mock_config.models = models
-        mock_config.access_control = MagicMock()
-        mock_config.access_control.gateway_access_token = "test_token"
-        mock_config.health_policy = MagicMock()
-        mock_config.proxy_config = MagicMock()
-        mock_config.proxy_config.mode = "none"
-        mock_config.timeouts = MagicMock()
-        mock_config.timeouts.total = 30.0
-        mock_config.timeouts.connect = 10.0
-        mock_config.timeouts.read = 30.0
-        mock_config.timeouts.write = 30.0
-        mock_config.timeouts.pool = 5.0
-
-        provider = AnthropicProvider("test_anthropic", mock_config)
-        return provider
+    @pytest.fixture(autouse=True)
+    def _setup_provider_factory(self, create_mock_anthropic_provider):
+        """Inject the shared Anthropic provider factory from conftest."""
+        self.create_mock_provider = create_mock_anthropic_provider
 
     @pytest.mark.asyncio
     async def test_inspect_returns_model_list_from_config(self):

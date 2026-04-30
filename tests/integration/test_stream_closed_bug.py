@@ -18,7 +18,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
-from fastapi import Request
 from starlette.responses import Response
 
 from src.config.schemas import (
@@ -32,36 +31,6 @@ from src.config.schemas import (
 )
 from src.core.constants import ErrorReason
 from src.core.models import CheckResult
-
-
-# Helper from test_gateway_refactor.py
-def make_mock_request(
-    url: str = "http://test/v1/chat/completions", method: str = "POST"
-) -> MagicMock:
-    req = MagicMock(spec=Request)
-    req.url.path = "/v1/chat/completions"
-    req.url.query = ""
-    req.method = method
-    req.headers = {"authorization": "Bearer test-token"}
-    req.body = AsyncMock(return_value=b'{"model": "gpt-4"}')
-
-    # Create state mock explicitly
-    state = MagicMock()
-    state.gateway_cache = MagicMock()
-    state.gateway_cache.remove_key_from_pool = AsyncMock()
-
-    # HTTP Factory Mock
-    http_factory = MagicMock()
-    http_factory.get_client_for_provider = AsyncMock(return_value=MagicMock())
-    state.http_client_factory = http_factory
-
-    state.db_manager = MagicMock()
-    state.db_manager.keys.update_status = AsyncMock()
-    state.accessor = MagicMock()
-    state.debug_mode_map = {}
-
-    req.app.state = state
-    return req
 
 
 def create_provider_config(

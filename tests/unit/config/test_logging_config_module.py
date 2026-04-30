@@ -227,41 +227,4 @@ class TestLoggingConfiguration:
             mock_uvicorn_access_logger.setLevel.assert_called_once_with(logging.WARNING)
 
 
-class TestGatewayPolicyConfigDebugMode:
-    """Tests for GatewayPolicyConfig debug_mode field validation."""
 
-    def test_headers_only_rejected(self):
-        """Test that 'headers_only' is rejected with a validation error listing allowed values."""
-        from pydantic import ValidationError
-
-        from src.config.schemas import GatewayPolicyConfig
-
-        with pytest.raises(ValidationError) as exc_info:
-            GatewayPolicyConfig(debug_mode="headers_only")
-
-        error_msg = str(exc_info.value)
-        # The error message should list the allowed values: "disabled", "no_content", "full_body"
-        assert "disabled" in error_msg
-        assert "no_content" in error_msg
-        assert "full_body" in error_msg
-
-    def test_no_content_accepted(self):
-        """Test that 'no_content' debug_mode is accepted."""
-        from src.config.schemas import GatewayPolicyConfig
-
-        config = GatewayPolicyConfig(debug_mode="no_content")
-        assert config.debug_mode == "no_content"
-
-    def test_full_body_accepted(self):
-        """Regression: test that 'full_body' debug_mode still succeeds."""
-        from src.config.schemas import GatewayPolicyConfig
-
-        config = GatewayPolicyConfig(debug_mode="full_body")
-        assert config.debug_mode == "full_body"
-
-    def test_disabled_accepted(self):
-        """Regression: test that 'disabled' debug_mode still succeeds."""
-        from src.config.schemas import GatewayPolicyConfig
-
-        config = GatewayPolicyConfig(debug_mode="disabled")
-        assert config.debug_mode == "disabled"

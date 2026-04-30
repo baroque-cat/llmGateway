@@ -743,14 +743,8 @@ def test_ut_d02_start_batch_size_capped_at_max_boundary() -> None:
     assert controller.batch_size == 50
 
 
-def test_ut_d02_start_batch_size_out_of_bounds_rejected() -> None:
-    """
-    UT-D02: start_batch_size exceeding max_batch_size is rejected by
-    Pydantic model_validator (ValidationError). Config-level validation
-    ensures start values are within [min, max] bounds.
-    """
-    with pytest.raises(ValidationError):
-        AdaptiveBatchingConfig(start_batch_size=100, max_batch_size=50)
+# UT-D02 (out-of-bounds) removed: duplicate of UC-03
+# (test_uc03_start_batch_size_exceeds_max_rejected covers the same scenario)
 
 
 def test_ut_d03_start_batch_delay_capped_at_min_boundary() -> None:

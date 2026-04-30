@@ -28,18 +28,13 @@ async def test_get_status_summary_empty_database():
     result = await repo.get_status_summary()
 
     assert result == []
-    mock_conn.fetch.assert_called_once_with("""
-            SELECT
-                p.name AS provider,
-                s.model_name AS model,
-                s.status,
-                COUNT(s.key_id) AS count
-            FROM key_model_status AS s
-            JOIN api_keys AS k ON s.key_id = k.id
-            JOIN providers AS p ON k.provider_id = p.id
-            GROUP BY p.name, s.model_name, s.status
-            ORDER BY p.name, s.model_name, s.status
-            """)
+    # Verify key fragments of the SQL query (not exact string — avoids brittle tests)
+    query = mock_conn.fetch.call_args[0][0]
+    assert "key_model_status" in query
+    assert "GROUP BY" in query
+    assert "p.name" in query
+    assert "s.model_name" in query
+    assert "s.status" in query
 
 
 @pytest.mark.asyncio

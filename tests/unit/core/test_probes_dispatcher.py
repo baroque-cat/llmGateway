@@ -78,7 +78,7 @@ async def test_happy_path_provider_dispatched_and_cleaned_up(probe, mock_depende
     # Mock _process_provider_batch to do nothing (success)
     probe._process_provider_batch = AsyncMock()
     # Mock get_health_policy to return a policy with default timeout
-    policy = HealthPolicyConfig(task_timeout_sec=300)
+    policy = HealthPolicyConfig(task_timeout_sec=900)
     mock_accessor.get_health_policy.return_value = policy
 
     # Run a single cycle
@@ -163,7 +163,7 @@ async def test_error_handling_exception_in_batch(probe, mock_dependencies):
     probe._process_provider_batch = AsyncMock(
         side_effect=RuntimeError("Simulated error")
     )
-    policy = HealthPolicyConfig(task_timeout_sec=300)
+    policy = HealthPolicyConfig(task_timeout_sec=900)
     mock_accessor.get_health_policy.return_value = policy
 
     # Patch logger.error to capture the error log
@@ -196,6 +196,9 @@ async def test_timeout_handling_task_exceeds_timeout(probe, mock_dependencies):
     """
     Scenario: _process_provider_batch takes longer than task_timeout_sec.
     The task should be cancelled, an error logged, and registry cleaned up.
+
+    We mock asyncio.wait_for to raise TimeoutError to simulate a timeout
+    without having to wait the full timeout duration in real time.
     """
     mock_accessor, mock_db, mock_client_factory = mock_dependencies
     provider_name = "slow_provider"
@@ -203,27 +206,32 @@ async def test_timeout_handling_task_exceeds_timeout(probe, mock_dependencies):
 
     probe._get_resources_to_check = AsyncMock(return_value=resources)
 
-    # Create a mock batch that sleeps longer than timeout
-    async def slow_batch(*args, **kwargs):
-        await asyncio.sleep(2.0)  # longer than our short timeout
-
-    probe._process_provider_batch = AsyncMock(side_effect=slow_batch)
-    # Set a very short timeout (1 second) for the test
-    # Note: task_timeout_sec is an int field with gt=0 constraint (Pydantic v2 migration)
-    policy = HealthPolicyConfig(task_timeout_sec=1)
+    # Mock _process_provider_batch — it won't actually run due to the wait_for mock
+    probe._process_provider_batch = AsyncMock()
+    # Use a valid HealthPolicyConfig with minimum allowed timeout parameters.
+    # HealthPolicyConfig requires task_timeout_sec >= verification_attempts * verification_delay_sec * 2,
+    # so we use: 1 attempt × 60 sec × 2 = 120 sec minimum, with task_timeout_sec=130.
+    policy = HealthPolicyConfig(
+        task_timeout_sec=130, verification_attempts=1, verification_delay_sec=60
+    )
     mock_accessor.get_health_policy.return_value = policy
 
-    # Patch logger.error to capture timeout log
-    with patch("src.core.probes.logger.error") as mock_error:
-        await probe.run_cycle()
+    # Patch asyncio.wait_for to raise TimeoutError, simulating a timeout
+    with patch(
+        "src.core.probes.asyncio.wait_for",
+        side_effect=TimeoutError("simulated timeout"),
+    ):
+        # Patch logger.error to capture timeout log
+        with patch("src.core.probes.logger.error") as mock_error:
+            await probe.run_cycle()
 
-        # Wait a bit for the timeout to trigger
-        await asyncio.sleep(1.5)
+            # Give time for the wrapper's finally block to execute
+            await asyncio.sleep(0.01)
 
-        # Verify that timeout error was logged
-        mock_error.assert_called_once_with(
-            f"Provider '{provider_name}' task timed out after 1 seconds. Task was cancelled."
-        )
+            # Verify that timeout error was logged
+            mock_error.assert_called_once_with(
+                f"Provider '{provider_name}' task timed out after 130 seconds. Task was cancelled."
+            )
 
     # Verify that active_tasks is cleaned up
     assert provider_name not in probe.active_tasks
@@ -285,7 +293,7 @@ async def test_multiple_providers_mixed_dispatch_and_skipping(probe, mock_depend
     probe._get_resources_to_check = AsyncMock(return_value=resources)
     # Mock batch for new provider only
     probe._process_provider_batch = AsyncMock()
-    policy = HealthPolicyConfig(task_timeout_sec=300)
+    policy = HealthPolicyConfig(task_timeout_sec=900)
     mock_accessor.get_health_policy.return_value = policy
 
     with patch("src.core.probes.logger.debug") as mock_debug:

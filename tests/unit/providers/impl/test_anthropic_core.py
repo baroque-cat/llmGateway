@@ -15,9 +15,7 @@ import pytest
 from src.config.schemas import (
     ErrorParsingConfig,
     ErrorParsingRule,
-    GatewayPolicyConfig,
     ModelInfo,
-    ProviderConfig,
 )
 from src.core.constants import ErrorReason
 from src.core.models import RequestDetails
@@ -27,36 +25,10 @@ from src.providers.impl.anthropic import AnthropicProvider
 class TestAnthropicProvider:
     """Test suite for Anthropic provider core functionality."""
 
-    def create_mock_provider(self, error_config=None):
-        """Helper to create a mock AnthropicProvider with given error parsing configuration."""
-        mock_config = MagicMock(spec=ProviderConfig)
-        mock_config.gateway_policy = MagicMock(spec=GatewayPolicyConfig)
-
-        if error_config is None:
-            error_config = ErrorParsingConfig(enabled=False, rules=[])
-
-        mock_config.error_parsing = error_config
-
-        # Set up other required config fields
-        mock_config.provider_type = "anthropic"
-        mock_config.api_base_url = "https://api.anthropic.com/v1"
-        mock_config.default_model = "claude-3-opus-20240229"
-        mock_config.models = {}
-        mock_config.access_control = MagicMock()
-        mock_config.access_control.gateway_access_token = "test_token"
-        mock_config.health_policy = MagicMock()
-        mock_config.proxy_config = MagicMock()
-        mock_config.proxy_config.mode = "none"
-        mock_config.timeouts = MagicMock()
-        mock_config.timeouts.total = 30.0
-        mock_config.timeouts.connect = 10.0
-        mock_config.timeouts.read = 30.0
-        mock_config.timeouts.write = 30.0
-        mock_config.worker_health_policy = MagicMock()
-
-        # Create provider instance
-        provider = AnthropicProvider("test_provider", mock_config)
-        return provider
+    @pytest.fixture(autouse=True)
+    def _setup_provider_factory(self, create_mock_anthropic_provider):
+        """Inject the shared Anthropic provider factory from conftest."""
+        self.create_mock_provider = create_mock_anthropic_provider
 
     # Test 1: Provider instantiation
     def test_provider_instantiation(self):

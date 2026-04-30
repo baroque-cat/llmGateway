@@ -820,16 +820,22 @@ async def test_ic17_timeout_wrapper_partial_batch_not_reported_on_timeout():
     state should not be corrupted — partial batch results that were
     already reported remain, but the incomplete batch is not reported.
     """
-    # Use a timeout long enough for the first batch to complete but short
-    # enough that the second batch (with sleep between batches) is interrupted.
-    # First batch of 30 resources completes quickly.
-    # Then asyncio.sleep(batch_delay) between batches triggers the timeout.
+    # Strategy: Use a valid HealthPolicyConfig (task_timeout_sec=130 satisfies
+    # the cross-validator: verification_attempts=1 × verification_delay_sec=60 × 2 = 120 ≤ 130).
+    # Then override asyncio.wait_for's timeout to a SHORT value (2 seconds) via patching,
+    # so the timeout actually fires during the first inter-batch sleep (5 seconds).
+    # start_batch_delay_sec=5.0 means the first inter-batch sleep takes 5 real seconds,
+    # but the patched wait_for timeout of 2 seconds interrupts it.
+    # First batch of 30 resources completes near-instantly (mocked _check_and_update_resource),
+    # then asyncio.sleep(5) starts → patched timeout at 2s cancels it.
     policy = HealthPolicyConfig(
         adaptive_batching=AdaptiveBatchingConfig(
             start_batch_size=30,
-            start_batch_delay_sec=15.0,
+            start_batch_delay_sec=5.0,
         ),
-        task_timeout_sec=2,  # 2 seconds — enough for first batch, not for sleep+second
+        verification_attempts=1,
+        verification_delay_sec=60,
+        task_timeout_sec=130,
     )
     probe = _make_probe(policy=policy)
 
@@ -837,8 +843,16 @@ async def test_ic17_timeout_wrapper_partial_batch_not_reported_on_timeout():
 
     probe._check_and_update_resource = AsyncMock(return_value=CheckResult.success())
 
-    # Patch asyncio.sleep to sleep for real (so timeout triggers during inter-batch delay)
-    await probe._run_task_wrapper("test_provider", resources)
+    # Patch asyncio.wait_for to use a 2-second timeout instead of the policy's 130s.
+    # This simulates a short timeout that fires during the inter-batch sleep,
+    # while keeping the HealthPolicyConfig valid (task_timeout_sec=130 ≥ 120).
+    original_wait_for = asyncio.wait_for
+
+    async def _wait_for_with_short_timeout(coro, timeout=None):
+        return await original_wait_for(coro, timeout=2)
+
+    with patch("asyncio.wait_for", side_effect=_wait_for_with_short_timeout):
+        await probe._run_task_wrapper("test_provider", resources)
 
     # The first batch of 30 should have completed and been reported to the controller.
     # The timeout interrupts during the sleep between batch 1 and batch 2.

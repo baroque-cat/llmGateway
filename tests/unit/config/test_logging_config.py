@@ -1,3 +1,5 @@
+# TODO: Move to tests/unit/services/ — this tests gateway_service, not config
+
 from unittest.mock import patch
 
 import pytest

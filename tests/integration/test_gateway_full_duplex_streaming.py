@@ -8,42 +8,9 @@ from fastapi import Request
 from fastapi.testclient import TestClient
 from starlette.responses import StreamingResponse
 
-from src.config.schemas import (
-    GatewayPolicyConfig,
-    ModelInfo,
-    ProviderConfig,
-    RetryOnErrorConfig,
-    RetryPolicyConfig,
-)
-from src.core.constants import DebugMode, ErrorReason, StreamingMode
+from src.config.schemas import ModelInfo
+from src.core.constants import ErrorReason, StreamingMode
 from src.core.models import CheckResult, RequestDetails
-
-
-def create_mock_provider_config(
-    *,
-    provider_type: str = "openai_like",
-    models: dict[str, ModelInfo] | None = None,
-    streaming_mode: StreamingMode = StreamingMode.AUTO,
-    debug_mode: DebugMode = DebugMode.DISABLED,
-    retry_enabled: bool = False,
-    retry_on_key_error: RetryOnErrorConfig | None = None,
-    retry_on_server_error: RetryOnErrorConfig | None = None,
-) -> ProviderConfig:
-    """Helper to create a ProviderConfig with specified settings."""
-    if models is None:
-        models = {"gpt-4": ModelInfo()}
-    config = ProviderConfig(provider_type=provider_type, keys_path="keys/test/")
-    config.enabled = True
-    config.models = models
-    config.gateway_policy = GatewayPolicyConfig()
-    config.gateway_policy.streaming_mode = streaming_mode.value  # expects string
-    config.gateway_policy.debug_mode = debug_mode.value
-    config.gateway_policy.retry = RetryPolicyConfig(enabled=retry_enabled)
-    if retry_on_key_error:
-        config.gateway_policy.retry.on_key_error = retry_on_key_error
-    if retry_on_server_error:
-        config.gateway_policy.retry.on_server_error = retry_on_server_error
-    return config
 
 
 @pytest.mark.asyncio
@@ -140,7 +107,9 @@ async def test_gateway_routes_to_full_stream_handler_when_auto_with_eligible_pro
         # Patch buffered handlers to verify they are not called
         with (
             patch(
-                "src.services.gateway.gateway_service._handle_buffered_request"
+                "src.services.gateway.gateway_service._handle_buffered_request",
+                new_callable=AsyncMock,
+                create=True,
             ) as mock_buffered_handler,
             patch(
                 "src.services.gateway.gateway_service._handle_buffered_retryable_request"
@@ -294,7 +263,9 @@ async def test_gateway_routes_to_full_stream_handler_for_gemini_provider():
         # Patch buffered handlers to verify they are not called
         with (
             patch(
-                "src.services.gateway.gateway_service._handle_buffered_request"
+                "src.services.gateway.gateway_service._handle_buffered_request",
+                new_callable=AsyncMock,
+                create=True,
             ) as mock_buffered_handler,
             patch(
                 "src.services.gateway.gateway_service._handle_buffered_retryable_request"

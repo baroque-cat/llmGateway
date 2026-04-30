@@ -257,18 +257,5 @@ async def test_ut10_callback_on_every_while_iteration():
     assert 3 <= call_count <= 5, f"Expected 3-5 callbacks, got {call_count}"
 
 
-# UT-11: src/core/probes.py has no services imports
-def test_ut11_probes_has_no_services_imports():
-    """The probes.py module must not import anything from src.services."""
-    import pathlib
-
-    content = (
-        pathlib.Path(__file__).parent.parent.parent / "src" / "core" / "probes.py"
-    ).read_text()
-    lines = content.split("\n")
-    for line in lines:
-        if "import" in line and "src.services" in line:
-            pytest.fail(f"src/core/probes.py contains services import: {line.strip()}")
-    # Also verify the correct imports are present
-    assert "from src.core.batching import AdaptiveBatchController" in content
-    assert "BatchCallback" in content
+# UT-11 removed: duplicate of SEC-01 in test_adaptive_security.py
+# (probes.py no-services-import check is consolidated there)

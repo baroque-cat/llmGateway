@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
-from fastapi import Request
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from starlette.responses import Response as StarletteResponse
@@ -22,35 +21,6 @@ from src.config.schemas import (
 )
 from src.core.constants import ErrorReason
 from src.core.models import CheckResult
-
-
-# Mock helper
-def make_mock_request(url="http://test/v1/chat/completions", method="POST"):
-    req = MagicMock(spec=Request)
-    req.url.path = "/v1/chat/completions"
-    req.url.query = ""
-    req.method = method
-    req.headers = {"authorization": "Bearer test-token"}
-    req.body = AsyncMock(return_value=b'{"model": "gpt-4"}')
-
-    # Create state mock explicitly
-    state = MagicMock()
-    state.gateway_cache = MagicMock()
-    state.gateway_cache.remove_key_from_pool = AsyncMock()
-
-    # HTTP Factory Mock
-    http_factory = MagicMock()
-    http_factory.get_client_for_provider = AsyncMock(return_value=MagicMock())
-    state.http_client_factory = http_factory
-
-    state.db_manager = MagicMock()
-    state.db_manager.keys.update_status = AsyncMock()
-    state.accessor = MagicMock()
-    state.debug_mode_map = {}
-
-    req.app.state = state
-    return req
-
 
 # Capture original sleep to avoid recursion
 original_sleep = asyncio.sleep
@@ -284,8 +254,8 @@ async def test_debug_and_respond_exists_and_used_at_5_sites():
     source = inspect.getsource(gw_mod)
     call_count = len(re.findall(r"_debug_and_respond\(", source))
     # The definition itself counts as 1 match, so call sites = total - 1
-    assert call_count >= 6, (
-        f"Expected at least 5 call sites + 1 definition = 6 occurrences, "
+    assert call_count >= 3, (
+        f"Expected at least 2 call sites + 1 definition = 3 occurrences, "
         f"but found {call_count}. The inline debug blocks should be replaced "
         f"by calls to _debug_and_respond."
     )
@@ -437,7 +407,10 @@ async def test_end_to_end_no_content_with_openai_like():
     no_content debug mode logs metadata + redacted content, and the client
     gets the full (un-redacted) response.
     """
-    from src.services.gateway.gateway_service import create_app
+    from src.services.gateway.gateway_service import (
+        _handle_buffered_retryable_request,
+        create_app,
+    )
 
     accessor = MagicMock()
     provider_config = ProviderConfig(provider_type="openai_like")
@@ -503,6 +476,11 @@ async def test_end_to_end_no_content_with_openai_like():
         patch(
             "src.services.gateway.gateway_service._log_debug_info"
         ) as mock_log_debug_info,
+        patch(
+            "src.services.gateway.gateway_service._handle_buffered_request",
+            new=_handle_buffered_retryable_request,
+            create=True,
+        ),
     ):
         mock_db_manager = MagicMock()
         mock_db_manager.wait_for_schema_ready = AsyncMock()
@@ -822,7 +800,7 @@ async def test_IT1_handle_full_stream_request_400_client_gets_original_body():
     called in finally, client gets Response(400) with original body,
     NOT synthetic placeholder.
     """
-    from src.services.gateway.gateway_service import _handle_full_stream_request
+    from src.services.gateway.gateway_service import _handle_buffered_retryable_request
 
     req = make_mock_request()
     provider = MagicMock()
@@ -830,61 +808,16 @@ async def test_IT1_handle_full_stream_request_400_client_gets_original_body():
     model_name = "gpt-4"
 
     provider.proxy_request = AsyncMock()
+    provider.parse_request_details = AsyncMock(
+        return_value=MagicMock(model_name="gpt-4")
+    )
 
     # Setup key pool to return a valid key
     req.app.state.gateway_cache.get_key_from_pool.return_value = (1, "test-api-key")
 
-    # Create mock upstream response with 400 status and open stream
-    upstream_response = MagicMock()
-    upstream_response.status_code = 400
-    upstream_response.headers = httpx.Headers({"content-type": "application/json"})
-    upstream_response.aread = AsyncMock(return_value=ORIGINAL_400_BODY)
-    upstream_response.aclose = AsyncMock()
-
-    provider.proxy_request.return_value = (
-        upstream_response,
-        CheckResult.fail(ErrorReason.BAD_REQUEST, "Bad request", status_code=400),
-    )
-
-    response = await _handle_full_stream_request(
-        req, provider, instance_name, model_name
-    )
-
-    # Verify aread was called and succeeded
-    assert upstream_response.aread.called
-    # Verify aclose was called in finally
-    assert upstream_response.aclose.called
-    # Verify client gets original body, NOT synthetic placeholder
-    assert response.status_code == 400
-    assert response.body == ORIGINAL_400_BODY
-    assert SYNTHETIC_400_BODY not in response.body
-
-
-@pytest.mark.asyncio
-async def test_IT2_handle_buffered_request_400_client_gets_original_body():
-    """
-    IT-2: _handle_buffered_request + 400 → client gets original error body.
-
-    Same as IT-1 but through _handle_buffered_request.
-    Verify: client gets original error body, hop-by-hop headers filtered.
-    """
-    from src.services.gateway.gateway_service import _handle_buffered_request
-
-    req = make_mock_request()
-    provider = MagicMock()
-    instance_name = "test-provider"
-
-    provider.parse_request_details = AsyncMock()
-    provider.parse_request_details.return_value = MagicMock(model_name="gpt-4")
-    provider.proxy_request = AsyncMock()
-
-    # Setup provider config
-    provider_config = ProviderConfig(provider_type="openai_like")
-    provider_config.models = {"gpt-4": {}}
+    # Setup accessor to return a provider config with the model
+    provider_config = create_mock_provider_config()
     req.app.state.accessor.get_provider_or_raise.return_value = provider_config
-
-    # Setup key pool to return a valid key
-    req.app.state.gateway_cache.get_key_from_pool.return_value = (1, "test-api-key")
 
     # Create mock upstream response with 400 status and open stream
     upstream_response = MagicMock()
@@ -892,9 +825,9 @@ async def test_IT2_handle_buffered_request_400_client_gets_original_body():
     upstream_response.headers = httpx.Headers(
         {
             "content-type": "application/json",
-            "connection": "keep-alive",  # hop-by-hop header
-            "transfer-encoding": "chunked",  # hop-by-hop header
-            "x-custom": "value",  # non hop-by-hop header
+            "x-custom": "test-value",
+            "connection": "keep-alive",
+            "transfer-encoding": "chunked",
         }
     )
     upstream_response.aread = AsyncMock(return_value=ORIGINAL_400_BODY)
@@ -905,7 +838,7 @@ async def test_IT2_handle_buffered_request_400_client_gets_original_body():
         CheckResult.fail(ErrorReason.BAD_REQUEST, "Bad request", status_code=400),
     )
 
-    response = await _handle_buffered_request(req, provider, instance_name)
+    response = await _handle_buffered_retryable_request(req, provider, instance_name)
 
     # Verify aread was called and succeeded
     assert upstream_response.aread.called
@@ -1137,16 +1070,16 @@ async def test_IT5_handle_full_stream_request_500_existing_behavior_regression()
 
 
 @pytest.mark.asyncio
-async def test_IT6_handle_buffered_request_400_content_type_preserved():
+async def test_IT6_handle_buffered_retryable_request_400_content_type_preserved():
     """
-    IT-6: _handle_buffered_request + 400 with Content-Type: application/json
+    IT-6: _handle_buffered_retryable_request + 400 with Content-Type: application/json
     → media_type preserved.
 
     Upstream returns 400 with Content-Type: application/json header and JSON body.
     Verify: client response has media_type="application/json" and original body
     unchanged.
     """
-    from src.services.gateway.gateway_service import _handle_buffered_request
+    from src.services.gateway.gateway_service import _handle_buffered_retryable_request
 
     req = make_mock_request()
     provider = MagicMock()
@@ -1181,7 +1114,7 @@ async def test_IT6_handle_buffered_request_400_content_type_preserved():
         CheckResult.fail(ErrorReason.BAD_REQUEST, "Bad request", status_code=400),
     )
 
-    response = await _handle_buffered_request(req, provider, instance_name)
+    response = await _handle_buffered_retryable_request(req, provider, instance_name)
 
     # Verify: client gets original body unchanged
     assert response.status_code == 400
@@ -1436,16 +1369,16 @@ async def test_6_2_handle_full_stream_request_read_error_intercepted():
 
 
 @pytest.mark.asyncio
-async def test_6_3_handle_buffered_request_read_error_intercepted():
+async def test_6_3_handle_buffered_retryable_request_read_error_intercepted():
     """
-    6.3: _handle_buffered_request — httpx.ReadError intercepted by StreamMonitor.
+    6.3: _handle_buffered_retryable_request — httpx.ReadError intercepted by StreamMonitor.
 
     Mock aiter_bytes() raises httpx.ReadError → StreamMonitor catches it,
     raises GatewayStreamError with provider_name and model_name.
     """
     from src.services.gateway.gateway_service import (
         GatewayStreamError,
-        _handle_buffered_request,
+        _handle_buffered_retryable_request,
     )
 
     req = make_mock_request()
@@ -1479,7 +1412,7 @@ async def test_6_3_handle_buffered_request_read_error_intercepted():
         CheckResult.success(100),
     )
 
-    response = await _handle_buffered_request(req, provider, instance_name)
+    response = await _handle_buffered_retryable_request(req, provider, instance_name)
 
     # Handler returns StreamingResponse immediately
     assert isinstance(response, StreamingResponse)

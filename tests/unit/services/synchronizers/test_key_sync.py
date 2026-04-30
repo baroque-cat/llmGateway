@@ -23,8 +23,9 @@ from src.services.synchronizers.key_sync import (
 
 def test_read_keys_from_directory_nonexistent_path(caplog):
     """Non-existent directory returns empty set with warning."""
-    result = read_keys_from_directory("/nonexistent/path/12345")
-    assert result == set()
+    keys, file_map = read_keys_from_directory("/nonexistent/path/12345")
+    assert keys == set()
+    assert file_map == {}
     assert (
         "not found" in caplog.text.lower() or "not a directory" in caplog.text.lower()
     )
@@ -201,8 +202,8 @@ def test_read_keys_ndjson_valid_line(tmp_path):
     (d / "keys.ndjson").write_text(
         '{"value": "sk-c62c80ccd9d94857b36e4f3f25d49a9d"}\n', encoding="utf-8"
     )
-    result = read_keys_from_directory(str(d))
-    assert result == {"sk-c62c80ccd9d94857b36e4f3f25d49a9d"}
+    keys, _ = read_keys_from_directory(str(d))
+    assert keys == {"sk-c62c80ccd9d94857b36e4f3f25d49a9d"}
 
 
 def test_read_keys_ndjson_multiple_lines(tmp_path):
@@ -213,8 +214,8 @@ def test_read_keys_ndjson_multiple_lines(tmp_path):
         '{"value": "key1"}\n{"value": "key2"}\n{"value": "key3"}\n',
         encoding="utf-8",
     )
-    result = read_keys_from_directory(str(d))
-    assert result == {"key1", "key2", "key3"}
+    keys, _ = read_keys_from_directory(str(d))
+    assert keys == {"key1", "key2", "key3"}
 
 
 def test_read_keys_ndjson_empty_line_skipped(tmp_path, caplog):
@@ -225,8 +226,8 @@ def test_read_keys_ndjson_empty_line_skipped(tmp_path, caplog):
         '{"value": "key1"}\n\n{"value": "key2"}\n', encoding="utf-8"
     )
     with caplog.at_level(logging.WARNING):
-        result = read_keys_from_directory(str(d))
-    assert result == {"key1", "key2"}
+        keys, _ = read_keys_from_directory(str(d))
+    assert keys == {"key1", "key2"}
     # No warnings for empty lines
     assert "empty" not in caplog.text.lower()
 
@@ -239,8 +240,8 @@ def test_read_keys_ndjson_malformed_json_skipped(tmp_path, caplog):
         '{"value": "key1"}\nnot json\n{"value": "key2"}\n', encoding="utf-8"
     )
     with caplog.at_level(logging.WARNING):
-        result = read_keys_from_directory(str(d))
-    assert result == {"key1", "key2"}
+        keys, _ = read_keys_from_directory(str(d))
+    assert keys == {"key1", "key2"}
     assert "non-JSON" in caplog.text.lower() or "not json" in caplog.text
 
 
@@ -250,8 +251,8 @@ def test_read_keys_ndjson_missing_value_field(tmp_path, caplog):
     d.mkdir()
     (d / "keys.ndjson").write_text('{"other_field": "data"}\n', encoding="utf-8")
     with caplog.at_level(logging.WARNING):
-        result = read_keys_from_directory(str(d))
-    assert result == set()
+        keys, _ = read_keys_from_directory(str(d))
+    assert keys == set()
     assert "value" in caplog.text.lower()
 
 
@@ -261,8 +262,8 @@ def test_read_keys_ndjson_null_value_skipped(tmp_path, caplog):
     d.mkdir()
     (d / "keys.ndjson").write_text('{"value": null}\n', encoding="utf-8")
     with caplog.at_level(logging.WARNING):
-        result = read_keys_from_directory(str(d))
-    assert result == set()
+        keys, _ = read_keys_from_directory(str(d))
+    assert keys == set()
     assert "null" in caplog.text.lower()
 
 
@@ -272,8 +273,8 @@ def test_read_keys_ndjson_integer_value_stringified(tmp_path, caplog):
     d.mkdir()
     (d / "keys.ndjson").write_text('{"value": 12345}\n', encoding="utf-8")
     with caplog.at_level(logging.WARNING):
-        result = read_keys_from_directory(str(d))
-    assert result == {"12345"}
+        keys, _ = read_keys_from_directory(str(d))
+    assert keys == {"12345"}
     assert "coerc" in caplog.text.lower()
 
 
@@ -284,8 +285,8 @@ def test_read_keys_ndjson_bom_tolerance(tmp_path):
     # Write file with BOM
     with open(d / "keys.ndjson", "wb") as f:
         f.write(b'\xef\xbb\xbf{"value": "sk-test"}\n')
-    result = read_keys_from_directory(str(d))
-    assert result == {"sk-test"}
+    keys, _ = read_keys_from_directory(str(d))
+    assert keys == {"sk-test"}
 
 
 # --- Extension filtering tests ---
@@ -296,8 +297,8 @@ def test_read_keys_txt_file_processed(tmp_path):
     d = tmp_path / "keys"
     d.mkdir()
     (d / "keys.txt").write_text("key1  key2,key3", encoding="utf-8")
-    result = read_keys_from_directory(str(d))
-    assert result == {"key1", "key2", "key3"}
+    keys, _ = read_keys_from_directory(str(d))
+    assert keys == {"key1", "key2", "key3"}
 
 
 def test_read_keys_ndjson_file_processed(tmp_path):
@@ -305,8 +306,8 @@ def test_read_keys_ndjson_file_processed(tmp_path):
     d = tmp_path / "keys"
     d.mkdir()
     (d / "keys.ndjson").write_text('{"value": "ndjson-key"}\n', encoding="utf-8")
-    result = read_keys_from_directory(str(d))
-    assert result == {"ndjson-key"}
+    keys, _ = read_keys_from_directory(str(d))
+    assert keys == {"ndjson-key"}
 
 
 def test_read_keys_gitkeep_ignored(tmp_path, caplog):
@@ -314,8 +315,8 @@ def test_read_keys_gitkeep_ignored(tmp_path, caplog):
     d = tmp_path / "keys"
     d.mkdir()
     (d / ".gitkeep").write_text("", encoding="utf-8")
-    result = read_keys_from_directory(str(d))
-    assert result == set()
+    keys, _ = read_keys_from_directory(str(d))
+    assert keys == set()
 
 
 def test_read_keys_no_extension_ignored(tmp_path):
@@ -323,8 +324,8 @@ def test_read_keys_no_extension_ignored(tmp_path):
     d = tmp_path / "keys"
     d.mkdir()
     (d / "README").write_text("key1", encoding="utf-8")
-    result = read_keys_from_directory(str(d))
-    assert result == set()
+    keys, _ = read_keys_from_directory(str(d))
+    assert keys == set()
 
 
 def test_read_keys_ds_store_ignored(tmp_path):
@@ -332,8 +333,8 @@ def test_read_keys_ds_store_ignored(tmp_path):
     d = tmp_path / "keys"
     d.mkdir()
     (d / ".DS_Store").write_text("junk", encoding="utf-8")
-    result = read_keys_from_directory(str(d))
-    assert result == set()
+    keys, _ = read_keys_from_directory(str(d))
+    assert keys == set()
 
 
 # --- Mixed formats and deduplication ---
@@ -345,8 +346,8 @@ def test_read_keys_mixed_txt_ndjson_merged(tmp_path):
     d.mkdir()
     (d / "a.txt").write_text("key1", encoding="utf-8")
     (d / "b.ndjson").write_text('{"value": "key2"}\n', encoding="utf-8")
-    result = read_keys_from_directory(str(d))
-    assert result == {"key1", "key2"}
+    keys, _ = read_keys_from_directory(str(d))
+    assert keys == {"key1", "key2"}
 
 
 def test_read_keys_duplicate_across_formats_deduplicated(tmp_path):
@@ -355,8 +356,8 @@ def test_read_keys_duplicate_across_formats_deduplicated(tmp_path):
     d.mkdir()
     (d / "a.txt").write_text("key1", encoding="utf-8")
     (d / "b.ndjson").write_text('{"value": "key1"}\n', encoding="utf-8")
-    result = read_keys_from_directory(str(d))
-    assert result == {"key1"}
+    keys, _ = read_keys_from_directory(str(d))
+    assert keys == {"key1"}
 
 
 def test_read_keys_same_key_in_two_txt_files(tmp_path):
@@ -365,8 +366,8 @@ def test_read_keys_same_key_in_two_txt_files(tmp_path):
     d.mkdir()
     (d / "a.txt").write_text("key1", encoding="utf-8")
     (d / "b.txt").write_text("key1", encoding="utf-8")
-    result = read_keys_from_directory(str(d))
-    assert result == {"key1"}
+    keys, _ = read_keys_from_directory(str(d))
+    assert keys == {"key1"}
 
 
 def test_read_keys_same_key_twice_in_one_txt_file(tmp_path):
@@ -374,8 +375,8 @@ def test_read_keys_same_key_twice_in_one_txt_file(tmp_path):
     d = tmp_path / "keys"
     d.mkdir()
     (d / "keys.txt").write_text("key1\nkey1", encoding="utf-8")
-    result = read_keys_from_directory(str(d))
-    assert result == {"key1"}
+    keys, _ = read_keys_from_directory(str(d))
+    assert keys == {"key1"}
 
 
 # --- File purity tests ---

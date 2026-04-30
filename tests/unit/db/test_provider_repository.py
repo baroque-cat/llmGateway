@@ -25,9 +25,8 @@ def _make_repo_and_deps(
     mock_pool = MagicMock()
     mock_conn = MagicMock()
 
-    # Make mock_conn work as async context manager for pool.acquire()
-    mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-    mock_conn.__aexit__ = AsyncMock(return_value=None)
+    # pool.acquire() returns async context manager → conn
+    mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
 
     # Make conn.transaction() return an async context manager
     mock_conn.transaction.return_value.__aenter__ = AsyncMock(return_value=None)
@@ -40,9 +39,6 @@ def _make_repo_and_deps(
     mock_conn.fetch = AsyncMock(return_value=db_rows)
     mock_conn.copy_records_to_table = AsyncMock(return_value=None)
     mock_conn.execute = AsyncMock(return_value=None)
-
-    # pool.acquire() returns mock_conn directly
-    mock_pool.acquire = MagicMock(return_value=mock_conn)
 
     mock_key_purger = MagicMock()
     mock_key_purger.purge_provider = AsyncMock(return_value=purge_return)

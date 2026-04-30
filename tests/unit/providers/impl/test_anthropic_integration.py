@@ -58,7 +58,7 @@ class TestAnthropicConfigurationLoading:
   host: localhost
   port: 5432
   password: test_password
-worker:
+keeper:
   max_concurrent_providers: 5
 providers:
   anthropic_main:

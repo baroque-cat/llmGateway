@@ -149,8 +149,8 @@ class TestErrorParsingBase:
         assert provider._extract_json_value(data, "errors.0.code") is None
 
         # Data is None - method expects Dict[str, Any], but we test edge case
-        # We'll skip this test as it's not valid for the method signature
-        pass
+        # Skipping as None is not valid for the method signature
+        pytest.skip("_extract_json_value expects Dict[str, Any]; None is outside the method's contract")
 
     # --- Tests for _refine_error_reason ---
 

@@ -1,3 +1,5 @@
+# Note: Tests KeyProbe._calculate_next_check_time via accessor, not ConfigAccessor directly.
+
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 

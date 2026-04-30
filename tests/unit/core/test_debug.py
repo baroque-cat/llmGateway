@@ -1,3 +1,5 @@
+# TODO: Move to tests/unit/services/ — this tests gateway_service._log_debug_info, not core.
+
 from unittest.mock import patch
 
 import pytest

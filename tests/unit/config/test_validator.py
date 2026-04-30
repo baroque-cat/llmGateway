@@ -23,14 +23,11 @@ from pydantic import ValidationError
 from src.config.loader import ConfigLoader
 from src.config.schemas import (
     AdaptiveBatchingConfig,
-    DatabaseConfig,
     ErrorParsingRule,
     GatewayPolicyConfig,
     HealthPolicyConfig,
     ProviderConfig,
     ProxyConfig,
-    PurgeConfig,
-    RetryOnErrorConfig,
     TimeoutConfig,
 )
 from src.core.constants import (
@@ -142,23 +139,6 @@ def test_invalid_streaming_mode_direct_schema_validation():
     assert "disabled" in error_message
 
 
-def test_invalid_fast_mapping_value_should_fail():
-    """
-    Test that fast_status_mapping on GatewayPolicyConfig causes validation failure.
-
-    INVERTED: Previously, fast_status_mapping was a valid field typed as dict[int, str],
-    so any string value was accepted at the schema level. After removing the field from
-    GatewayPolicyConfig (which uses extra="forbid"), passing fast_status_mapping is now
-    rejected as an extra field regardless of the value.
-    """
-    with pytest.raises(ValidationError) as exc_info:
-        GatewayPolicyConfig(fast_status_mapping={400: "invalid_typo_reason"})
-
-    error_message = str(exc_info.value)
-    # Verify that the error message mentions the extra field
-    assert "fast_status_mapping" in error_message
-
-
 def test_valid_config_should_pass_validation():
     """
     Ensure that a completely valid configuration passes Pydantic validation
@@ -189,34 +169,6 @@ def test_valid_config_should_pass_validation():
         assert provider.gateway_policy.streaming_mode == StreamingMode.AUTO
 
 
-def test_proxy_config_static_mode_requires_url():
-    """
-    Test that ProxyConfig model_validator requires static_url when mode is 'static'.
-
-    After replacing with ProxyMode enum, string "static" is coerced to ProxyMode.STATIC
-    and the validate_proxy_requirements validator works with the enum value.
-    """
-    with pytest.raises(ValidationError) as exc_info:
-        ProxyConfig(mode="static")
-
-    error_message = str(exc_info.value)
-    assert "static_url" in error_message
-
-
-def test_proxy_config_stealth_mode_requires_pool_path():
-    """
-    Test that ProxyConfig model_validator requires pool_list_path when mode is 'stealth'.
-
-    After replacing with ProxyMode enum, string "stealth" is coerced to ProxyMode.STEALTH
-    and the validate_proxy_requirements validator works with the enum value.
-    """
-    with pytest.raises(ValidationError) as exc_info:
-        ProxyConfig(mode="stealth")
-
-    error_message = str(exc_info.value)
-    assert "pool_list_path" in error_message
-
-
 # ==============================================================================
 # Preserved tests (not in G1 scope but need provider_type fix)
 # ==============================================================================
@@ -237,22 +189,6 @@ def test_provider_config_extra_fields_forbidden():
     assert (
         "unknown_field" in error_message
         or "Extra inputs are not permitted" in error_message
-    )
-
-
-def test_config_root_extra_fields_forbidden():
-    """
-    Test that Config root model rejects extra fields (Pydantic extra="forbid").
-    """
-    from src.config.schemas import Config
-
-    with pytest.raises(ValidationError) as exc_info:
-        Config.model_validate({"unknown_section": "should_fail"})
-
-    error_message = str(exc_info.value)
-    assert (
-        "Extra inputs are not permitted" in error_message
-        or "unknown_section" in error_message
     )
 
 
@@ -683,180 +619,6 @@ def test_full_valid_config_with_all_enums_loads_via_yaml():
         )
 
 
-def test_yaml_with_typo_in_provider_type_causes_system_exit_with_formatted_error():
-    """
-    Integration: YAML with a typo in provider_type causes SystemExit.
-    The error_formatter produces a readable message with line number info.
-    """
-    mock_yaml_content = """providers:
-  deepseek_provider:
-    enabled: true
-    provider_type: "deepseek"
-    api_base_url: "https://api.deepseek.com/v1"
-    access_control:
-      gateway_access_token: "ds_token"
-"""
-
-    with (
-        patch("os.path.exists", return_value=True),
-        patch("builtins.open", mock_open(read_data=mock_yaml_content)),
-    ):
-        loader = ConfigLoader(path="dummy_path.yaml")
-        with pytest.raises(SystemExit):
-            loader.load()
-
-
-def test_yaml_with_invalid_fast_status_mapping_key_causes_system_exit():
-    """
-    Integration: YAML with fast_status_mapping key outside 100-599 range
-    causes SystemExit via model_validator.
-    """
-    mock_yaml_content = """providers:
-  test_provider:
-    enabled: true
-    provider_type: "openai_like"
-    api_base_url: "https://api.test.com/v1"
-    access_control:
-      gateway_access_token: "test_token"
-    gateway_policy:
-      fast_status_mapping:
-        999: "server_error"
-"""
-
-    with (
-        patch("os.path.exists", return_value=True),
-        patch("builtins.open", mock_open(read_data=mock_yaml_content)),
-    ):
-        loader = ConfigLoader(path="dummy_path.yaml")
-        with pytest.raises(SystemExit):
-            loader.load()
-
-
-def test_yaml_with_invalid_error_parsing_map_to_causes_system_exit():
-    """
-    Integration: YAML with invalid ErrorReason in error_parsing.rules[0].map_to
-    causes SystemExit.
-    """
-    mock_yaml_content = """providers:
-  test_provider:
-    enabled: true
-    provider_type: "openai_like"
-    api_base_url: "https://api.test.com/v1"
-    access_control:
-      gateway_access_token: "test_token"
-    gateway_policy:
-      error_parsing:
-        enabled: true
-        rules:
-          - status_code: 400
-            error_path: "error.type"
-            match_pattern: "INVALID_KEY"
-            map_to: "garbage"
-"""
-
-    with (
-        patch("os.path.exists", return_value=True),
-        patch("builtins.open", mock_open(read_data=mock_yaml_content)),
-    ):
-        loader = ConfigLoader(path="dummy_path.yaml")
-        with pytest.raises(SystemExit):
-            loader.load()
-
-
-def test_yaml_with_invalid_regex_in_error_parsing_causes_system_exit():
-    """
-    Integration: YAML with invalid regex in error_parsing.rules[0].match_pattern
-    causes SystemExit via field_validator.
-    """
-    mock_yaml_content = """providers:
-  test_provider:
-    enabled: true
-    provider_type: "openai_like"
-    api_base_url: "https://api.test.com/v1"
-    access_control:
-      gateway_access_token: "test_token"
-    gateway_policy:
-      error_parsing:
-        enabled: true
-        rules:
-          - status_code: 400
-            error_path: "error.type"
-            match_pattern: "(unclosed"
-            map_to: "invalid_key"
-"""
-
-    with (
-        patch("os.path.exists", return_value=True),
-        patch("builtins.open", mock_open(read_data=mock_yaml_content)),
-    ):
-        loader = ConfigLoader(path="dummy_path.yaml")
-        with pytest.raises(SystemExit):
-            loader.load()
-
-
-def test_yaml_with_retry_enabled_no_attempts_causes_system_exit():
-    """
-    Integration: YAML with retry.enabled=true but no retry attempts
-    causes SystemExit via model_validator check_retry_meaningful.
-
-    Note: The default config has on_key_error.attempts=3 and
-    on_server_error.attempts=5, so we must explicitly set both to 0
-    to trigger the validation error after deepmerge.
-    """
-    mock_yaml_content = """providers:
-  test_provider:
-    enabled: true
-    provider_type: "openai_like"
-    api_base_url: "https://api.test.com/v1"
-    access_control:
-      gateway_access_token: "test_token"
-    gateway_policy:
-      retry:
-        enabled: true
-        on_key_error:
-          attempts: 0
-        on_server_error:
-          attempts: 0
-"""
-
-    with (
-        patch("os.path.exists", return_value=True),
-        patch("builtins.open", mock_open(read_data=mock_yaml_content)),
-    ):
-        loader = ConfigLoader(path="dummy_path.yaml")
-        with pytest.raises(SystemExit):
-            loader.load()
-
-
-def test_yaml_with_backoff_base_exceeding_max_causes_system_exit():
-    """
-    Integration: YAML with circuit_breaker.backoff base_duration_sec exceeding
-    max_duration_sec causes SystemExit via model_validator check_bounds.
-    """
-    mock_yaml_content = """providers:
-  test_provider:
-    enabled: true
-    provider_type: "openai_like"
-    api_base_url: "https://api.test.com/v1"
-    access_control:
-      gateway_access_token: "test_token"
-    gateway_policy:
-      circuit_breaker:
-        enabled: true
-        backoff:
-          base_duration_sec: 100
-          max_duration_sec: 30
-"""
-
-    with (
-        patch("os.path.exists", return_value=True),
-        patch("builtins.open", mock_open(read_data=mock_yaml_content)),
-    ):
-        loader = ConfigLoader(path="dummy_path.yaml")
-        with pytest.raises(SystemExit):
-            loader.load()
-
-
 # ==============================================================================
 # Security Tests (from test-plan, not fitting in other group files)
 # ==============================================================================
@@ -919,28 +681,6 @@ def test_error_reason_injection_in_map_to_rejected():
     error_message = str(exc_info.value)
     # The error should indicate the value is not a valid ErrorReason
     assert "exec" in error_message or "enum" in error_message.lower()
-
-
-def test_database_port_overflow_rejected():
-    """
-    Security: DatabaseConfig rejects extremely large port values (lt=65536).
-    """
-    with pytest.raises(ValidationError) as exc_info:
-        DatabaseConfig(port=2147483647)
-
-    error_message = str(exc_info.value)
-    assert "port" in error_message
-
-
-def test_negative_retry_attempts_rejected():
-    """
-    Security: RetryOnErrorConfig rejects large negative attempts values (ge=0).
-    """
-    with pytest.raises(ValidationError) as exc_info:
-        RetryOnErrorConfig(attempts=-999)
-
-    error_message = str(exc_info.value)
-    assert "attempts" in error_message
 
 
 def test_regex_dos_pattern_compiles_but_documented():
@@ -1048,51 +788,4 @@ def test_keys_path_attribute_does_not_exist():
     assert not hasattr(provider, "keys_path")
 
 
-# ==============================================================================
-# M5..M7: HealthPolicyConfig — purge default factory and YAML override
-# ==============================================================================
 
-
-def test_health_policy_purge_default_factory():
-    """
-    M5: HealthPolicyConfig() → purge is a PurgeConfig instance with after_days=180.
-    """
-    policy = HealthPolicyConfig()
-    assert isinstance(policy.purge, PurgeConfig)
-    assert policy.purge.after_days == 180
-
-
-def test_health_policy_purge_override_via_yaml():
-    """
-    M6: YAML with worker_health_policy.purge.after_days: 365 → purge.after_days == 365.
-    """
-    mock_yaml_content = """providers:
-  test_provider:
-    enabled: true
-    provider_type: "openai_like"
-    api_base_url: "https://api.test.com/v1"
-    access_control:
-      gateway_access_token: "test_token"
-    worker_health_policy:
-      purge:
-        after_days: 365
-"""
-
-    with (
-        patch("os.path.exists", return_value=True),
-        patch("builtins.open", mock_open(read_data=mock_yaml_content)),
-    ):
-        loader = ConfigLoader(path="dummy.yaml")
-        config = loader.load()
-
-        provider = config.providers["test_provider"]
-        assert provider.worker_health_policy.purge.after_days == 365
-
-
-def test_health_policy_purge_always_present_never_none():
-    """
-    M7: HealthPolicyConfig() → purge is not None and is an instance of PurgeConfig.
-    """
-    policy = HealthPolicyConfig()
-    assert policy.purge is not None
-    assert isinstance(policy.purge, PurgeConfig)

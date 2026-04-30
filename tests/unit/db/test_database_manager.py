@@ -88,6 +88,7 @@ async def test_wait_for_schema_ready_timeout():
             with pytest.raises(
                 TimeoutError, match="Database schema not ready after 0.1 seconds."
             ):
+                # TODO: fix type mismatch — timeout is typed as int in source but passed as float here
                 await manager.wait_for_schema_ready(timeout=0.1)
             # Should have slept a few times (but timeout short, may not sleep)
             # We'll just ensure sleep was called at least once (since retry interval is 2 seconds,
