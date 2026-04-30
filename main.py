@@ -16,8 +16,8 @@ from src.config import load_config
 from src.config.logging_config import setup_logging
 from src.config.schemas import Config
 from src.core.accessor import ConfigAccessor
-from src.services.keeper import run_keeper
 from src.services.gateway.gateway_service import create_app
+from src.services.keeper import run_keeper
 
 logger = logging.getLogger(__name__)
 
@@ -91,9 +91,19 @@ def _start_gateway_service(args: argparse.Namespace):
         # We only pass the accessor, as the app will manage its own lifecycle.
         app = create_app(accessor=accessor)
 
+        workers = config.gateway.workers
+        if workers > 1:
+            print(
+                "WARNING: workers > 1 requires an import string ('module:app'). "
+                "uvicorn.run() received a direct app object — falling back to 1 worker. "
+                "In containers, scale via replicas (docker-compose up --scale gateway=N), "
+                "not uvicorn workers."
+            )
+            workers = 1
+
         print(
             f"Starting API Gateway on {config.gateway.host}:{config.gateway.port} "
-            f"with {config.gateway.workers} worker(s)..."
+            f"with {workers} worker(s)..."
         )
 
         # This is a blocking call that starts the Uvicorn server.
@@ -101,7 +111,7 @@ def _start_gateway_service(args: argparse.Namespace):
             app,
             host=config.gateway.host,
             port=config.gateway.port,
-            workers=config.gateway.workers,
+            workers=workers,
             access_log=False,
         )
 

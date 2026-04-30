@@ -34,7 +34,8 @@ def test_it_d01_gateway_command():
         "python",
         "main.py",
         "gateway",
-    ], f"gateway command should be exactly ['python', 'main.py', 'gateway']; got {gateway_command}"
+        "--workers", "1",
+    ], f"gateway command should be ['python', 'main.py', 'gateway', '--workers', '1']; got {gateway_command}"
 
 
 # ---------------------------------------------------------------------------

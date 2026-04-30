@@ -163,7 +163,7 @@ def test_cli06_port_override():
 
 
 def test_cli07_uvicorn_run_args():
-    """UT-CLI07: _start_gateway_service(args) calls uvicorn.run(app, host=config.gateway.host, port=config.gateway.port, workers=config.gateway.workers)"""
+    """UT-CLI07: _start_gateway_service(args) caps workers to 1 when passing a direct app object (uvicorn limitation)"""
     config = Config()
     mock_app = MagicMock()
 
@@ -177,11 +177,12 @@ def test_cli07_uvicorn_run_args():
         args = argparse.Namespace(host="192.168.1.1", port=9090, workers=2)
         main._start_gateway_service(args)
 
+    # workers capped to 1: direct app object, not import string
     mock_uvicorn.run.assert_called_once_with(
         mock_app,
         host="192.168.1.1",
         port=9090,
-        workers=2,
+        workers=1,
         access_log=False,
     )
 

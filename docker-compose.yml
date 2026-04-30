@@ -28,6 +28,7 @@ services:
         "python",
         "main.py",
         "gateway",
+        "--workers", "1",
       ]
     restart: unless-stopped
     ports:
