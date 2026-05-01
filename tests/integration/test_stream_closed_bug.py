@@ -12,6 +12,11 @@ Verifies that:
 After the fix: The base provider does NOT close the HTTP stream for 400 without matching rules,
 so the gateway can read the body via aread() and return the original provider error to the client,
 instead of a synthetic placeholder like "Upstream error: bad_request".
+
+Also verifies that forward_error_to_client() handles httpx.StreamClosed on aread() gracefully:
+- Falls back to a JSON body with the ErrorReason value.
+- Always calls aclose() in the finally block (no connection leak).
+- Preserves the original upstream status code (not a synthetic 503).
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -31,6 +36,10 @@ from src.config.schemas import (
 )
 from src.core.constants import ErrorReason
 from src.core.models import CheckResult
+from src.services.gateway.response_forwarder import (
+    UpstreamAttempt,
+    forward_error_to_client,
+)
 
 
 def create_provider_config(
@@ -131,7 +140,7 @@ async def test_stream_closed_bug(
     mock_response.elapsed.total_seconds.return_value = 0.5
 
     # The provider's proxy_request will return this response along with a CheckResult
-    # that indicates BAD_REQUEST (client error).
+    # and body_bytes (None = stream still open, will be read by forward_error_to_client).
     provider.proxy_request = AsyncMock(
         return_value=(
             mock_response,
@@ -141,6 +150,7 @@ async def test_stream_closed_bug(
                 0.5,
                 400,
             ),
+            None,  # body_bytes=None → stream still open, forward_error_to_client reads it
         )
     )
 
@@ -201,7 +211,7 @@ async def test_no_bug_when_error_parsing_rule_matches():
     mock_response.elapsed.total_seconds.return_value = 0.5
 
     # The provider's proxy_request will return a CheckResult with INVALID_KEY (due to rule mapping)
-    # but we can still simulate BAD_REQUEST for simplicity.
+    # and body_bytes (pre-read because the rule matched).
     provider.proxy_request = AsyncMock(
         return_value=(
             mock_response,
@@ -211,6 +221,7 @@ async def test_no_bug_when_error_parsing_rule_matches():
                 0.5,
                 400,
             ),
+            b'{"error": {"message": "Access denied, please make sure your account is in good standing"}}',
         )
     )
 
@@ -222,6 +233,119 @@ async def test_no_bug_when_error_parsing_rule_matches():
         # The gateway will treat INVALID_KEY as a key error (not client error) and may retry.
         # We just ensure no crash.
         assert isinstance(response, Response)
+
+
+@pytest.mark.asyncio
+async def test_stream_closed_on_last_attempt_forward_error_handles_gracefully():
+    """
+    Verify that forward_error_to_client() handles httpx.StreamClosed on aread()
+    gracefully on the last retry attempt.
+
+    When the upstream stream is already closed (e.g. an intermediate attempt
+    already read the body and closed it), calling aread() raises
+    httpx.StreamClosed.  The transparent-error-forwarding change ensures:
+
+    1. The exception is caught — no crash.
+    2. A fallback JSON body is produced: {"error": "Upstream error: <reason>"}.
+    3. aclose() is always called in the finally block — no connection leak.
+    4. The original upstream status code is preserved (not replaced by 503).
+    """
+    # -- Setup: upstream response whose stream is already closed --
+    mock_response = MagicMock(spec=httpx.Response)
+    mock_response.status_code = 500  # original upstream status code
+    mock_response.headers = {
+        "content-type": "application/json",
+        "connection": "keep-alive",
+    }
+
+    # aread() raises StreamClosed because the stream was already consumed
+    mock_response.aread = AsyncMock(side_effect=httpx.StreamClosed())
+
+    # aclose() must be called in the finally block — track it
+    mock_response.aclose = AsyncMock()
+
+    # CheckResult indicating a server error
+    check_result = CheckResult.fail(
+        ErrorReason.SERVER_ERROR,
+        "Upstream returned 500",
+        1.2,
+        500,
+    )
+
+    # body_bytes=None forces forward_error_to_client to attempt aread()
+    response = await forward_error_to_client(
+        upstream_response=mock_response,
+        check_result=check_result,
+        body_bytes=None,
+    )
+
+    # -- Assertions --
+
+    # 1. No crash — we got a Response object
+    assert isinstance(response, Response)
+
+    # 2. The original upstream status code is preserved (500, NOT a synthetic 503)
+    assert response.status_code == 500
+
+    # 3. The fallback body contains the ErrorReason value
+    expected_fallback = b'{"error": "Upstream error: server_error"}'
+    assert response.body == expected_fallback
+
+    # 4. aclose() was called in the finally block — no connection leak
+    mock_response.aclose.assert_awaited_once()
+
+    # 5. Hop-by-hop headers are filtered out (connection header should NOT appear)
+    assert "connection" not in response.headers
+    assert "content-type" in response.headers
+
+
+@pytest.mark.asyncio
+async def test_stream_closed_via_upstream_attempt_forward_error():
+    """
+    Same scenario as above but exercised through the UpstreamAttempt value
+    object's forward_error() method, which delegates to forward_error_to_client.
+
+    This verifies the full delegation chain works correctly when StreamClosed
+    occurs on the last retry attempt.
+    """
+    mock_response = MagicMock(spec=httpx.Response)
+    mock_response.status_code = 429  # original upstream rate-limit status
+    mock_response.headers = {
+        "x-ratelimit-remaining": "0",
+        "transfer-encoding": "chunked",
+    }
+
+    mock_response.aread = AsyncMock(side_effect=httpx.StreamClosed())
+    mock_response.aclose = AsyncMock()
+
+    check_result = CheckResult.fail(
+        ErrorReason.RATE_LIMITED,
+        "Rate limit exceeded",
+        0.8,
+        429,
+    )
+
+    attempt = UpstreamAttempt(
+        response=mock_response,
+        check_result=check_result,
+        body_bytes=None,  # forces aread() attempt
+    )
+
+    response = await attempt.forward_error()
+
+    # Original status code preserved (429, not synthetic 503)
+    assert isinstance(response, Response)
+    assert response.status_code == 429
+
+    # Fallback body with the correct ErrorReason
+    assert response.body == b'{"error": "Upstream error: rate_limited"}'
+
+    # aclose() called — no connection leak
+    mock_response.aclose.assert_awaited_once()
+
+    # Hop-by-hop headers filtered out
+    assert "transfer-encoding" not in response.headers
+    assert "x-ratelimit-remaining" in response.headers
 
 
 if __name__ == "__main__":

@@ -132,6 +132,3 @@ def test_purge_stopped_keys_signature() -> None:
     ), "purge_stopped_keys's db_manager should be annotated as DatabaseManager"
 
     assert sig.return_annotation == "int", "purge_stopped_keys should return int"
-
-
-

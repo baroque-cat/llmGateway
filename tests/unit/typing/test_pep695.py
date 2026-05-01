@@ -75,7 +75,9 @@ def test_forward_references_with_pipe_operator():
         T2 = int | "T1"  # noqa: F841
         # If it doesn't raise, that's unexpected — pipe operator should NOT
         # accept string forward references at runtime
-        pytest.fail("Expected TypeError when using pipe with string forward ref, but it succeeded")
+        pytest.fail(
+            "Expected TypeError when using pipe with string forward ref, but it succeeded"
+        )
     except TypeError:
         # Expected behavior
         pass

@@ -9,7 +9,7 @@ from typing import Annotated, Any
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request, Response
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse
 
 # Import core application components
 from src.core.accessor import ConfigAccessor
@@ -22,7 +22,12 @@ from src.db import database
 from src.db.database import DatabaseManager
 from src.providers import get_provider
 from src.services.gateway.gateway_cache import GatewayCache
-from src.services.gateway.sanitize_content import redact_content
+from src.services.gateway.response_forwarder import (
+    discard_response,
+    forward_buffered_body,
+    forward_error_to_client,
+    forward_success_stream,
+)
 from src.services.metrics_exporter import MetricsService
 
 # --- Dependency Injection Helpers ---
@@ -63,25 +68,6 @@ app_state: dict[str, Any] = {
     "metrics_service": None,  # Add metrics service to app state
     "cache_refresh_task": None,
     "metrics_update_task": None,  # Add metrics update task to app state
-}
-
-# These are headers that control the connection between two nodes (e.g., client and this proxy).
-# They MUST NOT be blindly forwarded to the upstream server, as this can cause protocol conflicts.
-# Headers are lowercase for case-insensitive comparison.
-HOP_BY_HOP_HEADERS: set[str] = {
-    "connection",
-    "keep-alive",
-    "proxy-authenticate",
-    "proxy-authorization",
-    "te",
-    "trailers",
-    "transfer-encoding",
-    "upgrade",
-    # Most importantly, Content-Length must be removed for streaming responses,
-    # as FastAPI/Starlette will use 'Transfer-Encoding: chunked' instead.
-    "content-length",
-    # Content-Encoding (e.g., gzip) is also managed by the client, not forwarded.
-    "content-encoding",
 }
 
 # --- Helper Functions ---
@@ -347,93 +333,6 @@ def _log_debug_info(
         logger.info(f"Response body: {safe_body}")
 
 
-async def _debug_and_respond(
-    upstream_response: httpx.Response,
-    debug_mode: str,
-    instance_name: str,
-    provider_type: str,
-    request: Request,
-    request_body: bytes,
-) -> Response:
-    """
-    Unified handler for reading, logging, and returning a buffered response.
-
-    This consolidates the previously duplicated debug-read-filter-respond
-    logic (5 call sites) into a single async helper.
-
-    1. Reads the upstream body (with ``try`` / ``finally`` around ``aread()``).
-    2. If debug mode is active, pre-sanitizes the body and calls
-       ``_log_debug_info`` (failures are caught and logged, never blocked).
-    3. Filters hop-by-hop headers and returns the ``Response``.
-
-    Args:
-        upstream_response: The raw ``httpx.Response`` from the upstream provider.
-        debug_mode: Effective debug mode string (``"disabled"``, ``"no_content"``,
-            ``"full_body"``).
-        instance_name: Provider instance name for logging.
-        provider_type: Provider type string (e.g. ``"openai_like"``) for content
-            redaction in ``no_content`` mode.
-        request: The original FastAPI ``Request`` object (used for path/method/
-            headers extraction).
-        request_body: The already-buffered request body bytes.
-
-    Returns:
-        A FastAPI ``Response`` with the upstream body and filtered headers.
-    """
-    # --- 1. Read upstream body defensively ---
-    try:
-        body = await upstream_response.aread()
-    except Exception:
-        logger.error("Failed to read upstream body for debug", exc_info=True)
-        body = b""
-    finally:
-        await upstream_response.aclose()
-
-    # --- 2. Pre-sanitize and log if debug is active ---
-    if debug_mode != "disabled":
-        sanitized_request_body = request_body
-        sanitized_response_body = body
-
-        # Apply content redaction for no_content mode
-        if debug_mode == "no_content":
-            try:
-                sanitized_request_body = redact_content(request_body, provider_type)
-                sanitized_response_body = redact_content(body, provider_type)
-            except Exception:
-                logger.error(
-                    "Content redaction failed, falling back to sensitive-only",
-                    exc_info=True,
-                )
-
-        try:
-            _log_debug_info(
-                debug_mode=debug_mode,
-                instance_name=instance_name,
-                request_method=request.method,
-                request_path=str(request.url),
-                request_headers=dict(request.headers),
-                request_body=sanitized_request_body,
-                response_status=upstream_response.status_code,
-                response_headers=dict(upstream_response.headers),
-                response_body=sanitized_response_body,
-                provider_type=provider_type,
-            )
-        except Exception:
-            logger.error("Debug logging failed", exc_info=True)
-
-    # --- 3. Filter headers and return response ---
-    filtered_headers = {
-        k: v
-        for k, v in upstream_response.headers.items()
-        if k.lower() not in HOP_BY_HOP_HEADERS
-    }
-    return Response(
-        content=body,
-        status_code=upstream_response.status_code,
-        headers=filtered_headers,
-    )
-
-
 async def _report_key_failure(
     db_manager: DatabaseManager,
     key_id: int,
@@ -594,7 +493,7 @@ async def _handle_full_stream_request(
     key_id, api_key = key_info
     client = await http_factory.get_client_for_provider(instance_name)
 
-    upstream_response, check_result = await provider.proxy_request(
+    upstream_response, check_result, body_bytes = await provider.proxy_request(
         client=client,
         token=api_key,
         method=request.method,
@@ -606,28 +505,15 @@ async def _handle_full_stream_request(
 
     if check_result.ok:
         # Case 1: Success. Stream the response back to the client using StreamMonitor.
-        # Extract client IP for logging
         client_ip = request.client.host if request.client else "unknown"
-        stream_monitor = StreamMonitor(
+        return await forward_success_stream(
             upstream_response=upstream_response,
+            check_result=check_result,
             client_ip=client_ip,
             request_method=request.method,
             request_path=str(request.url),
             provider_name=instance_name,
             model_name=model_name,
-            check_result=check_result,
-        )
-        # Filter out hop-by-hop headers from the upstream response.
-        filtered_headers = {
-            key: value
-            for key, value in upstream_response.headers.items()
-            if key.lower() not in HOP_BY_HOP_HEADERS
-        }
-        return StreamingResponse(
-            content=stream_monitor,
-            status_code=upstream_response.status_code,
-            media_type=upstream_response.headers.get("content-type"),
-            headers=filtered_headers,
         )
 
     elif check_result.error_reason.is_client_error():
@@ -636,23 +522,8 @@ async def _handle_full_stream_request(
             f"Request for '{instance_name}' failed due to a client-side error: [{check_result.error_reason.value}]. "
             f"The API key (ID: {key_id}) will NOT be penalized. Forwarding original error to client."
         )
-        # Read the error body from the upstream to forward it.
-        try:
-            response_body = await upstream_response.aread()
-        except Exception:
-            response_body = f'{{"error": "Upstream error: {check_result.message or check_result.error_reason.value}"}}'.encode()
-        finally:
-            await upstream_response.aclose()
-        # Filter headers just like in the success case.
-        filtered_headers = {
-            key: value
-            for key, value in upstream_response.headers.items()
-            if key.lower() not in HOP_BY_HOP_HEADERS
-        }
-        return Response(
-            content=response_body,
-            status_code=upstream_response.status_code,
-            headers=filtered_headers,
+        return await forward_error_to_client(
+            upstream_response, check_result, body_bytes
         )
 
     else:
@@ -662,17 +533,12 @@ async def _handle_full_stream_request(
             f"The API key (ID: {key_id}) WILL be penalized."
         )
 
-        try:
-            response_body = await upstream_response.aread()
-        except Exception:
-            response_body = b""
-        finally:
-            await upstream_response.aclose()
-
         effective_debug_mode = request.app.state.debug_mode_map.get(
             instance_name, "disabled"
         )
         if effective_debug_mode != "disabled":
+            if body_bytes is None:
+                body_bytes = await upstream_response.aread()
             _log_debug_info(
                 debug_mode=effective_debug_mode,
                 instance_name=instance_name,
@@ -682,9 +548,8 @@ async def _handle_full_stream_request(
                 request_body=b"",  # We don't have the original request body in full stream mode
                 response_status=upstream_response.status_code,
                 response_headers=dict(upstream_response.headers),
-                response_body=response_body,
+                response_body=body_bytes,
             )
-        # ------------------------------------------------
 
         # Report and remove the failed key from the live cache.
         asyncio.create_task(
@@ -695,11 +560,8 @@ async def _handle_full_stream_request(
         asyncio.create_task(
             cache.remove_key_from_pool(instance_name, model_name, key_id)
         )
-        return JSONResponse(
-            status_code=503,
-            content={
-                "error": f"Upstream service failed: {check_result.error_reason.value}"
-            },
+        return await forward_error_to_client(
+            upstream_response, check_result, body_bytes
         )
 
 
@@ -740,7 +602,6 @@ async def _handle_buffered_retryable_request(
     total_attempts = 0
     key_error_attempts = 0
     server_error_attempts = 0
-    last_error_response = None
 
     while True:
         total_attempts += 1
@@ -748,7 +609,7 @@ async def _handle_buffered_retryable_request(
             instance_name, details.model_name, exclude_key_ids=failed_key_ids
         )
         if not key_info:
-            return last_error_response or JSONResponse(
+            return JSONResponse(
                 status_code=503,
                 content={"error": "No available API keys to handle the request."},
             )
@@ -756,7 +617,7 @@ async def _handle_buffered_retryable_request(
         key_id, api_key = key_info
         client = await http_factory.get_client_for_provider(instance_name)
 
-        upstream_response, check_result = await provider.proxy_request(
+        upstream_response, check_result, body_bytes = await provider.proxy_request(
             client=client,
             token=api_key,
             method=request.method,
@@ -773,36 +634,18 @@ async def _handle_buffered_retryable_request(
             )
 
             if effective_debug_mode != "disabled":
-                return await _debug_and_respond(
-                    upstream_response=upstream_response,
-                    debug_mode=effective_debug_mode,
-                    instance_name=instance_name,
-                    provider_type=provider_config.provider_type,
-                    request=request,
-                    request_body=request_body,
-                )
+                return await forward_buffered_body(upstream_response, body_bytes)
             else:
                 # Normal streaming response when debug is disabled
                 client_ip = request.client.host if request.client else "unknown"
-                stream_monitor = StreamMonitor(
+                return await forward_success_stream(
                     upstream_response=upstream_response,
+                    check_result=check_result,
                     client_ip=client_ip,
                     request_method=request.method,
                     request_path=str(request.url),
                     provider_name=instance_name,
                     model_name=details.model_name,
-                    check_result=check_result,
-                )
-                filtered_headers = {
-                    key: value
-                    for key, value in upstream_response.headers.items()
-                    if key.lower() not in HOP_BY_HOP_HEADERS
-                }
-                return StreamingResponse(
-                    content=stream_monitor,
-                    status_code=upstream_response.status_code,
-                    media_type=upstream_response.headers.get("content-type"),
-                    headers=filtered_headers,
                 )
 
         reason = check_result.error_reason
@@ -823,46 +666,14 @@ async def _handle_buffered_retryable_request(
                 instance_name, "disabled"
             )
             if effective_debug_mode != "disabled":
-                return await _debug_and_respond(
-                    upstream_response=upstream_response,
-                    debug_mode=effective_debug_mode,
-                    instance_name=instance_name,
-                    provider_type=provider_config.provider_type,
-                    request=request,
-                    request_body=request_body,
-                )
+                return await forward_buffered_body(upstream_response, body_bytes)
 
-            try:
-                response_body = await upstream_response.aread()
-            except Exception:
-                response_body = f'{{"error": "Upstream error: {check_result.message or check_result.error_reason.value}"}}'.encode()
-            finally:
-                await upstream_response.aclose()
-
-            filtered_headers = {
-                key: value
-                for key, value in upstream_response.headers.items()
-                if key.lower() not in HOP_BY_HOP_HEADERS
-            }
-            last_error_response = Response(
-                content=response_body,
-                status_code=upstream_response.status_code,
-                headers=filtered_headers,
+            return await forward_error_to_client(
+                upstream_response, check_result, body_bytes
             )
-            break  # Exit the loop immediately
 
         # Case 3: Key-specific failures OR Overloaded (503).
-        # CRITICAL FIX: We explicitly treat ErrorReason.OVERLOADED as a key failure here.
-        # Even though 503 is technically a "server" error in standard HTTP, for LLM providers (like Gemini),
-        # it typically means the specific key/project is rate-limited or overloaded.
-        # Therefore, we must rotate the key (remove current, get new) instead of just waiting.
         if (not reason.is_retryable()) or (reason == ErrorReason.OVERLOADED):
-            # Phase 0 fix: Immediate penalty if fatal
-            # (Note: reason.is_fatal() is now true for INVALID_KEY, NO_QUOTA etc from previous refactor)
-
-            # Close the upstream connection to prevent connection pool leaks
-            await upstream_response.aclose()
-
             # Add to local blacklist to prevent fetching the same broken key again
             failed_key_ids.add(key_id)
 
@@ -886,13 +697,11 @@ async def _handle_buffered_retryable_request(
             )
 
             key_error_attempts += 1
-            server_error_attempts = (
-                0  # CRITICAL: Reset server error tracking for the next key
-            )
+            server_error_attempts = 0
 
             if key_error_attempts < key_error_policy.attempts:
-                # NEW LOGIC: Apply backoff for key rotation to prevent "Key Storm"
-                # This protects the DB and logic from spinning too fast if all keys are bad
+                # Intermediate attempt: discard and retry with next key
+                await discard_response(upstream_response, body_bytes)
                 delay = key_error_policy.backoff_sec * (
                     key_error_policy.backoff_factor ** (key_error_attempts - 1)
                 )
@@ -905,20 +714,16 @@ async def _handle_buffered_retryable_request(
                 logger.error(
                     f"Exhausted all {key_error_policy.attempts} retry attempts for key errors."
                 )
-                last_error_response = JSONResponse(
-                    status_code=503,
-                    content={"error": f"Upstream service failed: {reason.value}"},
+                return await forward_error_to_client(
+                    upstream_response, check_result, body_bytes
                 )
-                break
 
         # Case 4: True Transient Server Errors (Timeout, Connection Error, etc).
-        # These are unrelated to the specific key, so we keep the key and use backoff.
         elif reason.is_retryable():
-            # Close the upstream connection to prevent connection pool leaks
-            await upstream_response.aclose()
-
             server_error_attempts += 1
             if server_error_attempts < server_error_policy.attempts:
+                # Intermediate server error attempt: discard and retry
+                await discard_response(upstream_response, body_bytes)
                 delay = server_error_policy.backoff_sec * (
                     server_error_policy.backoff_factor ** (server_error_attempts - 1)
                 )
@@ -954,11 +759,10 @@ async def _handle_buffered_retryable_request(
 
                 # Fall through to Key Rotation logic
                 key_error_attempts += 1
-                server_error_attempts = (
-                    0  # CRITICAL: Reset server attempts for the new key
-                )
+                server_error_attempts = 0
 
                 if key_error_attempts < key_error_policy.attempts:
+                    await discard_response(upstream_response, body_bytes)
                     delay = key_error_policy.backoff_sec * (
                         key_error_policy.backoff_factor ** (key_error_attempts - 1)
                     )
@@ -968,15 +772,9 @@ async def _handle_buffered_retryable_request(
                     await asyncio.sleep(delay)
                     continue
                 else:
-                    last_error_response = JSONResponse(
-                        status_code=503,
-                        content={"error": f"Upstream service failed: {reason.value}"},
+                    return await forward_error_to_client(
+                        upstream_response, check_result, body_bytes
                     )
-                    break
-
-    return last_error_response or JSONResponse(
-        status_code=503, content={"error": "All retry attempts failed."}
-    )
 
 
 # --- FastAPI Application Factory and Event Handlers ---

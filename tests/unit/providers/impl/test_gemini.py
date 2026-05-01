@@ -618,7 +618,7 @@ class TestGeminiProxyRequest:
         content = b'{"prompt": "Hello"}'
 
         # Call proxy_request
-        response, check_result = await provider.proxy_request(
+        response, check_result, body_bytes = await provider.proxy_request(
             mock_client, token, method, headers, path, query_params, content
         )
 
@@ -670,7 +670,7 @@ class TestGeminiProxyRequest:
         content = async_iterable()
 
         # Call proxy_request
-        response, check_result = await provider.proxy_request(
+        response, check_result, body_bytes = await provider.proxy_request(
             mock_client, token, method, headers, path, query_params, content
         )
 
@@ -687,3 +687,41 @@ class TestGeminiProxyRequest:
         # AsyncIterable should be passed as content parameter
         assert call_kwargs["content"] == content
         assert "data" not in call_kwargs
+
+    @pytest.mark.asyncio
+    async def test_gemini_proxy_request_returns_three_element_tuple(self):
+        """Test proxy_request() returns (response, check_result, body_bytes) — third element pass-through from _send_proxy_request()."""
+        provider = self.create_mock_provider()
+        mock_client = MagicMock(spec=httpx.AsyncClient)
+        mock_request = MagicMock(spec=httpx.Request)
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.is_success = True
+
+        mock_client.build_request = MagicMock(return_value=mock_request)
+
+        expected_check_result = CheckResult.success(status_code=200)
+        expected_body_bytes = b"upstream response body"
+
+        # Mock _send_proxy_request to return a 3-element tuple
+        provider._send_proxy_request = AsyncMock(
+            return_value=(mock_response, expected_check_result, expected_body_bytes)
+        )
+
+        token = "test_token"
+        method = "POST"
+        headers = {"Content-Type": "application/json"}
+        path = "v1beta/models/gemini-pro:generateContent"
+        query_params = ""
+        content = b'{"prompt": "Hello"}'
+
+        result = await provider.proxy_request(
+            mock_client, token, method, headers, path, query_params, content
+        )
+
+        # Verify proxy_request returns a 3-element tuple
+        assert isinstance(result, tuple)
+        assert len(result) == 3
+        assert result[0] is mock_response
+        assert result[1] is expected_check_result
+        assert result[2] is expected_body_bytes

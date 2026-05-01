@@ -131,7 +131,7 @@ class IProvider(ABC):
         path: str,
         query_params: str,
         content: bytes | AsyncGenerator[bytes],
-    ) -> tuple[httpx.Response, CheckResult]:
+    ) -> tuple[httpx.Response, CheckResult, bytes | None]:
         """
         Proxies an incoming client request to the target API provider. (Async)
 
@@ -149,11 +149,9 @@ class IProvider(ABC):
             content: The raw byte content or async generator of bytes (body) of the original request.
 
         Returns:
-            A tuple containing:
-            1. The raw `httpx.Response` object from the upstream provider,
-               which supports streaming the response body.
-            2. A `CheckResult` object generated from the response, used for
-               logging and decision-making (e.g., for the circuit breaker).
+            A 3-tuple of ``(httpx.Response, CheckResult, bytes | None)``.
+            The third element is the pre-read upstream body when debug_mode
+            or error_parsing triggered ``aread()``, otherwise ``None``.
         """
         pass
 

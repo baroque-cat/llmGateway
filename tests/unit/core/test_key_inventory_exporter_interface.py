@@ -133,6 +133,3 @@ def test_export_inventory_signature_accepts_statuses() -> None:
     assert (
         sig.return_annotation is None or sig.return_annotation == "None"
     ), "export_inventory should return None"
-
-
-

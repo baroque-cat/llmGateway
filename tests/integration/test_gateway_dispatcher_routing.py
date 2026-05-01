@@ -343,10 +343,11 @@ async def test_debug_mode_forces_buffered_response_no_streaming():
     When debug_mode is "no_content" and upstream returns text/event-stream,
     the gateway must call aread() (not StreamMonitor) and return a non-streaming
     Response. Debug mode forces buffered response regardless of content-type.
+
+    After the transparent-error-forwarding refactor, _debug_and_respond was
+    replaced by forward_buffered_body() in response_forwarder.py.
     """
-    from src.services.gateway.gateway_service import (
-        _debug_and_respond,
-    )
+    from src.services.gateway.response_forwarder import forward_buffered_body
 
     # Build a mock upstream response with SSE content-type
     upstream_response = MagicMock()
@@ -354,35 +355,17 @@ async def test_debug_mode_forces_buffered_response_no_streaming():
     upstream_response.headers = httpx.Headers(
         {"content-type": "text/event-stream", "x-request-id": "req-123"}
     )
-    upstream_response.aread = AsyncMock(return_value=b'data: {"choices": []}\n\n')
+
+    # When body_bytes is None, forward_buffered_body reads via aread() and
+    # closes via aclose() in finally.  Set up the mocks accordingly.
+    response_body = b'data: {"choices": []}\n\n'
+    upstream_response.aread = AsyncMock(return_value=response_body)
     upstream_response.aclose = AsyncMock()
 
-    # Build a mock request with debug_mode_map set to "no_content"
-    request = MagicMock()
-    request.method = "POST"
-    request.url = MagicMock()
-    request.url.__str__ = lambda self: "http://test/v1/chat/completions"
-    request.headers = {
-        "authorization": "Bearer test-token",
-        "content-type": "application/json",
-    }
-
-    state = MagicMock()
-    state.debug_mode_map = {"test_instance": "no_content"}
-    request.app.state = state
-
-    request_body = (
-        b'{"model": "gpt-4", "messages": [{"role": "user", "content": "hello"}]}'
-    )
-
-    # Call _debug_and_respond directly
-    response = await _debug_and_respond(
+    # Call forward_buffered_body with body_bytes=None (stream still open)
+    response = await forward_buffered_body(
         upstream_response=upstream_response,
-        debug_mode="no_content",
-        instance_name="test_instance",
-        provider_type="openai_like",
-        request=request,
-        request_body=request_body,
+        body_bytes=None,
     )
 
     # Verify aread() was called (not StreamMonitor)
@@ -396,7 +379,7 @@ async def test_debug_mode_forces_buffered_response_no_streaming():
     assert isinstance(response, StarletteResponse)
     assert not isinstance(response, StreamingResponse)
     # Verify the response body contains the upstream data
-    assert response.body == b'data: {"choices": []}\n\n'
+    assert response.body == response_body
     assert response.status_code == 200
 
 

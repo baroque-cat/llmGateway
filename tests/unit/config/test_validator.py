@@ -786,6 +786,3 @@ def test_keys_path_attribute_does_not_exist():
 
     provider = ProviderConfig(provider_type="gemini")
     assert not hasattr(provider, "keys_path")
-
-
-

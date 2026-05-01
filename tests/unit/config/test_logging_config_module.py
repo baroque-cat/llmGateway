@@ -225,6 +225,3 @@ class TestLoggingConfiguration:
             # Other loggers remain unchanged
             mock_httpx_logger.setLevel.assert_called_once_with(logging.WARNING)
             mock_uvicorn_access_logger.setLevel.assert_called_once_with(logging.WARNING)
-
-
-

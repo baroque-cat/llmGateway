@@ -208,42 +208,45 @@ class AIBaseProvider(IProvider):
     # --- REFACTORED: Protected helper method for sending requests (Template Method pattern) ---
     async def _send_proxy_request(
         self, client: httpx.AsyncClient, request: httpx.Request
-    ) -> tuple[httpx.Response, CheckResult]:
+    ) -> tuple[httpx.Response, CheckResult, bytes | None]:
         """
         Sends a pre-built proxy request and parses the result.
 
         This method encapsulates the common logic for sending a request,
         handling network errors, and processing successful/failed responses.
         It delegates the parsing of provider-specific errors to the
-        `_parse_proxy_error` method.
+        ``_parse_proxy_error`` method.
 
-        For the Zero-Overhead Fallback path (no error_parsing, no debug_mode),
-        the upstream stream is normally closed with aclose() to release
-        resources. However, for HTTP 400 (Bad Request), the stream is intentionally
-        left open so the gateway's client-error handler can read the body via aread()
-        and return the original provider error message to the client, instead of a
-        synthetic placeholder.
+        The upstream stream is **never** closed by this method.  The caller
+        (gateway handler) takes ownership of the connection lifecycle via
+        :class:`~src.services.gateway.response_forwarder.UpstreamAttempt`.
 
         Args:
             client: The httpx.AsyncClient to use for the request.
             request: The pre-built httpx.Request object.
 
         Returns:
-            A tuple containing the raw httpx.Response and a parsed CheckResult.
+            A 3-tuple of ``(httpx.Response, CheckResult, body_bytes | None)``.
+            *body_bytes* is the pre-read body when debug_mode or error_parsing
+            triggered ``aread()``, otherwise ``None`` (stream is still open).
         """
+        content_bytes: bytes | None = None
+
         try:
             upstream_response = await client.send(request, stream=True)
 
             if upstream_response.is_success:
-                # --- FIXED: Do NOT access .elapsed on a successful streaming response ---
+                # --- Do NOT access .elapsed on a successful streaming response ---
                 # The response body has not been read yet, so accessing .elapsed
                 # would raise a RuntimeError. For a successful proxy, we only
                 # need to confirm it's okay and pass the status code.
                 check_result = CheckResult.success(
                     status_code=upstream_response.status_code
                 )
+                # Body not read — stream is open for the gateway to stream.
+                content_bytes = None
             else:
-                # --- NEW: Zero-Overhead Error Handling Pipeline ---
+                # --- Zero-Overhead Error Handling Pipeline ---
                 status_code = upstream_response.status_code
                 gateway_policy = self.config.gateway_policy
                 error_config = self.config.error_parsing
@@ -251,13 +254,10 @@ class AIBaseProvider(IProvider):
                 # 1. Debug Mode or Error Parsing (Read Body)
                 should_read_body = False
 
-                # Check Debug Mode (both full_body and no_content need the body)
                 if gateway_policy.debug_mode in ("full_body", "no_content"):
                     should_read_body = True
 
-                # Check Error Parsing Rules
                 elif error_config.enabled:
-                    # Only read if there is a rule for this specific status code
                     for rule in error_config.rules:
                         if rule.status_code == status_code:
                             should_read_body = True
@@ -271,20 +271,14 @@ class AIBaseProvider(IProvider):
                         logger.error(f"Failed to read error response body: {e}")
                         content_bytes = None
 
-                    # Delegate parsing with content
                     check_result = await self._parse_proxy_error(
                         upstream_response, content_bytes
                     )
                 else:
-                    # STOP: Fast Fallback (Default Behavior)
-                    # Do NOT read body; close stream to release resources.
-                    # Exception: For status 400, preserve the stream so the gateway
-                    # can read the error body via aread() and return it to the client
-                    # instead of a synthetic placeholder.
-                    if status_code != 400:
-                        await upstream_response.aclose()
-
-                    # Delegate parsing WITHOUT content (will use status code mapping)
+                    # Zero-Overhead Fast Fallback (Default Behavior)
+                    # Do NOT read body, do NOT close stream.
+                    # The gateway handler decides whether to discard or forward.
+                    content_bytes = None
                     check_result = await self._parse_proxy_error(
                         upstream_response, None
                     )
@@ -295,10 +289,10 @@ class AIBaseProvider(IProvider):
             check_result = CheckResult.fail(
                 ErrorReason.NETWORK_ERROR, error_message, status_code=503
             )
-            # Create a synthetic response for the gateway to handle gracefully.
             upstream_response = httpx.Response(503, content=error_message.encode())
+            content_bytes = None
 
-        return upstream_response, check_result
+        return upstream_response, check_result, content_bytes
 
     # --- Abstract method for provider-specific error parsing ---
     @abstractmethod
@@ -365,8 +359,10 @@ class AIBaseProvider(IProvider):
         path: str,
         query_params: str,
         content: bytes | AsyncGenerator[bytes],
-    ) -> tuple[httpx.Response, CheckResult]:
+    ) -> tuple[httpx.Response, CheckResult, bytes | None]:
         """
         (Abstract) Proxies an incoming client request to the target API provider. (Async)
+
+        Returns a 3-tuple of ``(httpx.Response, CheckResult, body_bytes | None)``.
         """
         raise NotImplementedError

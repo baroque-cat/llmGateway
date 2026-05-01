@@ -63,10 +63,10 @@ class MockAIBaseProvider(AIBaseProvider):
         path: str,
         query_params: str,
         content: bytes,
-    ) -> tuple[httpx.Response, CheckResult]:
+    ) -> tuple[httpx.Response, CheckResult, bytes | None]:
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
-        return mock_response, CheckResult.success()
+        return mock_response, CheckResult.success(), None
 
 
 class TestErrorParsingBase:
@@ -150,7 +150,9 @@ class TestErrorParsingBase:
 
         # Data is None - method expects Dict[str, Any], but we test edge case
         # Skipping as None is not valid for the method signature
-        pytest.skip("_extract_json_value expects Dict[str, Any]; None is outside the method's contract")
+        pytest.skip(
+            "_extract_json_value expects Dict[str, Any]; None is outside the method's contract"
+        )
 
     # --- Tests for _refine_error_reason ---
 
@@ -922,14 +924,14 @@ class TestErrorParsingBase:
         assert result == ErrorReason.NO_QUOTA
 
 
-class TestSendProxyRequest400BodyPreservation:
+class TestSendProxyRequestChangedContract:
     """
-    Test suite for the preserve-400-error-body change in _send_proxy_request.
+    Test suite for the transparent-error-forwarding change in _send_proxy_request.
 
-    Verifies that for HTTP 400 in the Zero-Overhead Fallback branch,
-    the upstream stream is NOT closed (so the gateway can read the body
-    via aread() and return the original provider error to the client).
-    All other status codes keep the existing behavior (stream closed).
+    Verifies that _send_proxy_request returns a 3-tuple
+    (httpx.Response, CheckResult, bytes | None), never calls aclose(),
+    and returns body_bytes=None when the stream is left open (no debug/error_parsing),
+    or body_bytes=bytes when the body was read (debug/error_parsing).
     """
 
     def _create_provider_with_config(
@@ -969,16 +971,16 @@ class TestSendProxyRequest400BodyPreservation:
         mock_response.aclose = AsyncMock()
         return mock_response
 
-    # --- UT-1: 400 without rules — stream NOT closed ---
+    # --- UT-1: 400 without rules — body_bytes=None, stream open ---
     @pytest.mark.asyncio
-    async def test_400_without_rules_stream_not_closed(self):
+    async def test_send_proxy_request_400_without_rules_body_none_stream_open(self):
         """
-        UT-1: _send_proxy_request with 400,
+        UT-1 (modified): _send_proxy_request with 400,
         no debug_mode, no error_parsing.
 
-        Verifies: aclose() is NOT called, _parse_proxy_error is called
-        with content=None, CheckResult.fail(BAD_REQUEST) is returned
-        with an open stream.
+        Verifies: body_bytes=None (stream not read), aclose() NOT called,
+        _parse_proxy_error called with content=None,
+        CheckResult.fail(BAD_REQUEST) returned, stream left open.
         """
         provider = self._create_provider_with_config()
 
@@ -987,17 +989,19 @@ class TestSendProxyRequest400BodyPreservation:
         mock_client.send = AsyncMock(return_value=mock_upstream)
         mock_request = MagicMock(spec=httpx.Request)
 
-        # Patch _parse_proxy_error to track its call and return BAD_REQUEST
         with patch.object(
             provider,
             "_parse_proxy_error",
             new=AsyncMock(return_value=CheckResult.fail(ErrorReason.BAD_REQUEST)),
         ) as mock_parse:
-            response, check_result = await provider._send_proxy_request(
+            response, check_result, body_bytes = await provider._send_proxy_request(
                 mock_client, mock_request
             )
 
-            # Verify: aclose() was NOT called (stream preserved for 400)
+            # Verify: body_bytes is None (stream open, not read)
+            assert body_bytes is None
+
+            # Verify: aclose() NOT called (stream management is caller's responsibility)
             mock_upstream.aclose.assert_not_called()
 
             # Verify: _parse_proxy_error was called with content=None
@@ -1007,52 +1011,46 @@ class TestSendProxyRequest400BodyPreservation:
             assert check_result.available is False
             assert check_result.error_reason == ErrorReason.BAD_REQUEST
 
-            # Verify: the response stream is still open (aread would work)
-            # The mock's aread hasn't been consumed by _send_proxy_request
+            # Verify: aread() NOT called (stream preserved)
             mock_upstream.aread.assert_not_called()
 
-    # --- UT-2: 401 without rules — stream closed (regression) ---
+    # --- UT-2/UT-6 combined: aclose() never called for any status code ---
     @pytest.mark.asyncio
-    async def test_401_without_rules_stream_closed_regression(self):
+    async def test_send_proxy_request_never_calls_aclose(self):
         """
-        UT-2: _send_proxy_request with 401,
-        no debug_mode, no error_parsing.
+        UT-2/UT-6 (modified): _send_proxy_request NO LONGER calls aclose()
+        for any status codes (including 401, 500).
 
-        Verifies: aclose() IS called (existing Zero-Overhead Fallback
-        behavior unchanged for non-400 codes).
+        After the transparent-error-forwarding change, stream management
+        is the caller's responsibility. _send_proxy_request never closes
+        the stream.
         """
-        provider = self._create_provider_with_config()
+        for status_code in [400, 401, 429, 500, 502, 503]:
+            provider = self._create_provider_with_config()
+            mock_upstream = self._create_mock_upstream_response(status_code=status_code)
+            mock_client = AsyncMock(spec=httpx.AsyncClient)
+            mock_client.send = AsyncMock(return_value=mock_upstream)
+            mock_request = MagicMock(spec=httpx.Request)
 
-        mock_upstream = self._create_mock_upstream_response(status_code=401)
-        mock_client = AsyncMock(spec=httpx.AsyncClient)
-        mock_client.send = AsyncMock(return_value=mock_upstream)
-        mock_request = MagicMock(spec=httpx.Request)
+            with patch.object(
+                provider,
+                "_parse_proxy_error",
+                new=AsyncMock(return_value=CheckResult.fail(ErrorReason.UNKNOWN)),
+            ):
+                _, _, _ = await provider._send_proxy_request(mock_client, mock_request)
 
-        with patch.object(
-            provider,
-            "_parse_proxy_error",
-            new=AsyncMock(return_value=CheckResult.fail(ErrorReason.INVALID_KEY)),
-        ) as mock_parse:
-            response, check_result = await provider._send_proxy_request(
-                mock_client, mock_request
-            )
+                # Verify: aclose() NOT called for any status code
+                mock_upstream.aclose.assert_not_called()
 
-            # Verify: aclose() WAS called (stream closed for 401)
-            mock_upstream.aclose.assert_called_once()
-
-            # Verify: _parse_proxy_error was called with content=None
-            mock_parse.assert_called_once_with(mock_upstream, None)
-
-    # --- UT-4: 400 + error_parsing — body read, error_parsing priority ---
+    # --- UT-4: error_parsing reads body, returns body_bytes ---
     @pytest.mark.asyncio
-    async def test_400_with_error_parsing_body_read_priority(self):
+    async def test_send_proxy_request_error_parsing_reads_body_returns_bytes(self):
         """
-        UT-4: _send_proxy_request with 400, error_parsing.enabled = true,
+        UT-4 (modified): _send_proxy_request with 400, error_parsing.enabled = true,
         rule exists for 400.
 
-        Verifies: aread() IS called (error_parsing has priority),
-        _refine_error_reason is called with body content,
-        _parse_proxy_error receives content_bytes, stream is consumed.
+        Verifies: aread() IS called, body_bytes has the read body,
+        aclose() NOT called, _parse_proxy_error receives content_bytes.
         """
         provider = self._create_provider_with_config(
             error_parsing_enabled=True,
@@ -1073,36 +1071,37 @@ class TestSendProxyRequest400BodyPreservation:
         mock_client.send = AsyncMock(return_value=mock_upstream)
         mock_request = MagicMock(spec=httpx.Request)
 
-        # Patch _parse_proxy_error to track its call and return a result
         with patch.object(
             provider,
             "_parse_proxy_error",
             new=AsyncMock(return_value=CheckResult.fail(ErrorReason.INVALID_KEY)),
         ) as mock_parse:
-            response, check_result = await provider._send_proxy_request(
+            response, check_result, body_bytes = await provider._send_proxy_request(
                 mock_client, mock_request
             )
 
             # Verify: aread() WAS called (error_parsing reads body)
             mock_upstream.aread.assert_called_once()
 
-            # Verify: _parse_proxy_error was called with content_bytes (not None)
-            call_args = mock_parse.call_args
-            assert (
-                call_args[0][1] is not None
-            ), "Expected content_bytes to be passed to _parse_proxy_error, got None"
+            # Verify: body_bytes has the read body
+            assert body_bytes == body
 
-            # Verify: the content_bytes match the body
+            # Verify: aclose() NOT called (stream management is caller's responsibility)
+            mock_upstream.aclose.assert_not_called()
+
+            # Verify: _parse_proxy_error was called with content_bytes
+            call_args = mock_parse.call_args
             assert call_args[0][1] == body
 
-    # --- UT-5: 400 + debug_mode — body read, debug priority ---
+    # --- UT-5: debug_mode reads body, returns body_bytes ---
     @pytest.mark.asyncio
-    async def test_400_with_debug_mode_body_read_priority(self):
+    async def test_send_proxy_request_debug_mode_reads_body_returns_bytes(self):
         """
-        UT-5: _send_proxy_request with 400, debug_mode = "full_body".
+        UT-5 (modified): _send_proxy_request with 400, debug_mode = "full_body".
 
-        Verifies: aread() IS called (debug mode has priority over
-        Zero-Overhead Fallback), body read for logging.
+        Verifies: aread() IS called, body_bytes has the read body,
+        aclose() NOT called (already closed by aread(), but _send_proxy_request
+        doesn't call it either).
         """
         provider = self._create_provider_with_config(debug_mode="full_body")
 
@@ -1117,47 +1116,53 @@ class TestSendProxyRequest400BodyPreservation:
             "_parse_proxy_error",
             new=AsyncMock(return_value=CheckResult.fail(ErrorReason.BAD_REQUEST)),
         ) as mock_parse:
-            response, check_result = await provider._send_proxy_request(
+            response, check_result, body_bytes = await provider._send_proxy_request(
                 mock_client, mock_request
             )
 
             # Verify: aread() WAS called (debug mode reads body)
             mock_upstream.aread.assert_called_once()
 
+            # Verify: body_bytes has the read body
+            assert body_bytes == body
+
+            # Verify: aclose() NOT called
+            mock_upstream.aclose.assert_not_called()
+
             # Verify: _parse_proxy_error was called with content_bytes
             call_args = mock_parse.call_args
             assert call_args[0][1] == body
 
-    # --- UT-6: 500 without rules — stream closed (regression) ---
+    # --- NEW: _send_proxy_request returns 3-element tuple ---
     @pytest.mark.asyncio
-    async def test_500_without_rules_stream_closed_regression(self):
+    async def test_send_proxy_request_returns_three_element_tuple(self):
         """
-        UT-6: _send_proxy_request with 500,
-        no debug_mode, no error_parsing.
-
-        Verifies: aclose() IS called (existing behavior for 5xx unchanged).
+        Verifies: _send_proxy_request returns a 3-element tuple
+        (httpx.Response, CheckResult, bytes | None).
         """
         provider = self._create_provider_with_config()
 
-        mock_upstream = self._create_mock_upstream_response(status_code=500)
+        mock_upstream = self._create_mock_upstream_response(status_code=200)
         mock_client = AsyncMock(spec=httpx.AsyncClient)
         mock_client.send = AsyncMock(return_value=mock_upstream)
         mock_request = MagicMock(spec=httpx.Request)
 
-        with patch.object(
-            provider,
-            "_parse_proxy_error",
-            new=AsyncMock(return_value=CheckResult.fail(ErrorReason.SERVER_ERROR)),
-        ) as mock_parse:
-            response, check_result = await provider._send_proxy_request(
-                mock_client, mock_request
-            )
+        result = await provider._send_proxy_request(mock_client, mock_request)
 
-            # Verify: aclose() WAS called (stream closed for 500)
-            mock_upstream.aclose.assert_called_once()
+        # Verify: result is a 3-element tuple
+        assert isinstance(result, tuple)
+        assert len(result) == 3
 
-            # Verify: _parse_proxy_error was called with content=None
-            mock_parse.assert_called_once_with(mock_upstream, None)
+        response, check_result, body_bytes = result
+
+        # Verify: first element is the upstream response
+        assert response is mock_upstream
+
+        # Verify: second element is a CheckResult
+        assert isinstance(check_result, CheckResult)
+
+        # Verify: third element is None or bytes
+        assert body_bytes is None or isinstance(body_bytes, bytes)
 
     # --- BASE-10: _send_proxy_request has no fast_status_mapping branch ---
     @pytest.mark.asyncio
@@ -1195,7 +1200,7 @@ class TestSendProxyRequest400BodyPreservation:
             "_parse_proxy_error",
             new=AsyncMock(return_value=CheckResult.fail(ErrorReason.INVALID_KEY)),
         ):
-            _, result = await provider_with_parsing._send_proxy_request(
+            _, result, _body = await provider_with_parsing._send_proxy_request(
                 mock_client, mock_request
             )
             # Body was read (error_parsing branch)
@@ -1214,7 +1219,7 @@ class TestSendProxyRequest400BodyPreservation:
             "_parse_proxy_error",
             new=AsyncMock(return_value=CheckResult.fail(ErrorReason.BAD_REQUEST)),
         ):
-            _, result2 = await provider_fallback._send_proxy_request(
+            _, result2, _body2 = await provider_fallback._send_proxy_request(
                 mock_client2, mock_request
             )
             # Body was NOT read (fallback branch)
@@ -1259,10 +1264,146 @@ class TestSendProxyRequest400BodyPreservation:
             "_parse_proxy_error",
             new=AsyncMock(return_value=CheckResult.fail(ErrorReason.INVALID_KEY)),
         ):
-            _, result = await provider._send_proxy_request(mock_client, mock_request)
+            _, result, _body = await provider._send_proxy_request(
+                mock_client, mock_request
+            )
             # Body was read because error_parsing.enabled=True and rule matches 400
             mock_upstream.aread.assert_called_once()
             assert result.error_reason == ErrorReason.INVALID_KEY
+
+    # --- NEW: HTTP 200 success returns body_bytes=None ---
+    @pytest.mark.asyncio
+    async def test_send_proxy_request_success_returns_body_none(self):
+        """
+        Verifies: HTTP 200 → body_bytes=None (body not read, streamed
+        via StreamMonitor), aclose() NOT called.
+        """
+        provider = self._create_provider_with_config()
+
+        mock_upstream = self._create_mock_upstream_response(status_code=200)
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.send = AsyncMock(return_value=mock_upstream)
+        mock_request = MagicMock(spec=httpx.Request)
+
+        response, check_result, body_bytes = await provider._send_proxy_request(
+            mock_client, mock_request
+        )
+
+        # Verify: body_bytes is None (stream left open for streaming)
+        assert body_bytes is None
+
+        # Verify: CheckResult is success
+        assert check_result.available is True
+
+        # Verify: aread() NOT called
+        mock_upstream.aread.assert_not_called()
+
+        # Verify: aclose() NOT called
+        mock_upstream.aclose.assert_not_called()
+
+    # --- NEW: no debug, no matching error_parsing rule → body_bytes=None ---
+    @pytest.mark.asyncio
+    async def test_send_proxy_request_no_debug_no_rules_body_none(self):
+        """
+        Verifies: no debug_mode, no matching error_parsing rule →
+        body_bytes=None, aread() NOT called, aclose() NOT called.
+        """
+        provider = self._create_provider_with_config(
+            error_parsing_enabled=True,
+            error_parsing_rules=[
+                ErrorParsingRule(
+                    status_code=429,  # Rule for 429, not 400
+                    error_path="error.code",
+                    match_pattern="rate_limit",
+                    map_to="rate_limited",
+                )
+            ],
+        )
+
+        mock_upstream = self._create_mock_upstream_response(status_code=400)
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.send = AsyncMock(return_value=mock_upstream)
+        mock_request = MagicMock(spec=httpx.Request)
+
+        with patch.object(
+            provider,
+            "_parse_proxy_error",
+            new=AsyncMock(return_value=CheckResult.fail(ErrorReason.BAD_REQUEST)),
+        ):
+            response, check_result, body_bytes = await provider._send_proxy_request(
+                mock_client, mock_request
+            )
+
+            # Verify: body_bytes is None (no matching rule, no debug)
+            assert body_bytes is None
+
+            # Verify: aread() NOT called
+            mock_upstream.aread.assert_not_called()
+
+            # Verify: aclose() NOT called
+            mock_upstream.aclose.assert_not_called()
+
+    # --- NEW: network error → synthetic Response(503), body_bytes=None ---
+    @pytest.mark.asyncio
+    async def test_send_proxy_request_network_error_returns_body_none(self):
+        """
+        Verifies: httpx.RequestError → synthetic httpx.Response(503),
+        CheckResult.fail(NETWORK_ERROR), body_bytes=None.
+        """
+        provider = self._create_provider_with_config()
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.send = AsyncMock(
+            side_effect=httpx.RequestError("Connection failed")
+        )
+        mock_request = MagicMock(spec=httpx.Request)
+
+        response, check_result, body_bytes = await provider._send_proxy_request(
+            mock_client, mock_request
+        )
+
+        # Verify: synthetic httpx.Response with status 503
+        assert response.status_code == 503
+
+        # Verify: CheckResult.fail(NETWORK_ERROR)
+        assert check_result.available is False
+        assert check_result.error_reason == ErrorReason.NETWORK_ERROR
+
+        # Verify: body_bytes is None
+        assert body_bytes is None
+
+    # --- NEW: aread() failure → body_bytes=None ---
+    @pytest.mark.asyncio
+    async def test_send_proxy_request_aread_failure_body_none(self):
+        """
+        Verifies: aread() throws exception → body_bytes=None,
+        aclose() NOT called (caller's responsibility).
+        """
+        provider = self._create_provider_with_config(debug_mode="full_body")
+
+        mock_upstream = self._create_mock_upstream_response(status_code=400)
+        mock_upstream.aread = AsyncMock(side_effect=Exception("Stream read failed"))
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.send = AsyncMock(return_value=mock_upstream)
+        mock_request = MagicMock(spec=httpx.Request)
+
+        with patch.object(
+            provider,
+            "_parse_proxy_error",
+            new=AsyncMock(return_value=CheckResult.fail(ErrorReason.BAD_REQUEST)),
+        ) as mock_parse:
+            response, check_result, body_bytes = await provider._send_proxy_request(
+                mock_client, mock_request
+            )
+
+            # Verify: body_bytes is None (aread failed)
+            assert body_bytes is None
+
+            # Verify: aclose() NOT called (caller's responsibility)
+            mock_upstream.aclose.assert_not_called()
+
+            # Verify: _parse_proxy_error called with content=None (aread failed)
+            mock_parse.assert_called_once_with(mock_upstream, None)
 
 
 class TestCheckFastFailRemoved:

@@ -689,7 +689,7 @@ class TestOpenAILikeProxyRequest:
         content = b'{"model": "gpt-4", "messages": []}'
 
         # Call proxy_request
-        response, check_result = await provider.proxy_request(
+        response, check_result, body_bytes = await provider.proxy_request(
             mock_client, token, method, headers, path, query_params, content
         )
 
@@ -738,7 +738,7 @@ class TestOpenAILikeProxyRequest:
         content = async_iterable()
 
         # Call proxy_request
-        response, check_result = await provider.proxy_request(
+        response, check_result, body_bytes = await provider.proxy_request(
             mock_client, token, method, headers, path, query_params, content
         )
 
@@ -752,3 +752,115 @@ class TestOpenAILikeProxyRequest:
         # AsyncIterable should be passed as content parameter
         assert call_kwargs["content"] == content
         assert "data" not in call_kwargs
+
+    @pytest.mark.asyncio
+    async def test_openai_like_proxy_request_returns_three_element_tuple(self):
+        """Test proxy_request() returns (response, check_result, body_bytes) — third element pass-through from _send_proxy_request()."""
+        provider = self.create_mock_provider()
+        mock_client = MagicMock(spec=httpx.AsyncClient)
+        mock_request = MagicMock(spec=httpx.Request)
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.is_success = True
+
+        mock_client.build_request = MagicMock(return_value=mock_request)
+
+        expected_check_result = CheckResult.success(status_code=200)
+        expected_body_bytes = b"upstream response body"
+
+        # Mock _send_proxy_request to return a 3-element tuple
+        provider._send_proxy_request = AsyncMock(
+            return_value=(mock_response, expected_check_result, expected_body_bytes)
+        )
+
+        token = "test_token"
+        method = "POST"
+        headers = {"Content-Type": "application/json"}
+        path = "chat/completions"
+        query_params = ""
+        content = b'{"model": "gpt-4", "messages": []}'
+
+        result = await provider.proxy_request(
+            mock_client, token, method, headers, path, query_params, content
+        )
+
+        # Verify proxy_request returns a 3-element tuple
+        assert isinstance(result, tuple)
+        assert len(result) == 3
+        assert result[0] is mock_response
+        assert result[1] is expected_check_result
+        assert result[2] is expected_body_bytes
+
+    @pytest.mark.asyncio
+    async def test_proxy_request_passes_body_bytes_none_when_no_debug(self):
+        """Test _send_proxy_request() returns body_bytes=None → proxy_request() passes through None."""
+        provider = self.create_mock_provider()
+        mock_client = MagicMock(spec=httpx.AsyncClient)
+        mock_request = MagicMock(spec=httpx.Request)
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.is_success = True
+
+        mock_client.build_request = MagicMock(return_value=mock_request)
+
+        expected_check_result = CheckResult.success(status_code=200)
+
+        # Mock _send_proxy_request to return body_bytes=None (no debug mode)
+        provider._send_proxy_request = AsyncMock(
+            return_value=(mock_response, expected_check_result, None)
+        )
+
+        token = "test_token"
+        method = "POST"
+        headers = {"Content-Type": "application/json"}
+        path = "chat/completions"
+        query_params = ""
+        content = b'{"model": "gpt-4", "messages": []}'
+
+        _response, _check_result, body_bytes = await provider.proxy_request(
+            mock_client, token, method, headers, path, query_params, content
+        )
+
+        # Verify third element is None when no debug mode
+        assert body_bytes is None
+
+    @pytest.mark.asyncio
+    async def test_proxy_request_passes_body_bytes_when_debug_mode(self):
+        """Test _send_proxy_request() returns body_bytes=b"..." → proxy_request() passes through bytes."""
+        provider = self.create_mock_provider()
+        mock_client = MagicMock(spec=httpx.AsyncClient)
+        mock_request = MagicMock(spec=httpx.Request)
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 400
+        mock_response.is_success = False
+
+        mock_client.build_request = MagicMock(return_value=mock_request)
+
+        expected_check_result = CheckResult(
+            available=False,
+            error_reason=ErrorReason.BAD_REQUEST,
+            status_code=400,
+            response_time=0.5,
+        )
+        expected_body_bytes = b'{"error": {"message": "Bad request"}}'
+
+        # Mock _send_proxy_request to return body_bytes with actual bytes (debug mode)
+        provider._send_proxy_request = AsyncMock(
+            return_value=(mock_response, expected_check_result, expected_body_bytes)
+        )
+
+        token = "test_token"
+        method = "POST"
+        headers = {"Content-Type": "application/json"}
+        path = "chat/completions"
+        query_params = ""
+        content = b'{"model": "gpt-4", "messages": []}'
+
+        _response, _check_result, body_bytes = await provider.proxy_request(
+            mock_client, token, method, headers, path, query_params, content
+        )
+
+        # Verify third element contains the body bytes from debug mode
+        assert body_bytes is not None
+        assert isinstance(body_bytes, bytes)
+        assert body_bytes == expected_body_bytes

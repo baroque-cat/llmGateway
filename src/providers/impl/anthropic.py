@@ -301,7 +301,7 @@ class AnthropicProvider(AIBaseProvider):
         path: str,
         query_params: str,
         content: bytes | AsyncGenerator[bytes],
-    ) -> tuple[httpx.Response, CheckResult]:
+    ) -> tuple[httpx.Response, CheckResult, bytes | None]:
         """
         Proxies the incoming request to the Anthropic API.
 
@@ -319,7 +319,7 @@ class AnthropicProvider(AIBaseProvider):
             content: The request body, either as bytes or an AsyncGenerator for streaming.
 
         Returns:
-            A tuple containing the httpx.Response and a parsed CheckResult.
+            A 3-tuple of ``(httpx.Response, CheckResult, body_bytes | None)``.
         """
         # 1. Construct the full upstream URL.
         base_url = self.config.api_base_url.rstrip("/")

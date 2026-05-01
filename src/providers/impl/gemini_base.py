@@ -291,9 +291,11 @@ class GeminiBaseProvider(AIBaseProvider):
         path: str,
         query_params: str,
         content: bytes | AsyncGenerator[bytes],
-    ) -> tuple[httpx.Response, CheckResult]:
+    ) -> tuple[httpx.Response, CheckResult, bytes | None]:
         """
         (Abstract) Proxies an incoming client request to the target API provider.
         Must be implemented by concrete subclasses.
+
+        Returns a 3-tuple of ``(httpx.Response, CheckResult, body_bytes | None)``.
         """
         raise NotImplementedError

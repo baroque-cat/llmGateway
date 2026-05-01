@@ -22,7 +22,9 @@ class TestSetupDirectories:
 
             with patch("src.services.keeper.os.makedirs") as patched_makedirs:
                 _setup_directories(mock_accessor)
-                patched_makedirs.assert_any_call("data/test-provider/raw", exist_ok=True)
+                patched_makedirs.assert_any_call(
+                    "data/test-provider/raw", exist_ok=True
+                )
 
     def test_setup_directories_existing_directory_no_error(self):
         """Existing directory does not raise error (exist_ok=True)."""
@@ -64,7 +66,9 @@ class TestSetupDirectories:
         mock_accessor = MagicMock()
         mock_provider = MagicMock()
         mock_provider.enabled = False
-        mock_accessor.get_all_providers.return_value = {"disabled-provider": mock_provider}
+        mock_accessor.get_all_providers.return_value = {
+            "disabled-provider": mock_provider
+        }
         mock_accessor.get_proxy_config.return_value = None
 
         from unittest.mock import patch
@@ -110,7 +114,9 @@ class TestSetupDirectoriesCleanup:
         assert not trash_dir.exists()
         assert "removed leftover .trash/" in caplog.text
 
-    def test_setup_directories_no_trash_dir_no_error(self, tmp_path, monkeypatch, caplog):
+    def test_setup_directories_no_trash_dir_no_error(
+        self, tmp_path, monkeypatch, caplog
+    ):
         """raw/.trash/ doesn't exist, no error."""
         caplog.set_level(logging.INFO)
         monkeypatch.chdir(tmp_path)
@@ -199,7 +205,9 @@ class TestSetupDirectoriesCleanup:
         assert (raw_dir / "key1.txt").exists()
         assert (raw_dir / "key2.ndjson").exists()
 
-    def test_setup_directories_trash_cleanup_empty_trash_dir(self, tmp_path, monkeypatch, caplog):
+    def test_setup_directories_trash_cleanup_empty_trash_dir(
+        self, tmp_path, monkeypatch, caplog
+    ):
         """.trash/ exists but empty, directory removed."""
         caplog.set_level(logging.INFO)
         monkeypatch.chdir(tmp_path)

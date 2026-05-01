@@ -212,6 +212,3 @@ class TestDatabasePoolConfigSecurity:
         assert config.database.pool.min_size == 3
         assert config.database.pool.max_size == 10
         # unknown_field is silently dropped — not stored, not rejected
-
-
-

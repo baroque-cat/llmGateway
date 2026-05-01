@@ -51,12 +51,12 @@ class GeminiProvider(GeminiBaseProvider):
         path: str,
         query_params: str,
         content: bytes | AsyncGenerator[bytes],
-    ) -> tuple[httpx.Response, CheckResult]:
+    ) -> tuple[httpx.Response, CheckResult, bytes | None]:
         """
         Proxies the incoming request to the Gemini API.
 
         This method is now a thin wrapper that constructs the request and then
-        delegates the sending and response parsing to the robust `_send_proxy_request`
+        delegates the sending and response parsing to the robust ``_send_proxy_request``
         method in the base class.
         """
         # 1. Construct the full upstream URL.

@@ -64,7 +64,7 @@ class TestAnthropicProxy:
         mock_client.build_request = mock_build_request
         # Mock _send_proxy_request to capture request and return success
         provider._send_proxy_request = AsyncMock(
-            return_value=(mock_response, CheckResult.success(status_code=200))
+            return_value=(mock_response, CheckResult.success(status_code=200), None)
         )
 
         token = "test_token_123"
@@ -75,7 +75,7 @@ class TestAnthropicProxy:
         content = b'{"model": "claude-3-opus", "messages": []}'
 
         # Call proxy_request
-        _response, _check_result = await provider.proxy_request(
+        _response, _check_result, _body_bytes = await provider.proxy_request(
             mock_client, token, method, headers, path, query_params, content
         )
 
@@ -118,7 +118,7 @@ class TestAnthropicProxy:
         mock_client.build_request = mock_build_request
         # Mock _send_proxy_request to capture request and return success
         provider._send_proxy_request = AsyncMock(
-            return_value=(mock_response, CheckResult.success(status_code=200))
+            return_value=(mock_response, CheckResult.success(status_code=200), None)
         )
 
         token = "test_token_456"
@@ -135,7 +135,7 @@ class TestAnthropicProxy:
         content = async_generator()
 
         # Call proxy_request
-        _response, _check_result = await provider.proxy_request(
+        _response, _check_result, _body_bytes = await provider.proxy_request(
             mock_client, token, method, headers, path, query_params, content
         )
 
@@ -175,7 +175,7 @@ class TestAnthropicProxy:
 
         mock_client.build_request = mock_build_request
         provider._send_proxy_request = AsyncMock(
-            return_value=(mock_response, CheckResult.success(status_code=200))
+            return_value=(mock_response, CheckResult.success(status_code=200), None)
         )
 
         token = "test_token"
@@ -217,7 +217,7 @@ class TestAnthropicProxy:
 
         mock_client.build_request = mock_build_request
         provider._send_proxy_request = AsyncMock(
-            return_value=(mock_response, CheckResult.success(status_code=200))
+            return_value=(mock_response, CheckResult.success(status_code=200), None)
         )
 
         token = "test_token"
@@ -257,7 +257,7 @@ class TestAnthropicProxy:
 
         mock_client.build_request = mock_build_request
         provider._send_proxy_request = AsyncMock(
-            return_value=(mock_response, CheckResult.success(status_code=200))
+            return_value=(mock_response, CheckResult.success(status_code=200), None)
         )
 
         token = "test_token"
@@ -297,7 +297,7 @@ class TestAnthropicProxy:
 
         mock_client.build_request = mock_build_request
         provider._send_proxy_request = AsyncMock(
-            return_value=(mock_response, CheckResult.success(status_code=200))
+            return_value=(mock_response, CheckResult.success(status_code=200), None)
         )
 
         token = "test_token_789"
@@ -333,3 +333,41 @@ class TestAnthropicProxy:
         assert proxy_headers["x-custom-header"] == "value"
         # Should have content-type from provider headers (application/json)
         assert proxy_headers["content-type"] == "application/json"
+
+    @pytest.mark.asyncio
+    async def test_anthropic_proxy_request_returns_three_element_tuple(self):
+        """Test proxy_request() returns (response, check_result, body_bytes) — third element pass-through from _send_proxy_request()."""
+        provider = self.create_mock_provider()
+        mock_client = MagicMock(spec=httpx.AsyncClient)
+        mock_request = MagicMock(spec=httpx.Request)
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.is_success = True
+
+        mock_client.build_request = MagicMock(return_value=mock_request)
+
+        expected_check_result = CheckResult.success(status_code=200)
+        expected_body_bytes = b"upstream response body"
+
+        # Mock _send_proxy_request to return a 3-element tuple
+        provider._send_proxy_request = AsyncMock(
+            return_value=(mock_response, expected_check_result, expected_body_bytes)
+        )
+
+        token = "test_token"
+        method = "POST"
+        headers = {"Content-Type": "application/json"}
+        path = "v1/messages"
+        query_params = ""
+        content = b'{"model": "claude-3-opus", "messages": []}'
+
+        result = await provider.proxy_request(
+            mock_client, token, method, headers, path, query_params, content
+        )
+
+        # Verify proxy_request returns a 3-element tuple
+        assert isinstance(result, tuple)
+        assert len(result) == 3
+        assert result[0] is mock_response
+        assert result[1] is expected_check_result
+        assert result[2] is expected_body_bytes
