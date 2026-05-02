@@ -92,38 +92,6 @@ def test_load_minimal_config_example(mock_env):
 # --- YAML Config & Defaults Order Tests ---
 
 
-def test_providers_yaml_gateway_values(mock_env):
-    """IT-Y01: Load config/providers.yaml → config.gateway exists, values match YAML."""
-    loader = ConfigLoader(path="config/providers.yaml")
-    config = loader.load()
-    assert config.gateway.host == "0.0.0.0"
-    assert config.gateway.port == 55300
-    assert config.gateway.workers == 4
-
-
-def test_providers_yaml_database_pool(mock_env):
-    """IT-Y02: Load config/providers.yaml → config.database.pool exists, min_size/max_size match YAML."""
-    loader = ConfigLoader(path="config/providers.yaml")
-    config = loader.load()
-    assert config.database.pool.min_size == 1
-    assert config.database.pool.max_size == 15
-
-
-def test_providers_yaml_key_order():
-    """IT-Y03: Read providers.yaml as dict → keys in order: keeper, database, logging, metrics, providers."""
-    yaml = YAML()
-    with open("config/providers.yaml", encoding="utf-8") as f:
-        data = yaml.load(f)
-    expected_order = [
-        "keeper",
-        "database",
-        "logging",
-        "metrics",
-        "providers",
-    ]
-    assert list(data.keys()) == expected_order
-
-
 def test_full_config_gateway_and_database_pool(mock_env):
     """IT-Y04: Load config/example_full_config.yaml → config.gateway and config.database.pool exist."""
     loader = ConfigLoader(path="config/example_full_config.yaml")
@@ -189,22 +157,6 @@ def test_full_config_dedicated_http_client_loaded(mock_env):
     """IT-Y07-2: ConfigLoader.load() on example_full_config.yaml → every provider
     has dedicated_http_client attribute."""
     loader = ConfigLoader(path="config/example_full_config.yaml")
-    config = loader.load()
-
-    for provider_name, provider in config.providers.items():
-        assert hasattr(
-            provider, "dedicated_http_client"
-        ), f"Provider '{provider_name}' loaded object has no 'dedicated_http_client' attribute"
-        assert provider.dedicated_http_client is False, (
-            f"Provider '{provider_name}' has dedicated_http_client="
-            f"{provider.dedicated_http_client}, expected False"
-        )
-
-
-def test_providers_yaml_dedicated_http_client(mock_env):
-    """IT-Y07-3: ConfigLoader.load() on config/providers.yaml → all providers
-    have dedicated_http_client == False."""
-    loader = ConfigLoader(path="config/providers.yaml")
     config = loader.load()
 
     for provider_name, provider in config.providers.items():

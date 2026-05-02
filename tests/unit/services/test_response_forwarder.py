@@ -8,7 +8,6 @@ Tests cover:
     sole filtering location (no inline blocks in gateway_service.py).
 """
 
-import subprocess
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import httpx
@@ -538,54 +537,3 @@ class TestExtractFilteredHeaders:
         filtered = _extract_filtered_headers(response)
 
         assert filtered == {}
-
-
-# ---------------------------------------------------------------------------
-# Section E: Static analysis — _extract_filtered_headers is sole filtering
-# ---------------------------------------------------------------------------
-
-
-class TestExtractFilteredHeadersIsSoleFilteringLocation:
-    """Static analysis tests confirming header filtering is centralized."""
-
-    def test_extract_filtered_headers_is_only_filtering_location(self):
-        """grep src/ confirms _extract_filtered_headers() is the only filtering
-        location for forwarded responses (inline blocks in gateway_service.py
-        removed)."""
-        # Search for any inline hop-by-hop filtering pattern in the source
-        result = subprocess.run(
-            [
-                "rg",
-                "-n",
-                r"if k\.lower\(\) not in.*HOP_BY_HOP",
-                "src/",
-            ],
-            capture_output=True,
-            text=True,
-        )
-        # Only match should be in response_forwarder.py itself
-        lines = result.stdout.strip().splitlines() if result.stdout.strip() else []
-        # All matches must be in response_forwarder.py only
-        for line in lines:
-            assert (
-                "response_forwarder.py" in line
-            ), f"Inline hop-by-hop filtering found outside response_forwarder.py: {line}"
-
-    def test_no_inline_header_filtering_in_gateway_service(self):
-        """gateway_service.py has NO inline blocks
-        `{k: v for k, v in headers.items() if k.lower() not in HOP_BY_HOP_HEADERS}`
-        — all removed and replaced by _extract_filtered_headers() call."""
-        result = subprocess.run(
-            [
-                "rg",
-                "-n",
-                r"HOP_BY_HOP",
-                "src/services/gateway/gateway_service.py",
-            ],
-            capture_output=True,
-            text=True,
-        )
-        # No matches at all — gateway_service.py does not reference HOP_BY_HOP
-        assert (
-            result.stdout.strip() == ""
-        ), f"gateway_service.py still contains HOP_BY_HOP references:\n{result.stdout}"

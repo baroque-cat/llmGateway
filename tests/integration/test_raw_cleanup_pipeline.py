@@ -11,6 +11,7 @@ including startup .trash/ cleanup via _setup_directories.
 
 import logging
 import os
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -26,7 +27,7 @@ from src.services.synchronizers.key_sync import KeySyncer, read_keys_from_direct
 # ---------------------------------------------------------------------------
 
 
-def _make_raw_dir(tmp_path: pytest.Path, provider_name: str) -> pytest.Path:
+def _make_raw_dir(tmp_path: Path, provider_name: str) -> Path:
     """Create the data/<provider>/raw directory tree under tmp_path."""
     raw_dir = tmp_path / "data" / provider_name / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
