@@ -26,15 +26,14 @@ from src.core.constants import ProxyMode
 
 def test_proxy_mode_enum_members():
     """
-    ProxyMode enum has exactly three members: NONE, STATIC, STEALTH
-    with string values 'none', 'static', 'stealth'.
+    ProxyMode enum has exactly two members: NONE, STATIC
+    with string values 'none', 'static'.
     """
     members = list(ProxyMode)
-    assert len(members) == 3
-    assert members == [ProxyMode.NONE, ProxyMode.STATIC, ProxyMode.STEALTH]
+    assert len(members) == 2
+    assert members == [ProxyMode.NONE, ProxyMode.STATIC]
     assert ProxyMode.NONE.value == "none"
     assert ProxyMode.STATIC.value == "static"
-    assert ProxyMode.STEALTH.value == "stealth"
 
 
 # ==============================================================================
@@ -60,20 +59,10 @@ def test_proxy_config_valid_mode_static_with_url():
     assert config.static_url == "http://proxy:8080"
 
 
-def test_proxy_config_valid_mode_stealth_with_pool_path():
-    """
-    ProxyConfig(mode='stealth', pool_list_path='/pools/') should
-    coerce mode to ProxyMode.STEALTH and accept the pool path.
-    """
-    config = ProxyConfig(mode="stealth", pool_list_path="/pools/")
-    assert config.mode == ProxyMode.STEALTH
-    assert config.pool_list_path == "/pools/"
-
-
 def test_proxy_config_invalid_mode_rejected():
     """
     ProxyConfig(mode='sttaic') should raise ValidationError.
-    The error message must list valid values: 'none', 'static', 'stealth'.
+    The error message must list valid values: 'none', 'static'.
     """
     with pytest.raises(ValidationError) as exc_info:
         ProxyConfig(mode="sttaic")
@@ -82,7 +71,6 @@ def test_proxy_config_invalid_mode_rejected():
     # Pydantic v2 lists valid enum values in the error message
     assert "none" in error_message
     assert "static" in error_message
-    assert "stealth" in error_message
 
 
 # ==============================================================================
@@ -100,12 +88,12 @@ def test_proxy_config_default_mode_is_none():
 
 def test_proxy_config_mode_string_comparison_works():
     """
-    ProxyMode is a StrEnum, so ProxyMode.STEALTH == 'stealth' must be True.
+    ProxyMode is a StrEnum, so ProxyMode.STATIC == 'static' must be True.
     This ensures backward compatibility with string-based comparisons.
     """
-    config = ProxyConfig(mode="stealth", pool_list_path="/p/")
-    assert config.mode == "stealth"
-    assert config.mode == ProxyMode.STEALTH
+    config = ProxyConfig(mode="static", static_url="http://proxy:8080")
+    assert config.mode == "static"
+    assert config.mode == ProxyMode.STATIC
 
 
 # ==============================================================================
@@ -124,19 +112,6 @@ def test_proxy_config_static_mode_requires_url_with_enum():
 
     error_message = str(exc_info.value)
     assert "static_url" in error_message
-
-
-def test_proxy_config_stealth_mode_requires_pool_path_with_enum():
-    """
-    ProxyConfig(mode='stealth') without pool_list_path should raise ValidationError
-    because the cross-field validator validate_proxy_requirements checks
-    that stealth mode requires a pool path. The validator works with ProxyMode enum.
-    """
-    with pytest.raises(ValidationError) as exc_info:
-        ProxyConfig(mode="stealth")
-
-    error_message = str(exc_info.value)
-    assert "pool_list_path" in error_message
 
 
 # ==============================================================================
@@ -168,33 +143,3 @@ def test_proxy_mode_yaml_typo_causes_system_exit():
         loader = ConfigLoader(path="dummy_path.yaml")
         with pytest.raises(SystemExit):
             loader.load()
-
-
-def test_proxy_mode_yaml_valid_stealth_loads():
-    """
-    YAML config with proxy_config: {mode: 'stealth', pool_list_path: '/p/'}
-    should load successfully through ConfigLoader, and the resulting
-    proxy_config.mode should be ProxyMode.STEALTH.
-    """
-    mock_yaml_content = """providers:
-  test_provider:
-    enabled: true
-    provider_type: "anthropic"
-    api_base_url: "https://api.test.com/v1"
-    access_control:
-      gateway_access_token: "test_token"
-    proxy_config:
-      mode: "stealth"
-      pool_list_path: "/p/"
-"""
-
-    with (
-        patch("os.path.exists", return_value=True),
-        patch("builtins.open", mock_open(read_data=mock_yaml_content)),
-    ):
-        loader = ConfigLoader(path="dummy_path.yaml")
-        config = loader.load()
-
-        provider = config.providers["test_provider"]
-        assert provider.proxy_config.mode == ProxyMode.STEALTH
-        assert provider.proxy_config.pool_list_path == "/p/"

@@ -5,6 +5,7 @@ Covers test-plan scenarios:
   Section 2: _get_cache_key_for_provider  (UT-G3-2.1 .. UT-G3-2.5)
   Section 3: get_client_for_provider      (UT-G3-3.1 .. UT-G3-3.6)
   Section 4: close_all                    (UT-G3-4.1 .. UT-G3-4.3)
+  Section D: ProxyMode simplification verification
   Security:  SEC-1, SEC-2, SEC-4
 """
 
@@ -505,3 +506,110 @@ class TestSecurity:
         assert len(factory._locks) == 0
         # No dangling references - the client object is not referenced by the factory
         assert "__none__" not in factory._clients
+
+
+# ==============================================================================
+# Section D: ProxyMode simplification verification
+# ==============================================================================
+
+
+class TestProxyModeSimplification:
+    """
+    Tests verifying that STEALTH proxy mode has been fully removed from
+    HttpClientFactory and that only NONE and STATIC modes are supported.
+    """
+
+    def test_make_proxy_config_does_not_create_stealth(self) -> None:
+        """
+        _make_proxy_config does not create ProxyConfig(mode="stealth").
+        Attempting to create ProxyConfig(mode="stealth") raises ValidationError.
+        """
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            ProxyConfig(mode="stealth")
+
+    @pytest.mark.asyncio
+    async def test_none_mode_creates_client_with_no_proxy(self) -> None:
+        """
+        get_client_for_provider() with ProxyConfig(mode=NONE) →
+        httpx.AsyncClient(proxy=None)
+        """
+        from src.core.constants import ProxyMode
+
+        provider = _make_provider_config(dedicated=False, proxy_mode="none")
+        assert provider.proxy_config.mode == ProxyMode.NONE
+        accessor = _make_accessor_mock(providers={"shared_prov": provider})
+        factory = HttpClientFactory(accessor)
+
+        mock_client = MagicMock(spec=httpx.AsyncClient)
+        mock_client.aclose = AsyncMock()
+
+        captured_kwargs: dict = {}
+
+        def capture_client(**kwargs):
+            captured_kwargs.update(kwargs)
+            return mock_client
+
+        with patch(
+            "src.core.http_client_factory.httpx.AsyncClient",
+            side_effect=capture_client,
+        ):
+            await factory.get_client_for_provider("shared_prov")
+
+        assert captured_kwargs.get("proxy") is None
+
+    @pytest.mark.asyncio
+    async def test_static_mode_creates_client_with_proxy_url(self) -> None:
+        """
+        get_client_for_provider() with ProxyConfig(mode=STATIC, static_url="http://p:8080") →
+        httpx.AsyncClient(proxy="http://p:8080")
+        """
+        from src.core.constants import ProxyMode
+
+        provider = _make_provider_config(
+            dedicated=False, proxy_mode="static", static_url="http://p:8080"
+        )
+        assert provider.proxy_config.mode == ProxyMode.STATIC
+        accessor = _make_accessor_mock(providers={"proxy_prov": provider})
+        factory = HttpClientFactory(accessor)
+
+        mock_client = MagicMock(spec=httpx.AsyncClient)
+        mock_client.aclose = AsyncMock()
+
+        captured_kwargs: dict = {}
+
+        def capture_client(**kwargs):
+            captured_kwargs.update(kwargs)
+            return mock_client
+
+        with patch(
+            "src.core.http_client_factory.httpx.AsyncClient",
+            side_effect=capture_client,
+        ):
+            await factory.get_client_for_provider("proxy_prov")
+
+        assert captured_kwargs.get("proxy") == "http://p:8080"
+
+    def test_source_has_no_stealth_references(self) -> None:
+        """
+        grep for STEALTH, "stealth", NotImplementedError in http_client_factory.py →
+        no matches. Verifies the source code has been fully cleaned.
+        """
+        import pathlib
+
+        source_path = pathlib.Path("src/core/http_client_factory.py")
+        source_text = source_path.read_text()
+
+        assert (
+            "STEALTH" not in source_text
+        ), "http_client_factory.py should not contain 'STEALTH'"
+        assert (
+            '"stealth"' not in source_text
+        ), "http_client_factory.py should not contain '\"stealth\"'"
+        assert (
+            "'stealth'" not in source_text
+        ), "http_client_factory.py should not contain \"'stealth'\""
+        assert (
+            "NotImplementedError" not in source_text
+        ), "http_client_factory.py should not contain 'NotImplementedError'"

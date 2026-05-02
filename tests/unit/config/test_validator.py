@@ -31,7 +31,6 @@ from src.config.schemas import (
     TimeoutConfig,
 )
 from src.core.constants import (
-    CircuitBreakerMode,
     DebugMode,
     ProviderType,
     ProxyMode,
@@ -594,8 +593,6 @@ def test_full_valid_config_with_all_enums_loads_via_yaml():
     gateway_policy:
       debug_mode: "no_content"
       streaming_mode: "auto"
-      circuit_breaker:
-        mode: "auto_recovery"
       retry:
         enabled: false
 """
@@ -613,10 +610,6 @@ def test_full_valid_config_with_all_enums_loads_via_yaml():
         assert provider.gateway_policy.debug_mode == DebugMode.NO_CONTENT
         assert provider.gateway_policy.streaming_mode == StreamingMode.AUTO
         assert provider.proxy_config.mode == ProxyMode.NONE
-        assert (
-            provider.gateway_policy.circuit_breaker.mode
-            == CircuitBreakerMode.AUTO_RECOVERY
-        )
 
 
 # ==============================================================================
@@ -649,11 +642,7 @@ def test_proxy_mode_injection_rejected():
 
     error_message = str(exc_info.value)
     # The error should list valid ProxyMode enum members
-    assert (
-        "none" in error_message
-        or "static" in error_message
-        or "stealth" in error_message
-    )
+    assert "none" in error_message or "static" in error_message
 
 
 def test_error_reason_injection_in_fast_status_mapping_rejected():

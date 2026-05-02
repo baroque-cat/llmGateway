@@ -1,5 +1,6 @@
+import pytest
+
 from src.core.constants import (
-    CircuitBreakerMode,
     ErrorReason,
     ProviderType,
     ProxyMode,
@@ -214,36 +215,230 @@ class TestProviderTypeEnumExistence:
 class TestProxyModeEnumExistence:
     """
     Tests for ProxyMode enum existence and members.
+    ProxyMode now has exactly 2 members: NONE and STATIC (STEALTH removed).
     """
 
-    def test_proxy_mode_enum_exists(self):
+    def test_proxy_mode_enum_has_none_and_static_only(self):
         """
-        Verify that ProxyMode is defined in src.core.constants and contains
-        the expected members: NONE, STATIC, STEALTH.
+        Verify that ProxyMode has exactly two members: NONE and STATIC.
+        STEALTH has been removed.
         """
         assert hasattr(ProxyMode, "NONE"), "ProxyMode should have NONE member"
         assert hasattr(ProxyMode, "STATIC"), "ProxyMode should have STATIC member"
-        assert hasattr(ProxyMode, "STEALTH"), "ProxyMode should have STEALTH member"
         assert ProxyMode.NONE.value == "none"
         assert ProxyMode.STATIC.value == "static"
-        assert ProxyMode.STEALTH.value == "stealth"
 
-
-class TestCircuitBreakerModeEnumExistence:
-    """
-    Tests for CircuitBreakerMode enum existence and members.
-    """
-
-    def test_circuit_breaker_mode_enum_exists(self):
+    def test_proxy_mode_has_exactly_two_members(self):
         """
-        Verify that CircuitBreakerMode is defined in src.core.constants and contains
-        the expected members: AUTO_RECOVERY, MANUAL_RESET.
+        Verify that ProxyMode has exactly 2 members (NONE, STATIC).
         """
-        assert hasattr(
-            CircuitBreakerMode, "AUTO_RECOVERY"
-        ), "CircuitBreakerMode should have AUTO_RECOVERY member"
-        assert hasattr(
-            CircuitBreakerMode, "MANUAL_RESET"
-        ), "CircuitBreakerMode should have MANUAL_RESET member"
-        assert CircuitBreakerMode.AUTO_RECOVERY.value == "auto_recovery"
-        assert CircuitBreakerMode.MANUAL_RESET.value == "manual_reset"
+        members = list(ProxyMode)
+        assert len(members) == 2, f"Expected 2 members, got {len(members)}: {members}"
+        assert members == [ProxyMode.NONE, ProxyMode.STATIC]
+
+    def test_proxy_mode_stealth_does_not_exist(self):
+        """
+        Verify that ProxyMode.STEALTH has been removed.
+        hasattr(ProxyMode, "STEALTH") → False
+        ProxyMode("stealth") → ValueError
+        """
+        assert not hasattr(
+            ProxyMode, "STEALTH"
+        ), "ProxyMode should NOT have STEALTH member"
+        with pytest.raises(ValueError):
+            ProxyMode("stealth")
+
+
+# ==============================================================================
+# Section A: Circuit Breaker removal verification
+# ==============================================================================
+
+
+class TestCircuitBreakerRemoval:
+    """
+    Tests verifying that CircuitBreaker-related types have been completely removed.
+    """
+
+    def test_circuit_breaker_mode_import_raises_import_error(self):
+        """
+        CircuitBreakerMode import → ImportError.
+        """
+        with pytest.raises(ImportError):
+            from src.core.constants import CircuitBreakerMode  # noqa: F401
+
+    def test_circuit_breaker_config_import_raises_import_error(self):
+        """
+        CircuitBreakerConfig import → ImportError.
+        """
+        with pytest.raises(ImportError):
+            from src.config.schemas import CircuitBreakerConfig  # noqa: F401
+
+    def test_backoff_config_import_raises_import_error(self):
+        """
+        BackoffConfig import → ImportError.
+        """
+        with pytest.raises(ImportError):
+            from src.config.schemas import BackoffConfig  # noqa: F401
+
+    def test_gateway_policy_config_has_no_circuit_breaker_field(self):
+        """
+        GatewayPolicyConfig() has no circuit_breaker field.
+        """
+        from src.config.schemas import GatewayPolicyConfig
+
+        policy = GatewayPolicyConfig()
+        assert not hasattr(
+            policy, "circuit_breaker"
+        ), "GatewayPolicyConfig should NOT have a circuit_breaker field"
+
+    def test_defaults_have_no_circuit_breaker_key(self):
+        """
+        GatewayPolicyConfig defaults have no "circuit_breaker" key.
+        """
+        from src.config.schemas import GatewayPolicyConfig
+
+        policy = GatewayPolicyConfig()
+        policy_dict = policy.model_dump()
+        assert (
+            "circuit_breaker" not in policy_dict
+        ), f"'circuit_breaker' should not appear in defaults, got keys: {list(policy_dict.keys())}"
+
+
+# ==============================================================================
+# Section B: Proxy STEALTH removal verification
+# ==============================================================================
+
+
+class TestProxyStealthRemoval:
+    """
+    Tests verifying that STEALTH proxy mode and related types have been removed.
+    """
+
+    def test_proxy_config_has_no_pool_list_path_field(self):
+        """
+        ProxyConfig() has no pool_list_path field.
+        """
+        from src.config.schemas import ProxyConfig
+
+        cfg = ProxyConfig()
+        assert not hasattr(
+            cfg, "pool_list_path"
+        ), "ProxyConfig should NOT have a pool_list_path field"
+
+    def test_proxy_config_stealth_mode_raises_validation_error(self):
+        """
+        ProxyConfig(mode="stealth") → ValidationError.
+        """
+        from pydantic import ValidationError
+
+        from src.config.schemas import ProxyConfig
+
+        with pytest.raises(ValidationError):
+            ProxyConfig(mode="stealth")
+
+    def test_provider_proxy_state_import_raises_import_error(self):
+        """
+        ProviderProxyState import → ImportError.
+        """
+        with pytest.raises(ImportError):
+            from src.core.models import ProviderProxyState  # noqa: F401
+
+    def test_defaults_have_no_pool_list_path_key(self):
+        """
+        ProxyConfig defaults have no "pool_list_path" key.
+        """
+        from src.config.schemas import ProxyConfig
+
+        cfg = ProxyConfig()
+        cfg_dict = cfg.model_dump()
+        assert (
+            "pool_list_path" not in cfg_dict
+        ), f"'pool_list_path' should not appear in defaults, got keys: {list(cfg_dict.keys())}"
+
+
+# ==============================================================================
+# Section C: Binary ProxyMode positive tests
+# ==============================================================================
+
+
+class TestBinaryProxyModePositive:
+    """
+    Positive tests for the binary ProxyMode (NONE, STATIC) and ProxyConfig.
+    """
+
+    def test_proxy_mode_none_exists(self):
+        """
+        ProxyMode.NONE exists, value "none".
+        """
+        assert hasattr(ProxyMode, "NONE")
+        assert ProxyMode.NONE.value == "none"
+
+    def test_proxy_mode_static_exists(self):
+        """
+        ProxyMode.STATIC exists, value "static".
+        """
+        assert hasattr(ProxyMode, "STATIC")
+        assert ProxyMode.STATIC.value == "static"
+
+    def test_proxy_config_default_is_none_mode(self):
+        """
+        ProxyConfig() → mode == ProxyMode.NONE, static_url == None.
+        """
+        from src.config.schemas import ProxyConfig
+
+        cfg = ProxyConfig()
+        assert cfg.mode == ProxyMode.NONE
+        assert cfg.static_url is None
+
+    def test_proxy_config_mode_none_is_valid(self):
+        """
+        ProxyConfig(mode="none") → valid.
+        """
+        from src.config.schemas import ProxyConfig
+
+        cfg = ProxyConfig(mode="none")
+        assert cfg.mode == ProxyMode.NONE
+
+    def test_proxy_config_mode_static_with_url_is_valid(self):
+        """
+        ProxyConfig(mode="static", static_url="http://proxy:8080") → valid.
+        """
+        from src.config.schemas import ProxyConfig
+
+        cfg = ProxyConfig(mode="static", static_url="http://proxy:8080")
+        assert cfg.mode == ProxyMode.STATIC
+        assert cfg.static_url == "http://proxy:8080"
+
+    def test_proxy_config_static_without_url_raises_validation_error(self):
+        """
+        ProxyConfig(mode="static") without static_url → ValidationError mentioning "static_url".
+        """
+        from pydantic import ValidationError
+
+        from src.config.schemas import ProxyConfig
+
+        with pytest.raises(ValidationError, match="static_url"):
+            ProxyConfig(mode="static")
+
+    def test_proxy_config_invalid_mode_raises_validation_error_without_stealth(self):
+        """
+        ProxyConfig(mode="invalid") → ValidationError, message contains "none" and "static"
+        but NOT "stealth".
+        """
+        from pydantic import ValidationError
+
+        from src.config.schemas import ProxyConfig
+
+        with pytest.raises(ValidationError) as exc_info:
+            ProxyConfig(mode="invalid")
+
+        error_msg = str(exc_info.value)
+        assert (
+            "none" in error_msg.lower()
+        ), f"Error message should mention 'none', got: {error_msg}"
+        assert (
+            "static" in error_msg.lower()
+        ), f"Error message should mention 'static', got: {error_msg}"
+        assert (
+            "stealth" not in error_msg.lower()
+        ), f"Error message should NOT mention 'stealth', got: {error_msg}"

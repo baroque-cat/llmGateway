@@ -15,7 +15,7 @@ from src.config import load_config
 from src.config.logging_config import setup_logging
 from src.core.accessor import ConfigAccessor
 from src.core.http_client_factory import HttpClientFactory
-from src.core.interfaces import IResourceSyncer, ProviderKeyState, ProviderProxyState
+from src.core.interfaces import IResourceSyncer, ProviderKeyState
 from src.db import database
 from src.db.database import DatabaseManager
 from src.services.db_maintainer import DatabaseMaintainer
@@ -25,7 +25,6 @@ from src.services.key_purger import KeyPurger
 from src.services.metrics_exporter import update_adaptive_controller_state
 from src.services.synchronizers import get_all_syncers
 from src.services.synchronizers.key_sync import read_keys_from_directory
-from src.services.synchronizers.proxy_sync import read_proxies_from_directory
 
 # The path is now defined in one place and passed to the loader.
 CONFIG_PATH = "config/providers.yaml"
@@ -57,15 +56,6 @@ def _setup_directories(accessor: ConfigAccessor) -> None:
         if provider.enabled:
             key_path = os.path.join("data", provider_name, "raw")
             paths_to_check.add(key_path)
-
-            # REFACTORED: Use accessor to get proxy config safely
-            proxy_config = accessor.get_proxy_config(provider_name)
-            if (
-                proxy_config
-                and proxy_config.mode == "stealth"
-                and proxy_config.pool_list_path
-            ):
-                paths_to_check.add(proxy_config.pool_list_path)
 
     try:
         for path in paths_to_check:
@@ -148,7 +138,6 @@ async def run_sync_cycle(
         )
         desired_state: dict[str, dict[str, Any]] = {
             "keys": {},
-            "proxies": {},
         }
 
         enabled_providers = accessor.get_enabled_providers()
@@ -163,22 +152,6 @@ async def run_sync_cycle(
                 "file_map": file_map,
             }
             desired_state["keys"][provider_name] = key_state
-
-            # For ProxySyncer (runs only if mode is 'stealth')
-            # REFACTORED: Use accessor to get proxy config safely
-            proxy_config = accessor.get_proxy_config(provider_name)
-            if (
-                proxy_config
-                and proxy_config.mode == "stealth"
-                and proxy_config.pool_list_path
-            ):
-                proxies_from_file = read_proxies_from_directory(
-                    proxy_config.pool_list_path
-                )
-                proxy_state: ProviderProxyState = {
-                    "proxies_from_files": proxies_from_file
-                }
-                desired_state["proxies"][provider_name] = proxy_state
 
         logger.debug(
             f"Sync Phase 1 (Read) complete. Collected state for {len(enabled_providers)} providers."

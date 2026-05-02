@@ -37,12 +37,6 @@ class ProviderKeyState(TypedDict):
     file_map: dict[str, float]
 
 
-class ProviderProxyState(TypedDict):
-    """Represents the desired state for proxies of a single provider."""
-
-    proxies_from_files: set[str]
-
-
 # --- Core Interfaces ---
 
 

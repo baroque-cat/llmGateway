@@ -59,11 +59,9 @@ class HttpClientFactory:
             if not proxy_config.static_url:
                 raise ValueError("Static proxy mode requires a 'static_url' to be set.")
             return proxy_config.static_url
-        else:
-            # Future-proofing for 'stealth' mode or other modes.
-            raise NotImplementedError(
-                f"Proxy mode '{proxy_config.mode}' is not supported by the factory yet."
-            )
+        raise ValueError(
+            f"Proxy mode '{proxy_config.mode}' is not supported by the factory yet."
+        )
 
     def _get_cache_key_for_provider(self, provider_name: str) -> str:
         """

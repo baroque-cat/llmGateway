@@ -1,7 +1,7 @@
-"""Tests for _setup_directories in keeper.py — basic and cleanup scenarios."""
+"""Tests for _setup_directories in keeper.py — basic, proxy-absence, and cleanup scenarios."""
 
 import logging
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from src.services.keeper import _setup_directories
 
@@ -15,16 +15,10 @@ class TestSetupDirectories:
         mock_provider = MagicMock()
         mock_provider.enabled = True
         mock_accessor.get_all_providers.return_value = {"test-provider": mock_provider}
-        mock_accessor.get_proxy_config.return_value = None  # no stealth proxy
 
-        with MagicMock() as mock_makedirs:
-            from unittest.mock import patch
-
-            with patch("src.services.keeper.os.makedirs") as patched_makedirs:
-                _setup_directories(mock_accessor)
-                patched_makedirs.assert_any_call(
-                    "data/test-provider/raw", exist_ok=True
-                )
+        with patch("src.services.keeper.os.makedirs") as patched_makedirs:
+            _setup_directories(mock_accessor)
+            patched_makedirs.assert_any_call("data/test-provider/raw", exist_ok=True)
 
     def test_setup_directories_existing_directory_no_error(self):
         """Existing directory does not raise error (exist_ok=True)."""
@@ -32,9 +26,6 @@ class TestSetupDirectories:
         mock_provider = MagicMock()
         mock_provider.enabled = True
         mock_accessor.get_all_providers.return_value = {"test-provider": mock_provider}
-        mock_accessor.get_proxy_config.return_value = None
-
-        from unittest.mock import patch
 
         with patch("src.services.keeper.os.makedirs") as mock_makedirs:
             _setup_directories(mock_accessor)
@@ -49,9 +40,6 @@ class TestSetupDirectories:
         mock_provider = MagicMock()
         mock_provider.enabled = True
         mock_accessor.get_all_providers.return_value = {"test-provider": mock_provider}
-        mock_accessor.get_proxy_config.return_value = None
-
-        from unittest.mock import patch
 
         with patch("src.services.keeper.os.makedirs"):
             _setup_directories(mock_accessor)
@@ -69,9 +57,6 @@ class TestSetupDirectories:
         mock_accessor.get_all_providers.return_value = {
             "disabled-provider": mock_provider
         }
-        mock_accessor.get_proxy_config.return_value = None
-
-        from unittest.mock import patch
 
         with patch("src.services.keeper.os.makedirs") as mock_makedirs:
             _setup_directories(mock_accessor)
@@ -80,6 +65,39 @@ class TestSetupDirectories:
         # (should not have been called with any data/ path for this provider)
         for call in mock_makedirs.call_args_list:
             assert "disabled-provider" not in str(call)
+
+    def test_setup_directories_no_makedirs_for_pool_list_path(self):
+        """_setup_directories does NOT call makedirs for pool_list_path
+        even when provider has ProxyConfig(mode='static').
+
+        After removing stealth proxy logic and circuit breaker, _setup_directories
+        only creates data/<name>/raw directories. It should never create
+        directories for proxy pool paths.
+        """
+        mock_accessor = MagicMock()
+        mock_provider = MagicMock()
+        mock_provider.enabled = True
+        mock_accessor.get_all_providers.return_value = {"my-provider": mock_provider}
+        # Simulate a provider with static proxy config — no pool_list_path
+        # should be created by _setup_directories
+        mock_proxy_config = MagicMock()
+        mock_proxy_config.mode = "static"
+        mock_proxy_config.static_url = "http://user:pass@host:8080"
+        mock_accessor.get_proxy_config.return_value = mock_proxy_config
+
+        with patch("src.services.keeper.os.makedirs") as mock_makedirs:
+            _setup_directories(mock_accessor)
+
+            # Only data/<name>/raw should be created — no pool_list_path directories
+            for call in mock_makedirs.call_args_list:
+                call_path = call[0][0] if call[0] else call[1].get("dir", "")
+                assert (
+                    "pool_list" not in call_path
+                ), f"makedirs called with path containing 'pool_list': {call_path}"
+
+            # Verify the only path created is data/<name>/raw
+            assert mock_makedirs.call_count == 1
+            mock_makedirs.assert_called_once_with("data/my-provider/raw", exist_ok=True)
 
 
 class TestSetupDirectoriesCleanup:
@@ -106,7 +124,6 @@ class TestSetupDirectoriesCleanup:
         mock_provider = MagicMock()
         mock_provider.enabled = True
         mock_accessor.get_all_providers.return_value = {"test-provider": mock_provider}
-        mock_accessor.get_proxy_config.return_value = None
 
         _setup_directories(mock_accessor)
 
@@ -130,7 +147,6 @@ class TestSetupDirectoriesCleanup:
         mock_provider = MagicMock()
         mock_provider.enabled = True
         mock_accessor.get_all_providers.return_value = {"test-provider": mock_provider}
-        mock_accessor.get_proxy_config.return_value = None
 
         _setup_directories(mock_accessor)
 
@@ -161,7 +177,6 @@ class TestSetupDirectoriesCleanup:
 
         mock_accessor = MagicMock()
         mock_accessor.get_all_providers.return_value = providers
-        mock_accessor.get_proxy_config.return_value = None
 
         _setup_directories(mock_accessor)
 
@@ -195,7 +210,6 @@ class TestSetupDirectoriesCleanup:
         mock_provider = MagicMock()
         mock_provider.enabled = True
         mock_accessor.get_all_providers.return_value = {"test-provider": mock_provider}
-        mock_accessor.get_proxy_config.return_value = None
 
         _setup_directories(mock_accessor)
 
@@ -224,7 +238,6 @@ class TestSetupDirectoriesCleanup:
         mock_provider = MagicMock()
         mock_provider.enabled = True
         mock_accessor.get_all_providers.return_value = {"test-provider": mock_provider}
-        mock_accessor.get_proxy_config.return_value = None
 
         _setup_directories(mock_accessor)
 

@@ -97,9 +97,8 @@ providers:
 
     # Proxy configuration
     proxy_config:
-      mode: "none" # "none", "static", or "stealth"
+      mode: "none" # "none" or "static"
       # static_url: "http://user:pass@proxy:8080" # Required if mode is static
-      pool_list_path: "proxies/gemini-production/" # Required if mode is stealth
 
     timeouts:
       connect: 15.0
@@ -214,16 +213,6 @@ providers:
           backoff_sec: 0.5
           backoff_factor: 2.0
 
-      circuit_breaker:
-        enabled: true
-        mode: "auto_recovery"
-        failure_threshold: 20
-        jitter_sec: 5
-        backoff:
-          base_duration_sec: 60
-          max_duration_sec: 3600
-          factor: 2.0
-
   # Example 2: OpenAI-compatible Provider (e.g. DeepSeek, Moonshot)
   deepseek-main:
     provider_type: "openai_like"
@@ -329,16 +318,6 @@ providers:
           attempts: 5
           backoff_sec: 0.5
           backoff_factor: 2.0
-
-      circuit_breaker:
-        enabled: true
-        mode: "auto_recovery"
-        failure_threshold: 20
-        jitter_sec: 5
-        backoff:
-          base_duration_sec: 60
-          max_duration_sec: 3600
-          factor: 2.0
 
     proxy_config:
       mode: "none"

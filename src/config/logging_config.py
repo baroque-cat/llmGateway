@@ -64,6 +64,11 @@ def setup_logging(accessor: ConfigAccessor) -> None:
     # with our own GATEWAY_ACCESS logs.
     uvicorn_access_logger.setLevel(logging.WARNING)
 
+    # Suppress uvicorn.error WARNING messages (e.g. "Invalid HTTP request received"
+    # caused by scanners, health probes, or malformed client requests).
+    # True errors (CRITICAL/ERROR) remain visible.
+    logging.getLogger("uvicorn.error").setLevel(logging.ERROR)
+
     # Reduce the log level for third-party libraries that can be very verbose.
     # This keeps the application's logs clean and focused.
     logging.getLogger("apscheduler.executors.default").setLevel(logging.WARNING)

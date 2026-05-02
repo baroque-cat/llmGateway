@@ -72,8 +72,6 @@ def get_default_config() -> dict[str, Any]:
                 "proxy_config": {
                     "mode": "none",
                     "static_url": None,
-                    # This path is customized by the config manager.
-                    "pool_list_path": "proxies/llm_provider_default/",
                 },
                 "timeouts": {
                     "connect": 15.0,
@@ -156,18 +154,6 @@ def get_default_config() -> dict[str, Any]:
                             "attempts": 5,
                             "backoff_sec": 0.5,
                             "backoff_factor": 2.0,
-                        },
-                    },
-                    # Circuit breaker to protect against cascading failures.
-                    "circuit_breaker": {
-                        "enabled": False,
-                        "mode": "auto_recovery",  # manual_reset
-                        "failure_threshold": 20,
-                        "jitter_sec": 5,
-                        "backoff": {
-                            "base_duration_sec": 60,
-                            "max_duration_sec": 3600,
-                            "factor": 2.0,
                         },
                     },
                 },

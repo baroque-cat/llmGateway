@@ -8,7 +8,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 # Import core enums for type hints and validation in schemas.
 # Pydantic will automatically validate enum values at runtime.
 from src.core.constants import (
-    CircuitBreakerMode,
     DebugMode,
     ErrorReason,
     ProviderType,
@@ -84,44 +83,6 @@ class RetryPolicyConfig(BaseModel):
                 "on_server_error.attempts are 0. At least one must be >= 1."
             )
         return self
-
-
-class BackoffConfig(BaseModel):
-    """Configuration for the exponential backoff strategy of the circuit breaker."""
-
-    # The initial duration in seconds to wait after the circuit opens.
-    base_duration_sec: int = Field(default=30, gt=0)
-    # The maximum duration the backoff can reach.
-    max_duration_sec: int = Field(default=1800, gt=0)
-    # The factor by which the duration increases after each failed check.
-    factor: float = Field(default=2.0, ge=1.0)
-
-    @model_validator(mode="after")
-    def check_bounds(self) -> "BackoffConfig":
-        """Validate base_duration_sec <= max_duration_sec."""
-        if self.base_duration_sec > self.max_duration_sec:
-            raise ValueError(
-                f"base_duration_sec ({self.base_duration_sec}) must be <= "
-                f"max_duration_sec ({self.max_duration_sec})"
-            )
-        return self
-
-
-class CircuitBreakerConfig(BaseModel):
-    """
-    Configuration for the Circuit Breaker mechanism to prevent cascading failures.
-    """
-
-    enabled: bool = False
-    # 'auto_recovery' will periodically re-test the endpoint.
-    # 'manual_reset' requires external intervention to close the circuit.
-    mode: CircuitBreakerMode = CircuitBreakerMode.AUTO_RECOVERY
-    # The number of consecutive failures required to open the circuit.
-    failure_threshold: int = Field(default=10, gt=0)
-    # Configuration for the backoff strategy when the circuit is open.
-    backoff: BackoffConfig = Field(default_factory=BackoffConfig)
-    # A random delay added to backoff to prevent thundering herd problems.
-    jitter_sec: int = Field(default=5, ge=0)
 
 
 class MetricsConfig(BaseModel):
@@ -390,20 +351,17 @@ class ProxyConfig(BaseModel):
 
     # 'none': Direct connection.
     # 'static': Use a single, fixed proxy URL.
-    # 'stealth': Use a rotating pool of proxies from a file/directory.
+    model_config = ConfigDict(extra="forbid")
+
     mode: ProxyMode = ProxyMode.NONE
     # The URL for the proxy if mode is 'static' (e.g., "http://user:pass@host:port").
     static_url: str | None = None
-    # Path to the directory containing proxy list files if mode is 'stealth'.
-    pool_list_path: str | None = None
 
     @model_validator(mode="after")
     def validate_proxy_requirements(self) -> "ProxyConfig":
         """Validate proxy configuration based on mode."""
         if self.mode == "static" and not self.static_url:
             raise ValueError("Proxy mode is 'static' but 'static_url' is not set.")
-        if self.mode == "stealth" and not self.pool_list_path:
-            raise ValueError("Proxy mode is 'stealth' but 'pool_list_path' is not set.")
         return self
 
 
@@ -512,8 +470,6 @@ class GatewayPolicyConfig(BaseModel):
 
     # Policy for automatically retrying failed requests.
     retry: RetryPolicyConfig = Field(default_factory=RetryPolicyConfig)
-    # Policy for the circuit breaker to handle endpoint failures.
-    circuit_breaker: CircuitBreakerConfig = Field(default_factory=CircuitBreakerConfig)
 
 
 class KeyInventoryConfig(BaseModel):

@@ -184,17 +184,6 @@ class ProxyMode(StrEnum):
 
     NONE = "none"
     STATIC = "static"
-    STEALTH = "stealth"
-
-
-@unique
-class CircuitBreakerMode(StrEnum):
-    """
-    Defines the allowed circuit breaker modes for a provider instance.
-    """
-
-    AUTO_RECOVERY = "auto_recovery"
-    MANUAL_RESET = "manual_reset"
 
 
 @unique

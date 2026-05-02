@@ -9,7 +9,6 @@ from src.db.database import DatabaseManager
 
 # Import concrete syncer implementations
 from src.services.synchronizers.key_sync import KeySyncer
-from src.services.synchronizers.proxy_sync import ProxySyncer
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +16,6 @@ logger = logging.getLogger(__name__)
 # This allows for easy extension with new resource types in the future.
 _SYNCER_CLASSES: dict[str, type[IResourceSyncer]] = {
     "keys": KeySyncer,
-    "proxies": ProxySyncer,
 }
 
 
@@ -44,7 +42,7 @@ def get_all_syncers(
         try:
             # REFACTORED: Pass the required dependencies to the constructor.
             # This aligns with the new IResourceSyncer contract and the refactored
-            # concrete syncer classes (KeySyncer, ProxySyncer).
+            # concrete syncer classes (KeySyncer).
             instance = syncer_class(accessor=accessor, db_manager=db_manager)
             all_syncers.append(instance)
             logger.debug(f"Successfully initialized synchronizer: '{syncer_name}'")
