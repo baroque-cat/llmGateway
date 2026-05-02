@@ -19,6 +19,45 @@ class MetricsEndpointFilter(logging.Filter):
         return "/metrics" not in record.getMessage()
 
 
+class ComponentNameFilter(logging.Filter):
+    """
+    A transparent filter that replaces full module paths with semantic component names.
+
+    Applied once to the root logger, it sets the ``component`` attribute on every
+    ``LogRecord`` without requiring changes to any ``logging.getLogger(__name__)``
+    calls in the application.
+    """
+
+    _MAP: tuple[tuple[str, str], ...] = (
+        ("__main__", "main"),
+        ("src.config", "config"),
+        ("src.services.gateway", "gateway"),
+        ("src.services.keeper", "keeper"),
+        ("src.services.key_probe", "probe"),
+        ("src.core.probes", "batch"),
+        ("src.services.key_purger", "purger"),
+        ("src.services.db_maintainer", "vacuum"),
+        ("src.services.inventory_exporter", "export"),
+        ("src.services.metrics_exporter", "metrics"),
+        ("src.services.synchronizers", "sync"),
+        ("src.db.database", "database"),
+        ("src.providers", "provider"),
+        ("src.core.http_client_factory", "http"),
+        ("src.core.retry", "retry"),
+        ("src.core.atomic_io", "storage"),
+    )
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        module = record.name
+        for prefix, name in self._MAP:
+            if module.startswith(prefix):
+                record.component = name
+                break
+        else:
+            record.component = module.rsplit(".", 1)[-1]
+        return True
+
+
 def setup_logging(accessor: ConfigAccessor) -> None:
     """
     Configures the root logger for the entire application based on the global config.
@@ -33,9 +72,11 @@ def setup_logging(accessor: ConfigAccessor) -> None:
     config_log_level = accessor.get_logging_config().level
     log_level = getattr(logging, config_log_level.upper(), logging.INFO)
 
-    # Define the format for log messages for consistency across the application.
-    # The new format is cleaner and avoids redundant [INFO] tags.
-    log_format = "%(name)s: %(message)s"
+    # Define the format for log messages.
+    # Format: LEVEL | COMPONENT | MESSAGE
+    # No asctime — timestamps are provided by the container runtime (docker/podman -t).
+    # No ANSI colors — plain text for container log collectors.
+    log_format = "%(levelname)-8s | %(component)-10s | %(message)s"
 
     # Get the root logger. All other loggers created with logging.getLogger(__name__)
     # will inherit this configuration.
@@ -49,6 +90,10 @@ def setup_logging(accessor: ConfigAccessor) -> None:
     # Create a handler to stream logs to standard output (the console).
     handler = logging.StreamHandler(sys.stdout)
     handler.setLevel(log_level)
+
+    # Attach the ComponentNameFilter at handler level so that all propagated
+    # records (from child loggers) are processed before hitting the formatter.
+    handler.addFilter(ComponentNameFilter())
 
     # Create a formatter and attach it to the handler.
     formatter = logging.Formatter(log_format)
@@ -71,6 +116,7 @@ def setup_logging(accessor: ConfigAccessor) -> None:
 
     # Reduce the log level for third-party libraries that can be very verbose.
     # This keeps the application's logs clean and focused.
+    logging.getLogger("apscheduler.scheduler").setLevel(logging.WARNING)
     logging.getLogger("apscheduler.executors.default").setLevel(logging.WARNING)
     logging.getLogger("urllib3.connectionpool").setLevel(logging.INFO)
     # Silence httpx logs as we will provide our own unified transaction logs.

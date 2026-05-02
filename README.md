@@ -2,6 +2,11 @@
 
 API gateway for managing LLM provider keys — health monitoring, request routing, and retry.
 
+**Supported providers:**
+- **Anthropic** — Claude API
+- **OpenAI-compatible** — OpenAI, DeepSeek, Groq, and any OpenAI-compatible API
+- **Gemini** — Google Gemini API
+
 The system consists of two independent components:
 
 1. **Keeper** — background service for health checks, key synchronization, database maintenance, and key export.
@@ -53,64 +58,68 @@ Example configs: `config/example_full_config.yaml`, `config/example_minimal_conf
 ## Directory Structure
 
 ```
-src/
-  config/                     # Configuration schema, loader, defaults
-    schemas.py                # Pydantic models — source of truth
-    loader.py                 # YAML loader with env var resolution
-    defaults.py               # Global default values
-    error_formatter.py        # Validation error formatting
-    logging_config.py         # Logging setup
-  core/                       # Abstractions, contracts, pure functions
-    constants.py              # ErrorReason, Status enums
-    models.py                 # CheckResult, DatabaseTableHealth, etc.
-    interfaces.py             # ABCs: IProvider, IResourceProbe, IKeyPurger, ...
-    probes.py                 # IResourceProbe base class + dispatch
-    accessor.py               # ConfigAccessor — typed config facade
-    policy_utils.py           # compute_next_check_time(), should_vacuum()
-    retry.py                  # AsyncRetrier for transient DB errors
-    atomic_io.py              # Atomic NDJSON file writes
-    http_client_factory.py    # httpx.AsyncClient factory per provider
-    batching/
-      adaptive.py             # AdaptiveBatchController (3-priority algorithm)
-  db/
-    database.py               # PostgreSQL layer: pool, repositories, queries
-  providers/                  # LLM provider implementations
-    base.py                   # AIBaseProvider — shared proxy logic
-    impl/
-      openai_like.py          # OpenAI-compatible API
-      anthropic.py            # Anthropic API
-      gemini.py               # Gemini (thin wrapper)
-      gemini_base.py          # Gemini base implementation
-  services/                   # Application services
-    keeper.py                 # Keeper entry point + APScheduler setup
-    gateway/                  # Conductor (API Gateway)
-      gateway_service.py      # FastAPI app: routing, retry, streaming
-      gateway_cache.py        # In-memory key pool + auth cache
-      sanitize_content.py     # Debug-mode content redaction
-    key_probe.py              # API key health probing
-    key_purger.py             # Stopped key cleanup + provider deletion
-    db_maintainer.py          # Conditional VACUUM ANALYZE + Prometheus
-    inventory_exporter.py     # NDJSON key snapshots and status export
-    metrics_exporter.py       # Prometheus metrics
-    synchronizers/
-      key_sync.py             # Key file → DB synchronization
-      proxy_sync.py           # Proxy file → DB synchronization
-```
-
-## Development
-
-```bash
-poetry install --with dev
-
-# Type checking
-poetry run pyright src/ main.py
-
-# Linting
-poetry run ruff check src/ main.py
-
-# Formatting
-poetry run black src/ main.py
-
-# Tests
-poetry run pytest tests/ -v
+llmGateway
+├── config
+│   ├── example_full_config.yaml  # all available options
+│   └── example_minimal_config.yaml  # quick-start template
+├── docs
+│   ├── DEBUG_MODE.md             # debug modes: disabled, no_content, full_body
+│   └── ERRORS.md                 # error reason catalog
+├── src
+│   ├── config                    # configuration: schema, loader, defaults, logging
+│   │   ├── __init__.py           # public API: load_config(), get_config()
+│   │   ├── defaults.py           # global default values
+│   │   ├── error_formatter.py    # pretty-prints Pydantic validation errors
+│   │   ├── loader.py             # YAML loader with env-var resolution + deep merge
+│   │   ├── logging_config.py     # setup_logging(), ComponentNameFilter
+│   │   └── schemas.py            # Pydantic v2 models — config source of truth
+│   ├── core                      # abstractions, contracts, pure functions
+│   │   ├── batching/             # adaptive batch controller (3-priority algorithm)
+│   │   ├── accessor.py           # ConfigAccessor — typed read-only config facade
+│   │   ├── atomic_io.py          # atomic NDJSON file writes
+│   │   ├── constants.py          # enums: ErrorReason, KeyStatus, DebugMode, ProviderType
+│   │   ├── exception_handler.py  # @handle_exceptions decorator (sync + async)
+│   │   ├── http_client_factory.py  # long-lived httpx.AsyncClient per provider
+│   │   ├── interfaces.py         # ABCs: IProvider, IResourceSyncer, IProbeDispatcher
+│   │   ├── models.py             # CheckResult, DatabaseTableHealth, StatusSummary
+│   │   ├── policy_utils.py       # compute_next_check_time(), should_vacuum()
+│   │   ├── probes.py             # probe dispatch and batch scheduling
+│   │   └── retry.py              # AsyncRetrier for transient DB errors
+│   ├── db
+│   │   └── database.py           # PostgreSQL: connection pool, repos, migrations
+│   ├── providers                 # LLM provider adapters
+│   │   ├── __init__.py           # provider factory + registry
+│   │   ├── base.py               # AIBaseProvider — shared proxy logic
+│   │   └── impl/
+│   │       ├── openai_like.py    # OpenAI-compatible API (OpenAI, DeepSeek, Groq...)
+│   │       ├── anthropic.py      # Anthropic (Claude) API
+│   │       ├── gemini.py         # Google Gemini (thin entry)
+│   │       └── gemini_base.py    # Gemini shared implementation
+│   └── services                  # application services
+│       ├── gateway/              # Conductor — FastAPI API Gateway
+│       │   ├── gateway_service.py  # routing, retry, streaming, debug modes
+│       │   ├── gateway_cache.py    # in-memory key pool + auth token cache
+│       │   ├── response_forwarder.py  # upstream response forwarding
+│       │   └── sanitize_content.py    # debug-mode content redaction
+│       ├── synchronizers/
+│       │   └── key_sync.py       # NDJSON key files → PostgreSQL sync
+│       ├── db_maintainer.py      # conditional VACUUM ANALYZE + dead-tuple Prometheus
+│       ├── inventory_exporter.py # periodic key snapshot + status inventory (NDJSON)
+│       ├── keeper.py             # Keeper entry point: APScheduler + health cycles
+│       ├── key_probe.py          # per-key API health probing (WORKER_CHECK)
+│       ├── key_purger.py         # stopped key cleanup + provider deletion
+│       └── metrics_exporter.py   # Prometheus metrics (key status, adaptive batch)
+├── tests
+│   ├── diagnostics/              # forward-ref diagnostic helper
+│   ├── e2e/                      # end-to-end gateway logging tests
+│   ├── integration/              # cross-component integration tests
+│   ├── security/                 # security tests (logging, error forwarding)
+│   ├── test_batching/            # adaptive batching unit + integration tests
+│   └── unit/                     # unit tests mirroring src/ structure
+├── main.py                       # CLI entry point: gateway | keeper
+├── Dockerfile
+├── docker-compose.yml
+├── pyproject.toml                # deps + ruff/black/isort/pytest config
+├── poetry.toml                   # poetry settings (package-mode = false)
+└── pyrightconfig.json            # strict type-checking configuration
 ```

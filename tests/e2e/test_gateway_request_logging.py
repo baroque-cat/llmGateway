@@ -107,7 +107,11 @@ async def test_gateway_request_logging():
         mock_httpx_response.aiter_bytes.return_value = chunk_iterator()
         mock_httpx_response.aclose = AsyncMock()
         mock_provider.proxy_request = AsyncMock(
-            return_value=(mock_httpx_response, CheckResult.success())
+            return_value=(
+                mock_httpx_response,
+                CheckResult.success(),
+                b'{"choices": []}',
+            )
         )
         mock_get_provider.return_value = mock_provider
 
