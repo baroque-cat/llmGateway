@@ -1,4 +1,9 @@
-# TODO: Move to tests/unit/services/ — this tests gateway_service, not config
+"""
+Unit tests for _log_debug_info in gateway_service — moved from tests/unit/config/.
+
+Tests verify that debug logging (no_content and full_body modes) correctly
+logs request/response information with proper sanitization.
+"""
 
 from unittest.mock import patch
 

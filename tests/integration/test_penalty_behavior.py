@@ -154,7 +154,7 @@ async def test_error_behavior_matrix(
 
     # Setup CheckResult
     fail_result = CheckResult.fail(error_reason, "Test Error", status_code)
-    mock_provider.proxy_request.return_value = (mock_response, fail_result)
+    mock_provider.proxy_request.return_value = (mock_response, fail_result, None)
 
     # Execute
     await _handle_buffered_retryable_request(

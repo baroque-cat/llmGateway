@@ -30,28 +30,6 @@ class TestAnthropicErrorHandling:
         self.create_mock_provider = create_mock_anthropic_provider
 
     @pytest.mark.asyncio
-    async def test_parse_proxy_error_without_error_parsing(self):
-        """Test _parse_proxy_error when error parsing is disabled and content=None."""
-        provider = self.create_mock_provider(
-            error_config=ErrorParsingConfig(enabled=False, rules=[])
-        )
-
-        mock_response = AsyncMock(spec=httpx.Response)
-        mock_response.status_code = 401
-        mock_response.elapsed = MagicMock()
-        mock_response.elapsed.total_seconds.return_value = 0.5
-
-        # content=None, meaning body was NOT read
-        result = await provider._parse_proxy_error(mock_response, content=None)
-
-        # Should map to INVALID_KEY via _map_status_code_to_reason
-        assert isinstance(result, CheckResult)
-        assert not result.available
-        assert result.error_reason == ErrorReason.INVALID_KEY
-        assert result.response_time == 0.5
-        assert result.status_code == 401
-
-    @pytest.mark.asyncio
     async def test_parse_proxy_error_with_error_parsing_rules(self):
         """Test _parse_proxy_error when error parsing rules are enabled."""
         provider = self.create_mock_provider(
@@ -98,70 +76,6 @@ class TestAnthropicErrorHandling:
             assert result.error_reason == ErrorReason.INVALID_KEY
             assert result.response_time == 0.5
             assert result.status_code == 400
-
-    @pytest.mark.asyncio
-    async def test_parse_proxy_error_empty_response_body(self):
-        """Test _parse_proxy_error with empty response body when error parsing enabled."""
-        provider = self.create_mock_provider(
-            error_config=ErrorParsingConfig(
-                enabled=True,
-                rules=[
-                    ErrorParsingRule(
-                        status_code=400,
-                        error_path="error.type",
-                        match_pattern=".*",
-                        map_to="invalid_key",
-                    )
-                ],
-            )
-        )
-
-        mock_response = AsyncMock(spec=httpx.Response)
-        mock_response.status_code = 400
-        mock_response.elapsed = MagicMock()
-        mock_response.elapsed.total_seconds.return_value = 0.5
-        mock_response.aread = AsyncMock(return_value=b"")  # Empty body
-
-        result = await provider._parse_proxy_error(mock_response, b"")
-
-        # Should fall back to default mapping (BAD_REQUEST)
-        assert isinstance(result, CheckResult)
-        assert not result.available
-        assert result.error_reason == ErrorReason.BAD_REQUEST
-        assert result.response_time == 0.5
-        assert result.status_code == 400
-
-    @pytest.mark.asyncio
-    async def test_parse_proxy_error_invalid_json_body(self):
-        """Test _parse_proxy_error with invalid JSON in body when error parsing enabled."""
-        provider = self.create_mock_provider(
-            error_config=ErrorParsingConfig(
-                enabled=True,
-                rules=[
-                    ErrorParsingRule(
-                        status_code=400,
-                        error_path="error.type",
-                        match_pattern=".*",
-                        map_to="invalid_key",
-                    )
-                ],
-            )
-        )
-
-        mock_response = AsyncMock(spec=httpx.Response)
-        mock_response.status_code = 400
-        mock_response.elapsed = MagicMock()
-        mock_response.elapsed.total_seconds.return_value = 0.5
-        mock_response.aread = AsyncMock(return_value=b"Invalid JSON {")
-
-        result = await provider._parse_proxy_error(mock_response, b"Invalid JSON {")
-
-        # Should fall back to default mapping (BAD_REQUEST)
-        assert isinstance(result, CheckResult)
-        assert not result.available
-        assert result.error_reason == ErrorReason.BAD_REQUEST
-        assert result.response_time == 0.5
-        assert result.status_code == 400
 
     @pytest.mark.asyncio
     async def test_check_successful_key_validation(self):

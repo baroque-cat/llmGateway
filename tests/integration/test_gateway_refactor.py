@@ -15,20 +15,12 @@ from starlette.responses import StreamingResponse
 from src.config.schemas import (
     GatewayPolicyConfig,
     HealthPolicyConfig,
-    ModelInfo,
     ProviderConfig,
     RetryOnErrorConfig,
     RetryPolicyConfig,
 )
 from src.core.constants import ErrorReason
 from src.core.models import CheckResult
-from src.services.gateway.response_forwarder import (
-    UpstreamAttempt,
-    discard_response,
-    forward_buffered_body,
-    forward_error_to_client,
-    forward_success_stream,
-)
 
 # Capture original sleep to avoid recursion
 original_sleep = asyncio.sleep
@@ -1245,8 +1237,9 @@ async def test_last_error_response_is_upstream_response_not_json_503():
     is a starlette.responses.Response (not JSONResponse) with the original
     upstream status code, not a synthetic 503.
     """
-    from src.services.gateway.gateway_service import _handle_buffered_retryable_request
     from fastapi.responses import JSONResponse
+
+    from src.services.gateway.gateway_service import _handle_buffered_retryable_request
 
     req = make_mock_request()
     provider = MagicMock()

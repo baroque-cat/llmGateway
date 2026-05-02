@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import tempfile
+from contextlib import suppress
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -43,33 +44,31 @@ def write_atomic_ndjson(path: str, records: list[dict[str, Any]]) -> None:
     # Ensure the target directory exists.
     os.makedirs(dirname, exist_ok=True)
 
-    tmp = tempfile.NamedTemporaryFile(
+    with tempfile.NamedTemporaryFile(
         mode="w",
         dir=dirname,
         delete=False,
         suffix=".tmp",
         encoding="utf-8",
-    )
+    ) as tmp:
+        try:
+            for record in records:
+                json_line = json.dumps(record, ensure_ascii=False)
+                tmp.write(json_line + "\n")
+
+            tmp.flush()
+            os.fsync(tmp.fileno())
+            tmp_path: str = tmp.name
+        except Exception:
+            # Clean up the temp file on write error before re-raising.
+            with suppress(OSError):
+                os.unlink(tmp.name)
+            raise
+
     try:
-        for record in records:
-            json_line = json.dumps(record, ensure_ascii=False)
-            tmp.write(json_line + "\n")
-
-        tmp.flush()
-        os.fsync(tmp.fileno())
-        tmp_path: str = tmp.name
-        tmp.close()
-
         os.replace(src=tmp_path, dst=path)
-
     except Exception:
-        # On any error, clean up the temporary file.
-        try:
-            tmp.close()
-        except OSError:
-            pass
-        try:
-            os.unlink(tmp.name)
-        except OSError:
-            pass
+        # On replace error, clean up the temporary file.
+        with suppress(OSError):
+            os.unlink(tmp_path)
         raise

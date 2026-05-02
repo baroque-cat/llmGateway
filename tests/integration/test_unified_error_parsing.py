@@ -15,7 +15,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
-from fastapi import Request
 
 from src.config.schemas import (
     ErrorParsingConfig,
@@ -54,35 +53,6 @@ def _make_gemini_provider_config_with_error_parsing(
     }
     config.error_parsing = ErrorParsingConfig(enabled=True, rules=rules)
     return config
-
-
-def _make_mock_request(
-    url: str = "http://test/v1/chat/completions", method: str = "POST"
-) -> MagicMock:
-    """Create a mock FastAPI Request object for gateway tests."""
-    req = MagicMock(spec=Request)
-    req.url.path = "/v1/chat/completions"
-    req.url.query = ""
-    req.method = method
-    req.headers = {"authorization": "Bearer test-token"}
-    req.body = AsyncMock(return_value=b'{"model": "gpt-4"}')
-
-    state = MagicMock()
-    state.gateway_cache = MagicMock()
-    state.gateway_cache.remove_key_from_pool = AsyncMock()
-    state.gateway_cache.get_key_from_pool = MagicMock(return_value=(1, "key1"))
-
-    http_factory = MagicMock()
-    http_factory.get_client_for_provider = AsyncMock(return_value=MagicMock())
-    state.http_client_factory = http_factory
-
-    state.db_manager = MagicMock()
-    state.db_manager.keys.update_status = AsyncMock()
-    state.accessor = MagicMock()
-    state.debug_mode_map = {}
-
-    req.app.state = state
-    return req
 
 
 def _make_mock_httpx_response(
@@ -272,7 +242,7 @@ async def test_gateway_error_body_preservation_without_fast_status_mapping() -> 
     assert config.error_parsing.enabled is False
 
     # Create a mock request
-    req = _make_mock_request()
+    req = make_mock_request()
     req.app.state.accessor.get_provider_or_raise.return_value = config
 
     # Create a provider mock that returns a 400 CheckResult with client error
@@ -290,7 +260,7 @@ async def test_gateway_error_body_preservation_without_fast_status_mapping() -> 
         ErrorReason.BAD_REQUEST, "Invalid request format", 0.5, 400
     )
 
-    provider.proxy_request = AsyncMock(return_value=(mock_response, check_result))
+    provider.proxy_request = AsyncMock(return_value=(mock_response, check_result, None))
 
     # Mock the cache to return a key
     req.app.state.gateway_cache.get_key_from_pool.return_value = (1, "test-key")

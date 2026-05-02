@@ -104,14 +104,8 @@ def test_uc02_initialization_with_user_bounds() -> None:
     assert controller._params.max_batch_delay_sec == 60.0
 
 
-def test_uc03_start_batch_size_exceeds_max_rejected() -> None:
-    """
-    Pass start_batch_size=100, max_batch_size=50 to AdaptiveBatchingConfig.
-    Verify Pydantic rejects it — start_batch_size must be within [min, max].
-    Out-of-bounds start values are now validated at config level.
-    """
-    with pytest.raises(ValidationError):
-        AdaptiveBatchingConfig(start_batch_size=100, max_batch_size=50)
+# test_uc03_start_batch_size_exceeds_max_rejected removed:
+# duplicate of test_ut_a03_start_batch_size_above_max_raises in test_adaptive_batching_config.py
 
 
 def test_uc03_start_batch_size_at_max_boundary() -> None:
@@ -757,17 +751,8 @@ def test_ut_d03_start_batch_delay_capped_at_min_boundary() -> None:
     assert controller.batch_delay == 3.0
 
 
-def test_ut_d03_start_batch_delay_out_of_bounds_rejected() -> None:
-    """
-    UT-D03: start_batch_delay_sec below min_batch_delay_sec is rejected by
-    Pydantic model_validator (ValidationError).
-    """
-    with pytest.raises(ValidationError):
-        AdaptiveBatchingConfig(
-            start_batch_delay_sec=1.0,
-            min_batch_delay_sec=3.0,
-            max_batch_delay_sec=120.0,
-        )
+# test_ut_d03_start_batch_delay_out_of_bounds_rejected removed:
+# duplicate of test_ut_a04_start_batch_delay_below_min_raises in test_adaptive_batching_config.py
 
 
 def test_ut_d04_constructor_rejects_initial_batch_size() -> None:

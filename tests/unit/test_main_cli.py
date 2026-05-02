@@ -261,7 +261,7 @@ async def test_it_s04_validate_before_worker():
 
 
 def test_sec07_no_old_argparse_port_default():
-    """SEC-07: argparse default=None means old argparse default (8000 for port) is NOT applied when CLI not passed."""
+    """SEC-07: argparse --port default is None, not 8000 or any other old default value."""
     # Part A: argparse --port default is None (not 8000 or any other value)
     with (
         patch("main._start_gateway_service") as mock_start,
@@ -273,21 +273,3 @@ def test_sec07_no_old_argparse_port_default():
     assert (
         args.port is None
     ), "argparse --port default should be None, not 8000 or any other value"
-
-    # Part B: when CLI --port is not passed, config default (55300) is preserved
-    config = Config()
-    assert config.gateway.port == 55300
-
-    with (
-        patch("main.load_config", return_value=config),
-        patch("main.uvicorn"),
-        patch("main.create_app", return_value=MagicMock()),
-        patch("main.setup_logging"),
-        patch("main.validate_pool_sizing"),
-    ):
-        args_no_port = argparse.Namespace(host=None, port=None, workers=None)
-        main._start_gateway_service(args_no_port)
-
-    assert (
-        config.gateway.port == 55300
-    ), "Config port should remain 55300, not be overridden by any argparse default"

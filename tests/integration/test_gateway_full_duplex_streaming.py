@@ -63,6 +63,7 @@ async def test_gateway_routes_to_full_stream_handler_when_auto_with_eligible_pro
         # Setup mock instances
         mock_db_manager = MagicMock()
         mock_db_manager.wait_for_schema_ready = AsyncMock()
+        mock_db_manager.keys.get_status_summary = AsyncMock(return_value={})
         MockDatabaseManager.return_value = mock_db_manager
         mock_http_factory = MagicMock()
         mock_http_factory.close_all = AsyncMock()
@@ -99,6 +100,7 @@ async def test_gateway_routes_to_full_stream_handler_when_auto_with_eligible_pro
         mock_provider.proxy_request.return_value = (
             mock_upstream_response,
             successful_result,
+            None,
         )
 
         # Create the app with mocked dependencies
@@ -204,6 +206,7 @@ async def test_gateway_routes_to_full_stream_handler_for_gemini_provider():
         # Setup mock instances
         mock_db_manager = MagicMock()
         mock_db_manager.wait_for_schema_ready = AsyncMock()
+        mock_db_manager.keys.get_status_summary = AsyncMock(return_value={})
         MockDatabaseManager.return_value = mock_db_manager
         mock_http_factory = MagicMock()
         mock_http_factory.close_all = AsyncMock()
@@ -250,6 +253,7 @@ async def test_gateway_routes_to_full_stream_handler_for_gemini_provider():
         mock_provider.proxy_request.return_value = (
             mock_upstream_response,
             successful_result,
+            None,
         )
 
         # Create the app with mocked dependencies
@@ -375,7 +379,7 @@ async def test_gateway_full_stream_read_error_converted_to_gateway_stream_error(
     mock_upstream_response.aclose = AsyncMock()
 
     provider.proxy_request = AsyncMock(
-        return_value=(mock_upstream_response, CheckResult.success())
+        return_value=(mock_upstream_response, CheckResult.success(), None)
     )
 
     response = await _handle_full_stream_request(

@@ -124,46 +124,26 @@ class TestValidatePoolSizingWarning:
 class TestValidatePoolSizingCritical:
     """Cases where worst_case > 97 → CRITICAL logged."""
 
-    def test_ut_v03_workers8_max15_critical(
+    def test_ut_v03_critical_with_message_content_and_exhaustion(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """UT-V03: workers=8, max_size=15 → (8+1)*15=135 > 97 → CRITICAL logged."""
-        config = _make_config(workers=8, max_size=15)
-        with caplog.at_level(logging.DEBUG, logger="main"):
-            validate_pool_sizing(config)
-        criticals = _records_at_level(caplog, logging.CRITICAL)
-        assert len(criticals) == 1
-        assert "CONNECTION OVERFLOW" in criticals[0].getMessage()
-
-    def test_sec_05_connection_exhaustion_critical(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """SEC-05: workers=8, max_size=15 → 135 > 97 → CRITICAL warns about connection exhaustion."""
+        """UT-V03 + UT-V08 + SEC-05: workers=8, max_size=15 → 135 > 97 → CRITICAL with CONNECTION OVERFLOW, calculation, and exhaustion details."""
         config = _make_config(workers=8, max_size=15)
         with caplog.at_level(logging.DEBUG, logger="main"):
             validate_pool_sizing(config)
         criticals = _records_at_level(caplog, logging.CRITICAL)
         assert len(criticals) == 1
         msg = criticals[0].getMessage()
-        assert "exceeds PostgreSQL limit" in msg
-        assert "Reduce" in msg
-
-    def test_ut_v08_critical_message_content(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """UT-V08: CRITICAL message contains (workers+1)*max_size calculation and > 97 reference."""
-        config = _make_config(workers=8, max_size=15)
-        with caplog.at_level(logging.DEBUG, logger="main"):
-            validate_pool_sizing(config)
-        criticals = _records_at_level(caplog, logging.CRITICAL)
-        assert len(criticals) == 1
-        msg = criticals[0].getMessage()
-        # Calculation: 9 processes × pool.max_size=15 = 135 connections
+        # UT-V03: CRITICAL level with CONNECTION OVERFLOW
+        assert "CONNECTION OVERFLOW" in msg
+        # UT-V08: calculation details
         assert "9 processes" in msg
         assert "pool.max_size=15" in msg
         assert "= 135 connections" in msg
-        # Must reference exceeding the 97 PostgreSQL limit
         assert "97" in msg
+        # SEC-05: connection exhaustion warning
+        assert "exceeds PostgreSQL limit" in msg
+        assert "Reduce" in msg
 
 
 # ---------------------------------------------------------------------------

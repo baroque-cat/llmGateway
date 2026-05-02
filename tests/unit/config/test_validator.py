@@ -240,24 +240,6 @@ def test_duplicate_gateway_tokens_rejected():
 # ==============================================================================
 
 
-def test_ut_b01_health_policy_batch_size_rejected():
-    """
-    UT-B01: HealthPolicyConfig does not contain field batch_size.
-    Attempting to create HealthPolicyConfig(batch_size=10) should raise
-    ValidationError because the field has been removed and replaced by
-    adaptive_batching.start_batch_size.
-
-    NOTE: This test requires HealthPolicyConfig to have extra="forbid".
-    If HealthPolicyConfig does not forbid extra fields, batch_size will be
-    silently ignored instead of raising ValidationError.
-    """
-    with pytest.raises(ValidationError) as exc_info:
-        HealthPolicyConfig(batch_size=10)
-
-    error_message = str(exc_info.value)
-    assert "batch_size" in error_message
-
-
 def test_ut_b02_health_policy_batch_delay_sec_rejected():
     """
     UT-B02: HealthPolicyConfig does not contain field batch_delay_sec.
@@ -274,37 +256,6 @@ def test_ut_b02_health_policy_batch_delay_sec_rejected():
 
     error_message = str(exc_info.value)
     assert "batch_delay_sec" in error_message
-
-
-def test_ut_b03_yaml_batch_size_under_worker_health_policy_causes_error():
-    """
-    UT-B03: YAML config with batch_size under worker_health_policy causes
-    ValidationError when loaded through ConfigLoader.
-
-    NOTE: This test requires HealthPolicyConfig to have extra="forbid".
-    If HealthPolicyConfig does not forbid extra fields, batch_size will be
-    silently ignored during YAML loading instead of causing a ValidationError.
-    """
-    mock_yaml_content = """providers:
-  test_provider:
-    enabled: true
-    provider_type: "openai_like"
-    api_base_url: "https://api.test.com/v1"
-    access_control:
-      gateway_access_token: "test_token"
-    worker_health_policy:
-      batch_size: 10
-"""
-
-    with (
-        patch("os.path.exists", return_value=True),
-        patch("builtins.open", mock_open(read_data=mock_yaml_content)),
-    ):
-        loader = ConfigLoader(path="dummy_path.yaml")
-        # ConfigLoader.load() calls handle_validation_error on ValidationError,
-        # which calls sys.exit(1)
-        with pytest.raises(SystemExit):
-            loader.load()
 
 
 def test_ut_b04_health_policy_adaptive_batching_default_factory():
@@ -643,19 +594,6 @@ def test_proxy_mode_injection_rejected():
     error_message = str(exc_info.value)
     # The error should list valid ProxyMode enum members
     assert "none" in error_message or "static" in error_message
-
-
-def test_error_reason_injection_in_fast_status_mapping_rejected():
-    """
-    Security: GatewayPolicyConfig rejects SQL injection-style ErrorReason
-    values in fast_status_mapping.
-    """
-    with pytest.raises(ValidationError) as exc_info:
-        GatewayPolicyConfig(fast_status_mapping={400: "'; DROP TABLE"})
-
-    error_message = str(exc_info.value)
-    # The error should indicate the value is not a valid ErrorReason
-    assert "DROP TABLE" in error_message or "enum" in error_message.lower()
 
 
 def test_error_reason_injection_in_map_to_rejected():

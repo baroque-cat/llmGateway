@@ -430,26 +430,10 @@ def test_uc40_negative_min_batch_size_raises():
 # ---------------------------------------------------------------------------
 
 
-def test_uc41_batch_size_step_zero_raises():
-    """
-    Passing batch_size_step=0 should raise ValidationError (gt=0 constraint).
-    """
-    with pytest.raises(ValidationError) as exc_info:
-        AdaptiveBatchingConfig(batch_size_step=0)
-
-    error_message = str(exc_info.value)
-    assert "batch_size_step" in error_message
-
-
-def test_uc41_delay_step_sec_zero_raises():
-    """
-    Passing delay_step_sec=0.0 should raise ValidationError (gt=0 constraint).
-    """
-    with pytest.raises(ValidationError) as exc_info:
-        AdaptiveBatchingConfig(delay_step_sec=0.0)
-
-    error_message = str(exc_info.value)
-    assert "delay_step_sec" in error_message
+# test_uc41_batch_size_step_zero_raises removed:
+# duplicate of SC-06 zero/negative value tests in test_adaptive_security.py
+# test_uc41_delay_step_sec_zero_raises removed:
+# duplicate of SC-06 zero/negative value tests in test_adaptive_security.py
 
 
 # ---------------------------------------------------------------------------

@@ -9,91 +9,12 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 from src.config.schemas import DatabaseConfig, DatabaseRetryConfig
-from src.core.constants import ALL_MODELS_MARKER, ErrorReason
+from src.core.constants import ErrorReason
 from src.core.models import CheckResult
-from src.services.gateway.gateway_cache import GatewayCache
 from src.services.key_probe import KeyProbe
 
-
-class TestGatewayCacheLoggingVerbosity:
-    """Tests for GatewayCache logging levels."""
-
-    @pytest.fixture
-    def mock_accessor(self):
-        """Provide a mock ConfigAccessor."""
-        return Mock()
-
-    @pytest.fixture
-    def mock_db_manager(self):
-        """Provide a mock DatabaseManager."""
-        return Mock()
-
-    @pytest.fixture
-    def cache(self, mock_accessor, mock_db_manager):
-        """Create a GatewayCache instance with mocked dependencies."""
-        return GatewayCache(mock_accessor, mock_db_manager)
-
-    @pytest.mark.asyncio
-    async def test_refresh_key_pool_logs_at_debug(self, cache, mock_db_manager):
-        """
-        Test 1: Verify that GatewayCache.refresh_key_pool logs its message at DEBUG level, not INFO.
-        """
-        mock_db_manager.keys.get_all_valid_keys_for_caching = AsyncMock(
-            return_value=[
-                {
-                    "key_id": 1,
-                    "provider_name": "openai",
-                    "model_name": "gpt-4",
-                    "key_value": "sk-xxx",
-                }
-            ]
-        )
-        with patch("src.services.gateway.gateway_cache.logger") as mock_logger:
-            await cache.refresh_key_pool()
-            # Both start and success messages should be at DEBUG level
-            assert mock_logger.debug.call_count >= 2
-            debug_messages = [call[0][0] for call in mock_logger.debug.call_args_list]
-            # Check for expected debug messages
-            start_found = any(
-                "Refreshing key pool cache from database" in msg
-                for msg in debug_messages
-            )
-            success_found = any(
-                "Key pool cache refreshed successfully" in msg for msg in debug_messages
-            )
-            assert start_found, "Start message not logged at DEBUG"
-            assert success_found, "Success message not logged at DEBUG"
-            # No INFO logs should be emitted for refresh operations
-            mock_logger.info.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_shared_key_removal_logs_debug_with_shared(
-        self, cache, mock_accessor
-    ):
-        """
-        Test 2: Verify that when a shared key is removed from the cache,
-        the log message (now at DEBUG) contains the string ':shared' and NOT ':__ALL_MODELS__'.
-        """
-        mock_provider_config = Mock()
-        mock_provider_config.shared_key_status = True
-        mock_accessor.get_provider.return_value = mock_provider_config
-        # Pre-populate a key in the pool with __ALL_MODELS__ marker
-        cache._key_pool[f"openai:{ALL_MODELS_MARKER}"] = [(1, "sk-xxx")]
-        with patch("src.services.gateway.gateway_cache.logger") as mock_logger:
-            await cache.remove_key_from_pool("openai", "gpt-4", 1)
-            # Should log DEBUG about removing shared key
-            mock_logger.info.assert_not_called()
-            # Find the call about shared key in debug logs
-            shared_call = None
-            for call in mock_logger.debug.call_args_list:
-                if "shared key_id" in call[0][0]:
-                    shared_call = call
-                    break
-            assert shared_call is not None
-            message = shared_call[0][0]
-            assert "Removing shared key_id 1 from virtual pool" in message
-            assert "openai:shared" in message
-            assert ":__ALL_MODELS__" not in message
+# TestGatewayCacheLoggingVerbosity removed:
+# duplicates TestGatewayCacheLogging in tests/unit/services/test_gateway_cache.py
 
 
 class TestKeyProbeLoggingVerbosity:

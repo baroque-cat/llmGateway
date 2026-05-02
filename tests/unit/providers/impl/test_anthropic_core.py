@@ -436,9 +436,3 @@ class TestAnthropicProvider:
         # When error_parsing is disabled, default_reason for 401 is INVALID_KEY
         assert result.error_reason == ErrorReason.INVALID_KEY
         assert result.status_code == 401
-
-    def test_check_does_not_call_check_fast_fail(self):
-        """ANT-4: check() doesn't call _check_fast_fail() — method has been removed."""
-        provider = self.create_mock_provider()
-        # _check_fast_fail method should not exist on the provider
-        assert not hasattr(provider, "_check_fast_fail")

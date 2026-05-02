@@ -181,12 +181,12 @@ def test_write_atomic_ndjson_preserves_unicode(tmp_path: pathlib.Path) -> None:
 
 def test_atomic_io_module_no_non_stdlib_imports() -> None:
     """atomic_io.py imports only stdlib modules: tempfile, os, json, typing,
-    logging. No `from src.` imports or third-party libraries."""
+    logging, contextlib. No `from src.` imports or third-party libraries."""
     source_path = pathlib.Path(importlib.util.find_spec("src.core.atomic_io").origin)
     source_text = source_path.read_text()
     tree = ast.parse(source_text)
 
-    allowed_stdlib = {"tempfile", "os", "json", "typing", "logging"}
+    allowed_stdlib = {"tempfile", "os", "json", "typing", "logging", "contextlib"}
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):

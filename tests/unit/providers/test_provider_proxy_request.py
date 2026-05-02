@@ -98,7 +98,7 @@ async def test_default_400_behavior(mock_client, mock_response):
     mock_client.send.return_value = mock_response
     request = httpx.Request("POST", "http://test")
 
-    _, result = await provider._send_proxy_request(mock_client, request)
+    _, result, _body = await provider._send_proxy_request(mock_client, request)
 
     # Assertions
     assert result.error_reason == ErrorReason.BAD_REQUEST
@@ -123,13 +123,14 @@ async def test_default_401_behavior(mock_client, mock_response):
     mock_client.send.return_value = mock_response
     request = httpx.Request("POST", "http://test")
 
-    _, result = await provider._send_proxy_request(mock_client, request)
+    _, result, _body = await provider._send_proxy_request(mock_client, request)
 
     # Assertions
     assert result.error_reason == ErrorReason.INVALID_KEY
     assert result.message == "Body NOT read"
     mock_response.aread.assert_not_called()
-    mock_response.aclose.assert_called_once()
+    # Stream is never closed by _send_proxy_request (caller owns lifecycle)
+    mock_response.aclose.assert_not_called()
 
 
 # --- 2. FAST FALLBACK (DEFAULT BEHAVIOR) TESTS ---
@@ -154,7 +155,7 @@ async def test_fast_fallback_400(mock_client, mock_response):
     mock_client.send.return_value = mock_response
     request = httpx.Request("POST", "http://test")
 
-    _, result = await provider._send_proxy_request(mock_client, request)
+    _, result, _body = await provider._send_proxy_request(mock_client, request)
 
     # Assertions - fast_status_mapping removed, falls through to default
     assert result.error_reason == ErrorReason.BAD_REQUEST  # Default mapping
@@ -194,7 +195,7 @@ async def test_error_parsing_triggered(mock_client, mock_response):
     mock_client.send.return_value = mock_response
     request = httpx.Request("POST", "http://test")
 
-    _, result = await provider._send_proxy_request(mock_client, request)
+    _, result, _body = await provider._send_proxy_request(mock_client, request)
 
     # Assertions
     assert result.message == "Body READ"
@@ -229,7 +230,7 @@ async def test_error_parsing_ignored_on_mismatch(mock_client, mock_response):
     mock_client.send.return_value = mock_response
     request = httpx.Request("POST", "http://test")
 
-    _, result = await provider._send_proxy_request(mock_client, request)
+    _, result, _body = await provider._send_proxy_request(mock_client, request)
 
     # Assertions
     assert result.error_reason == ErrorReason.SERVER_ERROR
@@ -256,7 +257,7 @@ async def test_debug_mode_force_read(mock_client, mock_response):
     mock_client.send.return_value = mock_response
     request = httpx.Request("POST", "http://test")
 
-    _, result = await provider._send_proxy_request(mock_client, request)
+    _, result, _body = await provider._send_proxy_request(mock_client, request)
 
     # Assertions
     assert result.message == "Body READ"

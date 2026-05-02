@@ -17,9 +17,8 @@ import pytest
 from src.core.constants import ErrorReason
 from src.core.models import CheckResult
 from src.services.gateway.response_forwarder import (
-    UpstreamAttempt,
     _HOP_BY_HOP_HEADERS,
-    _extract_filtered_headers,
+    UpstreamAttempt,
     discard_response,
     forward_error_to_client,
     forward_success_stream,
@@ -614,7 +613,7 @@ class TestSignatureContractEnforcement:
                 return await self._send_proxy_request(client, request)
 
         # Create a mock provider config
-        from src.config.schemas import ProviderConfig, GatewayPolicyConfig
+        from src.config.schemas import GatewayPolicyConfig, ProviderConfig
 
         mock_config = MagicMock(spec=ProviderConfig)
         mock_config.gateway_policy = MagicMock(spec=GatewayPolicyConfig)

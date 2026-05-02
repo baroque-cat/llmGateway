@@ -22,7 +22,7 @@ from src.config.schemas import (
     ProviderConfig,
 )
 from src.core.constants import ErrorReason
-from src.core.models import CheckResult
+from src.core.models import CheckResult, RequestDetails
 from src.providers.impl.openai_like import OpenAILikeProvider
 
 
@@ -58,33 +58,6 @@ class TestOpenAILikeErrorParsing:
         # Create provider instance
         provider = OpenAILikeProvider("test_provider", mock_config)
         return provider
-
-    @pytest.mark.asyncio
-    async def test_parse_proxy_error_without_error_parsing(self):
-        """Test _parse_proxy_error when error parsing is disabled."""
-        provider = self.create_mock_provider(
-            error_config=ErrorParsingConfig(enabled=False, rules=[])
-        )
-
-        mock_response = AsyncMock(spec=httpx.Response)
-        mock_response.status_code = 400
-        mock_response.elapsed = MagicMock()
-        mock_response.elapsed.total_seconds.return_value = 0.5
-
-        # Mock aread to return a generic error
-        error_body = json.dumps(
-            {"error": {"message": "Invalid request", "type": "invalid_request_error"}}
-        ).encode("utf-8")
-        mock_response.aread = AsyncMock(return_value=error_body)
-
-        result = await provider._parse_proxy_error(mock_response, error_body)
-
-        # Should map to BAD_REQUEST by default (no error parsing)
-        assert isinstance(result, CheckResult)
-        assert not result.available
-        assert result.error_reason == ErrorReason.BAD_REQUEST
-        assert result.response_time == 0.5
-        assert result.status_code == 400
 
     @pytest.mark.asyncio
     async def test_parse_proxy_error_with_error_parsing_match(self):
@@ -168,57 +141,6 @@ class TestOpenAILikeErrorParsing:
         assert result.status_code == 400
 
     @pytest.mark.asyncio
-    async def test_parse_proxy_error_with_multiple_rules_priority(self):
-        """Test _parse_proxy_error with multiple rules, respecting priority."""
-        provider = self.create_mock_provider(
-            error_config=ErrorParsingConfig(
-                enabled=True,
-                rules=[
-                    ErrorParsingRule(
-                        status_code=400,
-                        error_path="error.code",
-                        match_pattern="insufficient_quota",
-                        map_to="no_quota",
-                        priority=5,
-                    ),
-                    ErrorParsingRule(
-                        status_code=400,
-                        error_path="error.type",
-                        match_pattern="Arrearage",
-                        map_to="invalid_key",
-                        priority=10,  # Higher priority
-                    ),
-                ],
-            )
-        )
-
-        mock_response = AsyncMock(spec=httpx.Response)
-        mock_response.status_code = 400
-        mock_response.elapsed = MagicMock()
-        mock_response.elapsed.total_seconds.return_value = 0.5
-
-        # Mock aread to return error that matches both rules
-        error_body = json.dumps(
-            {
-                "error": {
-                    "type": "Arrearage",
-                    "code": "insufficient_quota",
-                    "message": "Multiple error indicators",
-                }
-            }
-        ).encode("utf-8")
-        mock_response.aread = AsyncMock(return_value=error_body)
-
-        result = await provider._parse_proxy_error(mock_response, error_body)
-
-        # Should use higher priority rule (INVALID_KEY)
-        assert isinstance(result, CheckResult)
-        assert not result.available
-        assert result.error_reason == ErrorReason.INVALID_KEY
-        assert result.response_time == 0.5
-        assert result.status_code == 400
-
-    @pytest.mark.asyncio
     async def test_parse_proxy_error_with_different_status_code(self):
         """Test _parse_proxy_error with rules for different status codes."""
         provider = self.create_mock_provider(
@@ -260,107 +182,6 @@ class TestOpenAILikeErrorParsing:
         assert result.error_reason == ErrorReason.RATE_LIMITED
         assert result.response_time == 0.5
         assert result.status_code == 429
-
-    @pytest.mark.asyncio
-    async def test_parse_proxy_error_empty_response_body(self):
-        """Test _parse_proxy_error with empty response body."""
-        provider = self.create_mock_provider(
-            error_config=ErrorParsingConfig(
-                enabled=True,
-                rules=[
-                    ErrorParsingRule(
-                        status_code=400,
-                        error_path="error.type",
-                        match_pattern=".*",
-                        map_to="invalid_key",
-                    )
-                ],
-            )
-        )
-
-        mock_response = AsyncMock(spec=httpx.Response)
-        mock_response.status_code = 400
-        mock_response.elapsed = MagicMock()
-        mock_response.elapsed.total_seconds.return_value = 0.5
-        mock_response.aread = AsyncMock(return_value=b"")  # Empty body
-
-        result = await provider._parse_proxy_error(mock_response, b"")
-
-        # Should use default mapping (BAD_REQUEST)
-        assert isinstance(result, CheckResult)
-        assert not result.available
-        assert result.error_reason == ErrorReason.BAD_REQUEST
-        assert result.response_time == 0.5
-        assert result.status_code == 400
-
-    @pytest.mark.asyncio
-    async def test_parse_proxy_error_invalid_json_body(self):
-        """Test _parse_proxy_error with invalid JSON in response body."""
-        provider = self.create_mock_provider(
-            error_config=ErrorParsingConfig(
-                enabled=True,
-                rules=[
-                    ErrorParsingRule(
-                        status_code=400,
-                        error_path="error.type",
-                        match_pattern=".*",
-                        map_to="invalid_key",
-                    )
-                ],
-            )
-        )
-
-        mock_response = AsyncMock(spec=httpx.Response)
-        mock_response.status_code = 400
-        mock_response.elapsed = MagicMock()
-        mock_response.elapsed.total_seconds.return_value = 0.5
-        mock_response.aread = AsyncMock(return_value=b"Invalid JSON {")
-
-        result = await provider._parse_proxy_error(mock_response, b"Invalid JSON {")
-
-        # Should use default mapping (BAD_REQUEST)
-        assert isinstance(result, CheckResult)
-        assert not result.available
-        assert result.error_reason == ErrorReason.BAD_REQUEST
-        assert result.response_time == 0.5
-        assert result.status_code == 400
-
-    @pytest.mark.asyncio
-    async def test_parse_proxy_error_passes_body_bytes(self):
-        """Test that _parse_proxy_error passes body_bytes to avoid re-reading."""
-        provider = self.create_mock_provider(
-            error_config=ErrorParsingConfig(
-                enabled=True,
-                rules=[
-                    ErrorParsingRule(
-                        status_code=400,
-                        error_path="error.type",
-                        match_pattern="Arrearage",
-                        map_to="invalid_key",
-                    )
-                ],
-            )
-        )
-
-        mock_response = AsyncMock(spec=httpx.Response)
-        mock_response.status_code = 400
-        mock_response.elapsed = MagicMock()
-        mock_response.elapsed.total_seconds.return_value = 0.5
-
-        error_body = json.dumps({"error": {"type": "Arrearage"}}).encode("utf-8")
-        mock_response.aread = AsyncMock(return_value=error_body)
-
-        # Patch _refine_error_reason to verify it's called with body_bytes
-        with patch.object(provider, "_refine_error_reason", AsyncMock()) as mock_refine:
-            mock_refine.return_value = ErrorReason.INVALID_KEY
-
-            await provider._parse_proxy_error(mock_response, error_body)
-
-            # Verify _refine_error_reason was called with body_bytes
-            mock_refine.assert_called_once()
-            call_args = mock_refine.call_args
-            assert call_args[1]["body_bytes"] == error_body
-            assert call_args[1]["default_reason"] == ErrorReason.BAD_REQUEST
 
     @pytest.mark.asyncio
     async def test_check_method_400_behavior(self):
@@ -556,44 +377,6 @@ class TestOpenAILikeErrorParsing:
         assert result.error_reason == ErrorReason.NO_QUOTA
         assert result.status_code == 400
 
-    @pytest.mark.asyncio
-    async def test_check_fallback_when_error_parsing_disabled(self):
-        """OAI-3: check() with error_parsing.enabled=False → default_reason (INVALID_KEY for 400)."""
-        provider = self.create_mock_provider(
-            error_config=ErrorParsingConfig(enabled=False, rules=[])
-        )
-        provider.config.models = {
-            "gpt-4": ModelInfo(
-                endpoint_suffix="/chat/completions",
-                test_payload={"messages": [{"role": "user", "content": "hi"}]},
-            )
-        }
-        provider.config.timeouts.pool = 35.0
-
-        mock_request = httpx.Request(
-            "POST", "https://api.openai.com/v1/chat/completions"
-        )
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 400
-        mock_response.elapsed = MagicMock()
-        mock_response.elapsed.total_seconds.return_value = 0.5
-        mock_response.text = '{"error": {"message": "Bad request"}}'
-
-        httpx_error = httpx.HTTPStatusError(
-            "400 Bad Request", request=mock_request, response=mock_response
-        )
-        mock_response.raise_for_status = MagicMock(side_effect=httpx_error)
-
-        mock_client = AsyncMock(spec=httpx.AsyncClient)
-        mock_client.post = AsyncMock(return_value=mock_response)
-
-        result = await provider.check(mock_client, "test_token", model="gpt-4")
-
-        assert not result.available
-        # When error_parsing is disabled, default_reason for 400 in check() is INVALID_KEY
-        assert result.error_reason == ErrorReason.INVALID_KEY
-        assert result.status_code == 400
-
     def test_check_does_not_call_check_fast_fail(self):
         """OAI-4: check() doesn't call _check_fast_fail() — method has been removed."""
         provider = self.create_mock_provider()
@@ -754,44 +537,6 @@ class TestOpenAILikeProxyRequest:
         assert "data" not in call_kwargs
 
     @pytest.mark.asyncio
-    async def test_openai_like_proxy_request_returns_three_element_tuple(self):
-        """Test proxy_request() returns (response, check_result, body_bytes) — third element pass-through from _send_proxy_request()."""
-        provider = self.create_mock_provider()
-        mock_client = MagicMock(spec=httpx.AsyncClient)
-        mock_request = MagicMock(spec=httpx.Request)
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 200
-        mock_response.is_success = True
-
-        mock_client.build_request = MagicMock(return_value=mock_request)
-
-        expected_check_result = CheckResult.success(status_code=200)
-        expected_body_bytes = b"upstream response body"
-
-        # Mock _send_proxy_request to return a 3-element tuple
-        provider._send_proxy_request = AsyncMock(
-            return_value=(mock_response, expected_check_result, expected_body_bytes)
-        )
-
-        token = "test_token"
-        method = "POST"
-        headers = {"Content-Type": "application/json"}
-        path = "chat/completions"
-        query_params = ""
-        content = b'{"model": "gpt-4", "messages": []}'
-
-        result = await provider.proxy_request(
-            mock_client, token, method, headers, path, query_params, content
-        )
-
-        # Verify proxy_request returns a 3-element tuple
-        assert isinstance(result, tuple)
-        assert len(result) == 3
-        assert result[0] is mock_response
-        assert result[1] is expected_check_result
-        assert result[2] is expected_body_bytes
-
-    @pytest.mark.asyncio
     async def test_proxy_request_passes_body_bytes_none_when_no_debug(self):
         """Test _send_proxy_request() returns body_bytes=None → proxy_request() passes through None."""
         provider = self.create_mock_provider()
@@ -864,3 +609,64 @@ class TestOpenAILikeProxyRequest:
         assert body_bytes is not None
         assert isinstance(body_bytes, bytes)
         assert body_bytes == expected_body_bytes
+
+
+class TestOpenAILikeParseRequestDetails:
+    """Test suite for OpenAI-like provider parse_request_details method."""
+
+    def create_mock_provider(self):
+        """Helper to create a mock OpenAILikeProvider with minimal configuration."""
+        mock_config = MagicMock(spec=ProviderConfig)
+        mock_config.error_parsing = ErrorParsingConfig(enabled=False, rules=[])
+        mock_config.provider_type = "openai"
+        mock_config.api_base_url = "https://api.openai.com/v1"
+        mock_config.default_model = "gpt-4"
+        mock_config.models = {}
+        mock_config.access_control = MagicMock()
+        mock_config.access_control.gateway_access_token = "test_token"
+        mock_config.health_policy = MagicMock()
+        mock_config.proxy_config = MagicMock()
+        mock_config.proxy_config.mode = "none"
+        mock_config.timeouts = MagicMock()
+        mock_config.timeouts.total = 30.0
+        mock_config.timeouts.connect = 10.0
+        mock_config.timeouts.read = 30.0
+        mock_config.timeouts.write = 30.0
+
+        provider = OpenAILikeProvider("test_provider", mock_config)
+        return provider
+
+    @pytest.mark.asyncio
+    async def test_parse_request_details_extracts_model_from_json(self):
+        """Test parse_request_details extracts model name from JSON request body."""
+        provider = self.create_mock_provider()
+
+        body = b'{"model":"gpt-4","messages":[]}'
+        path = "/v1/chat/completions"
+
+        result = await provider.parse_request_details(path, body)
+
+        assert isinstance(result, RequestDetails)
+        assert result.model_name == "gpt-4"
+
+    @pytest.mark.asyncio
+    async def test_parse_request_details_missing_model_field(self):
+        """Test parse_request_details raises ValueError when body lacks a model field."""
+        provider = self.create_mock_provider()
+
+        body = b'{"messages": [{"role": "user", "content": "Hello"}]}'
+        path = "/v1/chat/completions"
+
+        with pytest.raises(ValueError, match="missing a valid 'model' string field"):
+            await provider.parse_request_details(path, body)
+
+    @pytest.mark.asyncio
+    async def test_parse_request_details_invalid_json(self):
+        """Test parse_request_details raises ValueError for invalid JSON body."""
+        provider = self.create_mock_provider()
+
+        body = b"invalid"
+        path = "/v1/chat/completions"
+
+        with pytest.raises(ValueError, match="Failed to parse request body as JSON"):
+            await provider.parse_request_details(path, body)

@@ -107,7 +107,6 @@ class TestForwardSuccessStream:
         self, mock_upstream_response, mock_check_result_success
     ):
         """Status codes 200, 201, 204 are passed to client unchanged."""
-        from starlette.responses import StreamingResponse
 
         with patch(
             "src.services.gateway.gateway_service.StreamMonitor",
