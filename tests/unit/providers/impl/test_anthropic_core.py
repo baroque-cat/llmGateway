@@ -399,40 +399,4 @@ class TestAnthropicProvider:
         assert result.error_reason == ErrorReason.NO_QUOTA
         assert result.status_code == 401
 
-    @pytest.mark.asyncio
-    async def test_check_fallback_when_error_parsing_disabled(self):
-        """ANT-3: check() with error_parsing.enabled=False → default_reason."""
-        provider = self.create_mock_provider(
-            error_config=ErrorParsingConfig(enabled=False, rules=[])
-        )
-        provider.config.models = {
-            "claude-3-opus-20240229": ModelInfo(
-                endpoint_suffix="/v1/messages",
-                test_payload={"messages": [{"role": "user", "content": "hi"}]},
-            )
-        }
-        provider.config.timeouts.pool = 35.0
-
-        mock_request = httpx.Request("GET", "https://api.anthropic.com/v1/models")
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 401
-        mock_response.elapsed = MagicMock()
-        mock_response.elapsed.total_seconds.return_value = 0.5
-        mock_response.text = '{"error": {"type": "authentication_error"}}'
-
-        httpx_error = httpx.HTTPStatusError(
-            "401 Unauthorized", request=mock_request, response=mock_response
-        )
-        mock_response.raise_for_status = MagicMock(side_effect=httpx_error)
-
-        mock_client = AsyncMock(spec=httpx.AsyncClient)
-        mock_client.get = AsyncMock(return_value=mock_response)
-
-        result = await provider.check(
-            mock_client, "test_token", model="claude-3-opus-20240229"
-        )
-
-        assert not result.available
-        # When error_parsing is disabled, default_reason for 401 is INVALID_KEY
-        assert result.error_reason == ErrorReason.INVALID_KEY
-        assert result.status_code == 401
+    

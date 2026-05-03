@@ -4,9 +4,14 @@
 Unit tests for metrics configuration.
 
 Tests MetricsConfig defaults, validation, and YAML loading.
+
+Includes tests moved from integration/test_metrics_endpoint.py
+(TestMetricsConfigValidation class).
 """
 
-from unittest.mock import mock_open, patch
+from unittest.mock import MagicMock, mock_open, patch
+
+import pytest
 
 from src.config.loader import ConfigLoader
 from src.config.schemas import Config, MetricsConfig
@@ -176,3 +181,42 @@ class TestMetricsConfigIntegration:
 
         # Verify root config was modified (since it's the same object)
         assert root_config.metrics.access_token == "modified"
+
+
+# --- Tests moved from integration/test_metrics_endpoint.py ---
+
+
+@pytest.fixture
+def mock_accessor_metrics():
+    """Create a mock ConfigAccessor with metrics configuration."""
+    accessor = MagicMock()
+    accessor.get_metrics_config.return_value = MetricsConfig(
+        enabled=True, access_token="secret-token"
+    )
+    return accessor
+
+
+class TestMetricsConfigValidation:
+    """Test metrics configuration loading and validation.
+
+    Moved from integration/test_metrics_endpoint.py — these are pure
+    unit tests (Pydantic validation, no HTTP or gateway dependency).
+    """
+
+    def test_metrics_config_defaults(self):
+        """MetricsConfig has correct default values."""
+        config = MetricsConfig()
+        assert config.enabled is True
+        assert config.access_token == ""
+
+    def test_metrics_config_custom_values(self):
+        """MetricsConfig accepts custom values."""
+        config = MetricsConfig(enabled=True, access_token="my-token")
+        assert config.enabled is True
+        assert config.access_token == "my-token"
+
+    def test_accessor_returns_metrics_config(self, mock_accessor_metrics):
+        """ConfigAccessor.get_metrics_config() returns the config."""
+        config = MetricsConfig(enabled=True, access_token="test")
+        mock_accessor_metrics.get_metrics_config.return_value = config
+        assert mock_accessor_metrics.get_metrics_config() == config

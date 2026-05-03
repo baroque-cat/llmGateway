@@ -230,89 +230,22 @@ def test_run_sync_cycle_uses_computed_path():
 # ---------------------------------------------------------------------------
 
 
-def _make_scheduler_mocks() -> tuple[MagicMock, MagicMock, MagicMock]:
-    """Create the common mock objects for run_keeper() scheduler tests.
-
-    Returns (mock_scheduler, mock_accessor, mock_db_manager).
-    """
-    mock_scheduler = MagicMock()
-    mock_scheduler.start = MagicMock()
-    mock_scheduler.running = True
-    mock_scheduler.shutdown = MagicMock()
-    mock_scheduler.print_jobs = MagicMock()
-
-    mock_accessor = MagicMock()
-    mock_accessor.get_all_providers.return_value = {}
-    mock_accessor.get_enabled_providers.return_value = {}
-    mock_accessor.get_database_dsn.return_value = (
-        "postgresql://test:test@localhost:5432/testdb"
-    )
-    mock_accessor.get_pool_config.return_value = MagicMock(min_size=1, max_size=5)
-    mock_db_config = MagicMock()
-    mock_db_config.vacuum_policy.interval_minutes = 60
-    mock_accessor.get_database_config.return_value = mock_db_config
-
-    mock_db_manager = MagicMock()
-    mock_db_manager.initialize_schema = AsyncMock()
-    mock_db_manager.providers.sync = AsyncMock()
-
-    return mock_scheduler, mock_accessor, mock_db_manager
-
-
-async def _run_keeper_with_mocks(mock_scheduler, mock_accessor, mock_db_manager):
-    """Patch all dependencies and run run_keeper(), returning the mock scheduler."""
-    mock_hcf = MagicMock()
-    mock_hcf.return_value.close_all = AsyncMock()
-
-    with (
-        patch(
-            "src.services.keeper.AsyncIOScheduler",
-            return_value=mock_scheduler,
-        ),
-        patch("src.services.keeper.load_config", return_value=MagicMock()),
-        patch(
-            "src.services.keeper.ConfigAccessor",
-            return_value=mock_accessor,
-        ),
-        patch("src.services.keeper.setup_logging"),
-        patch("src.services.keeper._setup_directories"),
-        patch(
-            "src.services.keeper.database.init_db_pool",
-            new_callable=AsyncMock,
-        ),
-        patch(
-            "src.services.keeper.DatabaseManager",
-            return_value=mock_db_manager,
-        ),
-        patch("src.services.keeper.HttpClientFactory", mock_hcf),
-        patch("src.services.keeper.run_sync_cycle", new_callable=AsyncMock),
-        patch("src.services.keeper.get_all_probes", return_value=[]),
-        patch("src.services.keeper.get_all_syncers", return_value=[]),
-        patch("src.services.keeper.KeyInventoryExporter"),
-        patch(
-            "src.services.keeper.database.close_db_pool",
-            new_callable=AsyncMock,
-        ),
-        patch("asyncio.sleep", new_callable=AsyncMock, side_effect=KeyboardInterrupt),
-    ):
-        await run_keeper()
-
-    return mock_scheduler
-
-
 # --- M18 ---
 
 
 @pytest.mark.asyncio
-async def test_no_run_periodic_vacuum_job_registered() -> None:
+async def test_no_run_periodic_vacuum_job_registered(
+    mock_run_keeper_dependencies,
+) -> None:
     """M18: 'run_periodic_vacuum' is NOT in scheduler jobs after keeper setup."""
-    mock_scheduler, mock_accessor, mock_db_manager = _make_scheduler_mocks()
-    scheduler = await _run_keeper_with_mocks(
-        mock_scheduler, mock_accessor, mock_db_manager
-    )
+    deps = mock_run_keeper_dependencies
+    with patch(
+        "asyncio.sleep", new_callable=AsyncMock, side_effect=KeyboardInterrupt
+    ):
+        await run_keeper()
 
     # Verify no job with id "run_periodic_vacuum" was added
-    for call in scheduler.add_job.call_args_list:
+    for call in deps.scheduler.add_job.call_args_list:
         job_id = call[1].get("id")
         assert (
             job_id != "run_periodic_vacuum"
@@ -323,16 +256,19 @@ async def test_no_run_periodic_vacuum_job_registered() -> None:
 
 
 @pytest.mark.asyncio
-async def test_key_purge_cron_job_registered() -> None:
+async def test_key_purge_cron_job_registered(
+    mock_run_keeper_dependencies,
+) -> None:
     """M19: Worker registers cron job 'key_purge' with day_of_week='sun', hour=4, minute=0."""
-    mock_scheduler, mock_accessor, mock_db_manager = _make_scheduler_mocks()
-    scheduler = await _run_keeper_with_mocks(
-        mock_scheduler, mock_accessor, mock_db_manager
-    )
+    deps = mock_run_keeper_dependencies
+    with patch(
+        "asyncio.sleep", new_callable=AsyncMock, side_effect=KeyboardInterrupt
+    ):
+        await run_keeper()
 
     # Find the key_purge job among add_job calls
     key_purge_call = None
-    for call in scheduler.add_job.call_args_list:
+    for call in deps.scheduler.add_job.call_args_list:
         if call[1].get("id") == "key_purge":
             key_purge_call = call
             break
@@ -348,16 +284,19 @@ async def test_key_purge_cron_job_registered() -> None:
 
 
 @pytest.mark.asyncio
-async def test_smart_vacuum_interval_job_registered() -> None:
+async def test_smart_vacuum_interval_job_registered(
+    mock_run_keeper_dependencies,
+) -> None:
     """M20: Worker registers interval job 'smart_vacuum' with minutes=60."""
-    mock_scheduler, mock_accessor, mock_db_manager = _make_scheduler_mocks()
-    scheduler = await _run_keeper_with_mocks(
-        mock_scheduler, mock_accessor, mock_db_manager
-    )
+    deps = mock_run_keeper_dependencies
+    with patch(
+        "asyncio.sleep", new_callable=AsyncMock, side_effect=KeyboardInterrupt
+    ):
+        await run_keeper()
 
     # Find the smart_vacuum job among add_job calls
     smart_vacuum_call = None
-    for call in scheduler.add_job.call_args_list:
+    for call in deps.scheduler.add_job.call_args_list:
         if call[1].get("id") == "smart_vacuum":
             smart_vacuum_call = call
             break

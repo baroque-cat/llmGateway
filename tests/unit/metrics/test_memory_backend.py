@@ -5,14 +5,21 @@
 Verifies the in-memory metrics backend: gauge creation, set/inc
 operations, instance isolation, labelled metrics, and collect_from_db
 no-op behaviour.
+
+Includes test moved from integration/test_keeper_metrics_endpoint.py:
+  - test_keeper_metrics_with_memory_collector
 """
 
+import json
+import os
 from unittest.mock import MagicMock
 
 import pytest
 
 from src.core.interfaces import IGauge
+from src.metrics import get_collector, reset_collector
 from src.metrics.backends.memory import MemoryMetricsCollector
+from src.metrics.registry import KEY_STATUS_TOTAL
 
 
 # ---------------------------------------------------------------------------
@@ -122,3 +129,46 @@ async def test_collect_from_db_no_op() -> None:
 
     # Should complete without raising
     await collector.collect_from_db(mock_db)
+
+
+# --- Test moved from integration/test_keeper_metrics_endpoint.py ---
+
+
+@pytest.fixture(autouse=True)
+def _isolate_collector_for_memory_backend():
+    """Reset the collector singleton and clean env vars between tests."""
+    reset_collector()
+    for key in ("PROMETHEUS_MULTIPROC_DIR", "METRICS_BACKEND"):
+        os.environ.pop(key, None)
+    yield
+    reset_collector()
+    for key in ("PROMETHEUS_MULTIPROC_DIR", "METRICS_BACKEND"):
+        os.environ.pop(key, None)
+
+
+def test_keeper_metrics_with_memory_collector():
+    """Verify that MemoryMetricsCollector can also serve Keeper metrics
+    (useful for testing without prometheus_client I/O).
+
+    Moved from integration/test_keeper_metrics_endpoint.py — this test
+    only uses MemoryMetricsCollector in isolation (unit test).
+    """
+    os.environ["METRICS_BACKEND"] = "memory"
+    collector = get_collector()
+    assert isinstance(collector, MemoryMetricsCollector)
+
+    # Populate via collector interface
+    collector.gauge(
+        KEY_STATUS_TOTAL,
+        "Total number of API keys by provider, model, and status",
+        ["provider", "model", "status"],
+    ).set(10, {"provider": "openai", "model": "gpt-4o", "status": "valid"})
+
+    body, content_type = collector.generate_metrics()
+    assert content_type == "application/json"
+
+    data = json.loads(body)
+    metrics = data["metrics"]
+    key_status = [m for m in metrics if m["name"] == KEY_STATUS_TOTAL]
+    assert len(key_status) == 1
+    assert key_status[0]["value"] == 10.0

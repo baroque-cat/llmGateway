@@ -27,6 +27,7 @@ from src.metrics.registry import (
 from src.services.keeper import (
     _collect_db_metrics_loop,
     _create_adaptive_metrics_callback,
+    run_keeper,
 )
 
 
@@ -72,56 +73,32 @@ class TestKeeperCollectorInit:
         assert collector._multiprocess_dir is None
 
     @pytest.mark.asyncio
-    async def test_keeper_calls_get_collector_during_run(self):
+    async def test_keeper_calls_get_collector_during_run(
+        self, mock_run_keeper_dependencies
+    ):
         """run_keeper() calls get_collector() during initialization,
         producing a single-process collector (no PROMETHEUS_MULTIPROC_DIR)."""
         mock_collector = MagicMock(spec=IMetricsCollector)
 
-        mock_scheduler = MagicMock()
-        mock_scheduler.start = MagicMock()
-        mock_scheduler.running = True
-        mock_scheduler.shutdown = MagicMock()
-        mock_scheduler.print_jobs = MagicMock()
-
-        mock_accessor = MagicMock()
-        mock_accessor.get_all_providers.return_value = {}
-        mock_accessor.get_enabled_providers.return_value = {}
-        mock_accessor.get_database_dsn.return_value = (
-            "postgresql://test:test@localhost:5432/testdb"
-        )
-        mock_accessor.get_pool_config.return_value = MagicMock(min_size=1, max_size=5)
-        mock_db_config = MagicMock()
-        mock_db_config.vacuum_policy.interval_minutes = 60
-        mock_accessor.get_database_config.return_value = mock_db_config
-
-        mock_db_manager = MagicMock()
-        mock_db_manager.initialize_schema = AsyncMock()
-        mock_db_manager.providers.sync = AsyncMock()
-
-        mock_hcf = MagicMock()
-        mock_hcf.return_value.close_all = AsyncMock()
-
         with (
-            patch("src.services.keeper.get_collector", return_value=mock_collector) as mock_get,
-            patch("src.services.keeper.AsyncIOScheduler", return_value=mock_scheduler),
-            patch("src.services.keeper.load_config", return_value=MagicMock()),
-            patch("src.services.keeper.ConfigAccessor", return_value=mock_accessor),
-            patch("src.services.keeper.setup_logging"),
-            patch("src.services.keeper._setup_directories"),
-            patch("src.services.keeper.database.init_db_pool", new_callable=AsyncMock),
-            patch("src.services.keeper.DatabaseManager", return_value=mock_db_manager),
-            patch("src.services.keeper.HttpClientFactory", mock_hcf),
-            patch("src.services.keeper.run_sync_cycle", new_callable=AsyncMock),
-            patch("src.services.keeper.get_all_probes", return_value=[]),
-            patch("src.services.keeper.get_all_syncers", return_value=[]),
-            patch("src.services.keeper.KeyInventoryExporter"),
-            patch("src.services.keeper.database.close_db_pool", new_callable=AsyncMock),
-            patch("src.services.keeper._start_metrics_server", new_callable=AsyncMock),
-            patch("src.services.keeper._collect_db_metrics_loop", new_callable=AsyncMock),
-            patch("asyncio.sleep", new_callable=AsyncMock, side_effect=KeyboardInterrupt),
+            patch(
+                "src.services.keeper.get_collector",
+                return_value=mock_collector,
+            ) as mock_get,
+            patch(
+                "src.services.keeper._start_metrics_server",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "src.services.keeper._collect_db_metrics_loop",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "asyncio.sleep",
+                new_callable=AsyncMock,
+                side_effect=KeyboardInterrupt,
+            ),
         ):
-            from src.services.keeper import run_keeper
-
             # KeyboardInterrupt is caught by run_keeper's except block
             await run_keeper()
 

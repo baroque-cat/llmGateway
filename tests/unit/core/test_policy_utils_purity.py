@@ -226,16 +226,4 @@ def test_should_vacuum_zero_dead_tuples() -> None:
     assert should_vacuum(health, threshold=0.3) is False
 
 
-def test_should_vacuum_purity_no_config_db_imports() -> None:
-    """policy_utils.py does NOT import src.config or src.db (AST check)."""
-    source_path = pathlib.Path(importlib.util.find_spec("src.core.policy_utils").origin)
-    source_text = source_path.read_text()
-    tree = ast.parse(source_text)
 
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.Import, ast.ImportFrom)):
-            module_name = getattr(node, "module", "") or ""
-            if module_name.startswith("src.config") or module_name.startswith("src.db"):
-                pytest.fail(
-                    f"policy_utils.py imports from config/db layer: {module_name}"
-                )

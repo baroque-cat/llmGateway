@@ -11,6 +11,7 @@ import logging
 
 import pytest
 
+from src.core.constants import DebugMode
 from src.services.gateway.gateway_service import (
     _log_debug_info,
     _sanitize_body,
@@ -31,14 +32,27 @@ class TestSanitizeHeaders:
         result = _sanitize_headers(headers)
         assert result == headers
 
-    def test_sanitize_headers_authorization_bearer(self):
-        """Authorization Bearer token should be masked."""
+    @pytest.mark.parametrize(
+        "debug_mode",
+        [DebugMode.NO_CONTENT, DebugMode.FULL_BODY],
+        ids=["no_content", "full_body"],
+    )
+    def test_sanitize_headers_authorization_masked(self, debug_mode: DebugMode):
+        """Authorization Bearer token is masked to 'Bearer ***' in all debug modes.
+
+        Merged from three previously separate tests that verified the same
+        Bearer masking behavior with trivially different inputs:
+        - test_sanitize_headers_authorization_bearer
+        - test_sanitize_headers_authorization_masked_in_full_body
+        - test_sanitize_headers_authorization_masked_in_full_body_mode
+        """
         headers = {
-            "Authorization": "Bearer secret_token_123",
+            "Authorization": "Bearer sk-abc123",
             "Content-Type": "application/json",
         }
         result = _sanitize_headers(headers)
         assert result["Authorization"] == "Bearer ***"
+        assert "sk-abc123" not in result["Authorization"]
         assert result["Content-Type"] == "application/json"
 
     def test_sanitize_headers_authorization_other(self):
@@ -68,17 +82,6 @@ class TestSanitizeHeaders:
         # Keys retain original case
         assert result["AUTHORIZATION"] == "Bearer ***"
         assert result["X-API-KEY"] == "***"
-
-    def test_sanitize_headers_authorization_masked_in_full_body(self):
-        """Authorization header masked in full_body mode (regression check).
-
-        Verify that 'Bearer sk-abc123' becomes 'Bearer ***' — the Bearer
-        scheme is preserved while the credential is masked.
-        """
-        headers = {"Authorization": "Bearer sk-abc123"}
-        result = _sanitize_headers(headers)
-        assert result["Authorization"] == "Bearer ***"
-        assert "sk-abc123" not in result["Authorization"]
 
 
 class TestSanitizeBody:
@@ -173,19 +176,6 @@ class TestSanitizeBody:
         assert f'"{sensitive_field}": "***"' in result
         assert value not in result
         assert '"model": "gpt-4"' in result
-
-    # --- Task 7: Authorization header masked in full_body ---
-    def test_sanitize_headers_authorization_masked_in_full_body_mode(self):
-        """In full_body mode, Authorization header must be masked:
-        'Bearer sk-abc123' → 'Bearer ***'."""
-        headers = {
-            "Authorization": "Bearer sk-abc123",
-            "Content-Type": "application/json",
-        }
-        result = _sanitize_headers(headers)
-        assert result["Authorization"] == "Bearer ***"
-        assert "sk-abc123" not in result["Authorization"]
-        assert result["Content-Type"] == "application/json"
 
     # --- Task 8: provider_type passthrough in _sanitize_body ---
     def test_sanitize_body_accepts_provider_type_passthrough(self):

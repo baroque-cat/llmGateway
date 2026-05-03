@@ -166,26 +166,3 @@ class TestKeeperMetricsEndpoint:
         # Also verify with a random header — should still work
         response2 = client.get("/metrics", headers={"X-Some-Header": "value"})
         assert response2.status_code == 200
-
-    def test_keeper_metrics_with_memory_collector(self):
-        """Verify that MemoryMetricsCollector can also serve Keeper metrics
-        (useful for testing without prometheus_client I/O)."""
-        os.environ["METRICS_BACKEND"] = "memory"
-        collector = get_collector()
-        assert isinstance(collector, MemoryMetricsCollector)
-
-        # Populate via collector interface
-        collector.gauge(
-            KEY_STATUS_TOTAL,
-            "Total number of API keys by provider, model, and status",
-            ["provider", "model", "status"],
-        ).set(10, {"provider": "openai", "model": "gpt-4o", "status": "valid"})
-
-        body, content_type = collector.generate_metrics()
-        assert content_type == "application/json"
-
-        data = json.loads(body)
-        metrics = data["metrics"]
-        key_status = [m for m in metrics if m["name"] == KEY_STATUS_TOTAL]
-        assert len(key_status) == 1
-        assert key_status[0]["value"] == 10.0

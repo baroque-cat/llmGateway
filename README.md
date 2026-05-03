@@ -59,6 +59,9 @@ Example configs: `config/example_full_config.yaml`, `config/example_minimal_conf
 
 ```
 llmGateway
+├── .github
+│   └── workflows
+│       └── quality.yml           # CI: pyright, ruff, black, pytest, coverage
 ├── config
 │   ├── example_full_config.yaml  # all available options
 │   └── example_minimal_config.yaml  # quick-start template
@@ -74,52 +77,73 @@ llmGateway
 │   │   ├── logging_config.py     # setup_logging(), ComponentNameFilter
 │   │   └── schemas.py            # Pydantic v2 models — config source of truth
 │   ├── core                      # abstractions, contracts, pure functions
-│   │   ├── batching/             # adaptive batch controller (3-priority algorithm)
+│   │   ├── batching/
+│   │   │   ├── __init__.py       # re-exports AdaptiveBatchController
+│   │   │   └── adaptive.py       # self-tuning batch controller (3-priority algorithm)
 │   │   ├── accessor.py           # ConfigAccessor — typed read-only config facade
 │   │   ├── atomic_io.py          # atomic NDJSON file writes
-│   │   ├── constants.py          # enums: ErrorReason, KeyStatus, DebugMode, ProviderType
+│   │   ├── constants.py          # enums: ErrorReason, Status, DebugMode, ProviderType
 │   │   ├── exception_handler.py  # @handle_exceptions decorator (sync + async)
 │   │   ├── http_client_factory.py  # long-lived httpx.AsyncClient per provider
-│   │   ├── interfaces.py         # ABCs: IProvider, IResourceSyncer, IProbeDispatcher
+│   │   ├── interfaces.py         # ABCs: IProvider, IResourceSyncer, IResourceProbe
 │   │   ├── models.py             # CheckResult, DatabaseTableHealth, StatusSummary
 │   │   ├── policy_utils.py       # compute_next_check_time(), should_vacuum()
-│   │   ├── probes.py             # probe dispatch and batch scheduling
+│   │   ├── probes.py             # probe dispatch and adaptive batch scheduling
 │   │   └── retry.py              # AsyncRetrier for transient DB errors
 │   ├── db
 │   │   └── database.py           # PostgreSQL: connection pool, repos, migrations
+│   ├── metrics                   # Prometheus / in-memory metrics collection
+│   │   ├── backends/
+│   │   │   ├── __init__.py       # backend re-exports
+│   │   │   ├── memory.py         # MemoryMetricsCollector (testing / dev)
+│   │   │   └── prometheus.py     # PrometheusMetricsCollector (production)
+│   │   ├── __init__.py           # get_collector(), reset_collector()
+│   │   ├── auth.py               # metrics endpoint access control
+│   │   ├── contracts.py          # GaugeSpec, MetricValue dataclasses
+│   │   └── registry.py           # metric name constants (KEY_STATUS_TOTAL, etc.)
 │   ├── providers                 # LLM provider adapters
 │   │   ├── __init__.py           # provider factory + registry
-│   │   ├── base.py               # AIBaseProvider — shared proxy logic
+│   │   ├── base.py               # AIBaseProvider — shared proxy + error parsing logic
 │   │   └── impl/
 │   │       ├── openai_like.py    # OpenAI-compatible API (OpenAI, DeepSeek, Groq...)
 │   │       ├── anthropic.py      # Anthropic (Claude) API
-│   │       ├── gemini.py         # Google Gemini (thin entry)
-│   │       └── gemini_base.py    # Gemini shared implementation
+│   │       ├── gemini.py         # Google Gemini provider entry point
+│   │       └── gemini_base.py    # Gemini shared check/error-mapping implementation
 │   └── services                  # application services
 │       ├── gateway/              # Conductor — FastAPI API Gateway
+│       │   ├── __init__.py       # gateway package
 │       │   ├── gateway_service.py  # routing, retry, streaming, debug modes
 │       │   ├── gateway_cache.py    # in-memory key pool + auth token cache
 │       │   ├── response_forwarder.py  # upstream response forwarding
 │       │   └── sanitize_content.py    # debug-mode content redaction
 │       ├── synchronizers/
+│       │   ├── __init__.py       # synchronizer re-exports
 │       │   └── key_sync.py       # NDJSON key files → PostgreSQL sync
-│       ├── db_maintainer.py      # conditional VACUUM ANALYZE + dead-tuple Prometheus
+│       ├── db_maintainer.py      # conditional VACUUM ANALYZE + dead-tuple metrics
 │       ├── inventory_exporter.py # periodic key snapshot + status inventory (NDJSON)
 │       ├── keeper.py             # Keeper entry point: APScheduler + health cycles
-│       ├── key_probe.py          # per-key API health probing (WORKER_CHECK)
-│       ├── key_purger.py         # stopped key cleanup + provider deletion
-│       └── metrics_exporter.py   # Prometheus metrics (key status, adaptive batch)
+│       ├── key_probe.py          # per-key API health probing (adaptive batching)
+│       └── key_purger.py         # stopped key cleanup + provider deletion
 ├── tests
-│   ├── diagnostics/              # forward-ref diagnostic helper
 │   ├── e2e/                      # end-to-end gateway logging tests
-│   ├── integration/              # cross-component integration tests
-│   ├── security/                 # security tests (logging, error forwarding)
+│   ├── integration/              # cross-component integration tests (22 files)
+│   ├── security/                 # security tests (logging, error forwarding, auth)
 │   ├── test_batching/            # adaptive batching unit + integration tests
 │   └── unit/                     # unit tests mirroring src/ structure
+│       ├── config/               # config schema validation tests
+│       ├── core/                 # core interfaces, models, retry tests
+│       ├── db/                   # database manager + repository tests
+│       ├── metrics/              # metrics backends + auth tests
+│       ├── providers/            # provider adapter tests
+│       │   └── impl/             # per-provider implementation tests
+│       ├── services/             # service-level unit tests
+│       │   └── synchronizers/    # key sync unit tests
+│       └── typing/               # PEP 695 type alias checks
 ├── main.py                       # CLI entry point: gateway | keeper
 ├── Dockerfile
 ├── docker-compose.yml
-├── pyproject.toml                # deps + ruff/black/isort/pytest config
+├── pyproject.toml                # deps + ruff/black/pytest config
+├── poetry.lock                   # locked dependency versions
 ├── poetry.toml                   # poetry settings (package-mode = false)
 └── pyrightconfig.json            # strict type-checking configuration
 ```

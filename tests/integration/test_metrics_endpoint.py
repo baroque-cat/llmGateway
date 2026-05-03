@@ -276,28 +276,4 @@ class TestMetricsEndpointAuthProxy:
             assert "text/plain" in response.headers["content-type"]
 
 
-# ---------------------------------------------------------------------------
-# MetricsConfig validation (unchanged — no source code dependency)
-# ---------------------------------------------------------------------------
 
-
-class TestMetricsConfigValidation:
-    """Test metrics configuration loading and validation."""
-
-    def test_metrics_config_defaults(self):
-        """MetricsConfig has correct default values."""
-        config = MetricsConfig()
-        assert config.enabled is True
-        assert config.access_token == ""
-
-    def test_metrics_config_custom_values(self):
-        """MetricsConfig accepts custom values."""
-        config = MetricsConfig(enabled=True, access_token="my-token")
-        assert config.enabled is True
-        assert config.access_token == "my-token"
-
-    def test_accessor_returns_metrics_config(self, mock_accessor):
-        """ConfigAccessor.get_metrics_config() returns the config."""
-        config = MetricsConfig(enabled=True, access_token="test")
-        mock_accessor.get_metrics_config.return_value = config
-        assert mock_accessor.get_metrics_config() == config

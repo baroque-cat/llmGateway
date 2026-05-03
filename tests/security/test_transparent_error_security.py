@@ -322,6 +322,9 @@ class TestHeaderInjectionAndInformationLeakage:
     # M2: API key in forwarded error body (out of scope — xfail)
     # ------------------------------------------------------------------
 
+    # TODO: This test documents a REAL vulnerability — API key leaks in forwarded error body.
+    # Create a dedicated change for content-redaction pipeline, then remove xfail and make
+    # this test pass (remove xfail, keep assertion that NO api_key in body).
     @pytest.mark.xfail(
         reason="Body sanitization for API keys in forwarded errors is out of scope "
         "for the transparent-error-forwarding change. The gateway forwards the "

@@ -85,6 +85,8 @@ async def test_report_key_failure_integration_next_check_from_policy() -> None:
     now = datetime.now(UTC)
     expected_min = now + timedelta(hours=2) - timedelta(seconds=2)
     expected_max = now + timedelta(hours=2) + timedelta(seconds=2)
+    # TODO: time-sensitive assertion (±2 sec) may flake on slow CI.
+    # Consider using freezegun or increasing tolerance.
     assert expected_min <= next_check_time <= expected_max, (
         f"next_check_time {next_check_time} should be approximately "
         f"now + 2 hours (on_rate_limit_hr=2), not now + 1 minute"

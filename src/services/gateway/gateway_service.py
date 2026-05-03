@@ -875,13 +875,13 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
         try:
             expected_token = validate_metrics_access(accessor)
         except MetricsAuthError as e:
-            raise HTTPException(status_code=e.status_code, detail=e.detail)
+            raise HTTPException(status_code=e.status_code, detail=e.detail) from e
 
         raw_token = _get_token_from_headers(authorization)
         try:
             validate_metrics_token(raw_token, expected_token)
         except MetricsAuthError as e:
-            raise HTTPException(status_code=e.status_code, detail=e.detail)
+            raise HTTPException(status_code=e.status_code, detail=e.detail) from e
 
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
@@ -893,7 +893,9 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
                     media_type=keeper_resp.headers.get("content-type", "text/plain"),
                 )
         except httpx.TransportError:
-            raise HTTPException(status_code=502, detail="Keeper metrics unavailable")
+            raise HTTPException(
+                status_code=502, detail="Keeper metrics unavailable"
+            ) from None
 
     _ = metrics_endpoint
 

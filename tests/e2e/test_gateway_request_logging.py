@@ -13,6 +13,9 @@ from src.config.schemas import ModelInfo, ProviderConfig
 from src.core.constants import DebugMode, StreamingMode
 from src.core.models import CheckResult
 
+# NOTE: This is a fully mocked test using FastAPI TestClient, not a true end-to-end test.
+# TODO: Add a real E2E test that spins up the actual gateway server and sends real HTTP requests.
+
 
 def create_mock_provider_config(
     *,

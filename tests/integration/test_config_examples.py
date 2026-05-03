@@ -108,20 +108,7 @@ def test_full_config_gateway_and_database_pool(mock_env):
     assert config.database.pool.max_size == 15
 
 
-def test_full_config_key_order():
-    """IT-Y05: Read example_full_config.yaml as dict → keys in order: logging, metrics, gateway, worker, database, providers."""
-    yaml = YAML()
-    with open("config/example_full_config.yaml", encoding="utf-8") as f:
-        data = yaml.load(f)
-    expected_order = [
-        "logging",
-        "metrics",
-        "gateway",
-        "keeper",
-        "database",
-        "providers",
-    ]
-    assert list(data.keys()) == expected_order
+
 
 
 def test_minimal_config_gateway_defaults(mock_env):

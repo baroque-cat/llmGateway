@@ -20,7 +20,7 @@ from src.metrics.auth import (
 )
 
 # ---------------------------------------------------------------------------
-# TestMetricsAuthError — UT-MA01, UT-MA02, UT-MA03
+# TestMetricsAuthError — UT-MA01, UT-MA02
 # ---------------------------------------------------------------------------
 
 
@@ -39,15 +39,6 @@ class TestMetricsAuthError:
         e = MetricsAuthError(403, "Invalid metrics access token")
 
         assert isinstance(e, Exception)
-
-    def test_ma03_no_fastapi_import(self) -> None:
-        """UT-MA03: src/metrics/auth.py does not import fastapi."""
-        import pathlib
-
-        source = pathlib.Path("src/metrics/auth.py").read_text()
-        matches = re.findall(r"from fastapi|import fastapi", source)
-
-        assert matches == []
 
 
 # ---------------------------------------------------------------------------

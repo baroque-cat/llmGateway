@@ -214,8 +214,9 @@ class TestProviderTypeEnumExistence:
 
 class TestProxyModeEnumExistence:
     """
-    Tests for ProxyMode enum existence and members.
+    Tests for ProxyMode enum existence, members, and ProxyConfig behavior.
     ProxyMode now has exactly 2 members: NONE and STATIC (STEALTH removed).
+    Merged from TestProxyModeEnumExistence + TestBinaryProxyModePositive.
     """
 
     def test_proxy_mode_enum_has_none_and_static_only(self):
@@ -247,6 +248,83 @@ class TestProxyModeEnumExistence:
         ), "ProxyMode should NOT have STEALTH member"
         with pytest.raises(ValueError):
             ProxyMode("stealth")
+
+    def test_proxy_mode_none_exists(self):
+        """
+        ProxyMode.NONE exists, value "none".
+        """
+        assert hasattr(ProxyMode, "NONE")
+        assert ProxyMode.NONE.value == "none"
+
+    def test_proxy_mode_static_exists(self):
+        """
+        ProxyMode.STATIC exists, value "static".
+        """
+        assert hasattr(ProxyMode, "STATIC")
+        assert ProxyMode.STATIC.value == "static"
+
+    def test_proxy_config_default_is_none_mode(self):
+        """
+        ProxyConfig() → mode == ProxyMode.NONE, static_url == None.
+        """
+        from src.config.schemas import ProxyConfig
+
+        cfg = ProxyConfig()
+        assert cfg.mode == ProxyMode.NONE
+        assert cfg.static_url is None
+
+    def test_proxy_config_mode_none_is_valid(self):
+        """
+        ProxyConfig(mode="none") → valid.
+        """
+        from src.config.schemas import ProxyConfig
+
+        cfg = ProxyConfig(mode="none")
+        assert cfg.mode == ProxyMode.NONE
+
+    def test_proxy_config_mode_static_with_url_is_valid(self):
+        """
+        ProxyConfig(mode="static", static_url="http://proxy:8080") → valid.
+        """
+        from src.config.schemas import ProxyConfig
+
+        cfg = ProxyConfig(mode="static", static_url="http://proxy:8080")
+        assert cfg.mode == ProxyMode.STATIC
+        assert cfg.static_url == "http://proxy:8080"
+
+    def test_proxy_config_static_without_url_raises_validation_error(self):
+        """
+        ProxyConfig(mode="static") without static_url → ValidationError mentioning "static_url".
+        """
+        from pydantic import ValidationError
+
+        from src.config.schemas import ProxyConfig
+
+        with pytest.raises(ValidationError, match="static_url"):
+            ProxyConfig(mode="static")
+
+    def test_proxy_config_invalid_mode_raises_validation_error_without_stealth(self):
+        """
+        ProxyConfig(mode="invalid") → ValidationError, message contains "none" and "static"
+        but NOT "stealth".
+        """
+        from pydantic import ValidationError
+
+        from src.config.schemas import ProxyConfig
+
+        with pytest.raises(ValidationError) as exc_info:
+            ProxyConfig(mode="invalid")
+
+        error_msg = str(exc_info.value)
+        assert (
+            "none" in error_msg.lower()
+        ), f"Error message should mention 'none', got: {error_msg}"
+        assert (
+            "static" in error_msg.lower()
+        ), f"Error message should mention 'static', got: {error_msg}"
+        assert (
+            "stealth" not in error_msg.lower()
+        ), f"Error message should NOT mention 'stealth', got: {error_msg}"
 
 
 # ==============================================================================
@@ -325,17 +403,6 @@ class TestProxyStealthRemoval:
             cfg, "pool_list_path"
         ), "ProxyConfig should NOT have a pool_list_path field"
 
-    def test_proxy_config_stealth_mode_raises_validation_error(self):
-        """
-        ProxyConfig(mode="stealth") → ValidationError.
-        """
-        from pydantic import ValidationError
-
-        from src.config.schemas import ProxyConfig
-
-        with pytest.raises(ValidationError):
-            ProxyConfig(mode="stealth")
-
     def test_provider_proxy_state_import_raises_import_error(self):
         """
         ProviderProxyState import → ImportError.
@@ -356,89 +423,4 @@ class TestProxyStealthRemoval:
         ), f"'pool_list_path' should not appear in defaults, got keys: {list(cfg_dict.keys())}"
 
 
-# ==============================================================================
-# Section C: Binary ProxyMode positive tests
-# ==============================================================================
 
-
-class TestBinaryProxyModePositive:
-    """
-    Positive tests for the binary ProxyMode (NONE, STATIC) and ProxyConfig.
-    """
-
-    def test_proxy_mode_none_exists(self):
-        """
-        ProxyMode.NONE exists, value "none".
-        """
-        assert hasattr(ProxyMode, "NONE")
-        assert ProxyMode.NONE.value == "none"
-
-    def test_proxy_mode_static_exists(self):
-        """
-        ProxyMode.STATIC exists, value "static".
-        """
-        assert hasattr(ProxyMode, "STATIC")
-        assert ProxyMode.STATIC.value == "static"
-
-    def test_proxy_config_default_is_none_mode(self):
-        """
-        ProxyConfig() → mode == ProxyMode.NONE, static_url == None.
-        """
-        from src.config.schemas import ProxyConfig
-
-        cfg = ProxyConfig()
-        assert cfg.mode == ProxyMode.NONE
-        assert cfg.static_url is None
-
-    def test_proxy_config_mode_none_is_valid(self):
-        """
-        ProxyConfig(mode="none") → valid.
-        """
-        from src.config.schemas import ProxyConfig
-
-        cfg = ProxyConfig(mode="none")
-        assert cfg.mode == ProxyMode.NONE
-
-    def test_proxy_config_mode_static_with_url_is_valid(self):
-        """
-        ProxyConfig(mode="static", static_url="http://proxy:8080") → valid.
-        """
-        from src.config.schemas import ProxyConfig
-
-        cfg = ProxyConfig(mode="static", static_url="http://proxy:8080")
-        assert cfg.mode == ProxyMode.STATIC
-        assert cfg.static_url == "http://proxy:8080"
-
-    def test_proxy_config_static_without_url_raises_validation_error(self):
-        """
-        ProxyConfig(mode="static") without static_url → ValidationError mentioning "static_url".
-        """
-        from pydantic import ValidationError
-
-        from src.config.schemas import ProxyConfig
-
-        with pytest.raises(ValidationError, match="static_url"):
-            ProxyConfig(mode="static")
-
-    def test_proxy_config_invalid_mode_raises_validation_error_without_stealth(self):
-        """
-        ProxyConfig(mode="invalid") → ValidationError, message contains "none" and "static"
-        but NOT "stealth".
-        """
-        from pydantic import ValidationError
-
-        from src.config.schemas import ProxyConfig
-
-        with pytest.raises(ValidationError) as exc_info:
-            ProxyConfig(mode="invalid")
-
-        error_msg = str(exc_info.value)
-        assert (
-            "none" in error_msg.lower()
-        ), f"Error message should mention 'none', got: {error_msg}"
-        assert (
-            "static" in error_msg.lower()
-        ), f"Error message should mention 'static', got: {error_msg}"
-        assert (
-            "stealth" not in error_msg.lower()
-        ), f"Error message should NOT mention 'stealth', got: {error_msg}"

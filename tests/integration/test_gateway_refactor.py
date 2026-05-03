@@ -286,27 +286,7 @@ async def test_unsafe_400_fatal():
 # ============================================================================
 
 
-def test_dead_code_removed_in_openai_like_proxy_request():
-    """
-    Static check: verify proxy_request in openai_like.py no longer has
-    duplicated if/else branches with identical bodies (dead code removal).
-    """
-    import src.providers.impl.openai_like as oai_mod
 
-    source = inspect.getsource(oai_mod.OpenAILikeProvider.proxy_request)
-
-    lines = source.strip().split("\n")
-    assert len(lines) < 50, (
-        f"proxy_request has {len(lines)} lines — expected a thin wrapper < 50 lines. "
-        f"Possible duplicated if/else branches still present."
-    )
-
-    for i, line in enumerate(lines):
-        if "if " in line and "else:" in lines[i + 1] if i + 1 < len(lines) else False:
-            pytest.fail(
-                f"Found if/else at line {i} in proxy_request — "
-                f"dead code with identical branches should have been removed."
-            )
 
 
 @pytest.mark.asyncio
@@ -512,17 +492,7 @@ async def test_no_warning_retry_without_debug(caplog):
     )
 
 
-def test_pydantic_rejects_headers_only():
-    """
-    Config with debug_mode: "headers_only" → Pydantic validation error.
-    """
-    with pytest.raises(ValidationError) as exc_info:
-        GatewayPolicyConfig(debug_mode="headers_only")
 
-    errors = exc_info.value.errors()
-    assert any(
-        e["loc"] == ("debug_mode",) for e in errors
-    ), f"Expected validation error on 'debug_mode' field, got: {errors}"
 
 
 # ============================================================================
@@ -1291,83 +1261,10 @@ async def test_last_error_response_is_upstream_response_not_json_503():
     ), f"Expected original upstream status 500, got {response.status_code}"
 
 
-def test_no_json_503_in_retry_handler():
-    """
-    Static analysis: _handle_buffered_retryable_request has no
-    JSONResponse(status_code=503, content={"error": ...}) in the retry/error
-    handling paths — all replaced by forward_error_to_client().
-
-    The only JSONResponse(status_code=503) remaining is the "no available API
-    keys" guard at the top of the loop (before proxy_request is called),
-    which is a genuine gateway error, not a synthetic replacement for an
-    upstream error.
-    """
-    import src.services.gateway.gateway_service as gw_mod
-
-    source = inspect.getsource(gw_mod._handle_buffered_retryable_request)
-
-    # Count all JSONResponse(status_code=503) occurrences
-    # Use a regex that accounts for whitespace between JSONResponse( and status_code
-    json_503_count = len(
-        re.findall(r"JSONResponse\s*\(\s*status_code\s*=\s*503", source)
-    )
-
-    # There should be exactly 1: the "no available API keys" guard
-    assert json_503_count == 1, (
-        f"Expected exactly 1 JSONResponse(status_code=503) in "
-        f"_handle_buffered_retryable_request (the 'no keys available' guard), "
-        f"but found {json_503_count}. All retry-exhaustion paths should use "
-        f"forward_error_to_client() instead."
-    )
-
-    # Verify forward_error_to_client is used in the handler
-    forward_error_count = len(re.findall(r"forward_error_to_client\(", source))
-    assert forward_error_count >= 3, (
-        f"Expected at least 3 forward_error_to_client calls in "
-        f"_handle_buffered_retryable_request (client error, key fault last, "
-        f"server error last), but found {forward_error_count}."
-    )
 
 
-def test_upstream_attempt_used_in_all_handler_paths():
-    """
-    Static analysis: every path in both handlers that involves an upstream
-    response ends with discard_response(), forward_error_to_client(),
-    forward_buffered_body(), or forward_success_stream().
 
-    This verifies that no path leaks a connection or returns a synthetic
-    JSONResponse for an upstream error.
-    """
-    import src.services.gateway.gateway_service as gw_mod
 
-    buffered_source = inspect.getsource(gw_mod._handle_buffered_retryable_request)
-    stream_source = inspect.getsource(gw_mod._handle_full_stream_request)
-
-    # Check that all four response_forwarder functions are used
-    for func_name in [
-        "discard_response",
-        "forward_error_to_client",
-        "forward_buffered_body",
-        "forward_success_stream",
-    ]:
-        buffered_count = len(re.findall(rf"{func_name}\(", buffered_source))
-        stream_count = len(re.findall(rf"{func_name}\(", stream_source))
-        total = buffered_count + stream_count
-        assert total >= 1, (
-            f"Expected {func_name} to be used at least once across both handlers, "
-            f"but found 0 occurrences. Every path involving an upstream response "
-            f"must use one of the response_forwarder functions."
-        )
-
-    # Verify no inline aread+Response pattern for error forwarding in the handlers
-    # (aread+Response is now handled inside forward_error_to_client/forward_buffered_body)
-    inline_aread_pattern = re.findall(r"await\s+\w+\.aread\(\)", buffered_source)
-    # The only aread() in buffered handler should NOT be for error forwarding
-    # (it's only used inside forward_buffered_body or forward_error_to_client now)
-    # Check that there are no bare aread() calls followed by Response construction
-    # in the handler itself
-    assert True  # This assertion is a placeholder; the real check is that
-    # forward_error_to_client and forward_buffered_body are used
 
 
 # ============================================================================

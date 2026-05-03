@@ -254,7 +254,9 @@ async def _start_metrics_server(logger: logging.Logger) -> None:
     Uses ``prometheus_client.make_asgi_app()`` + uvicorn to avoid
     pulling in FastAPI just for metrics export.
     """
-    from prometheus_client import make_asgi_app  # type: ignore[reportUnknownVariableType]
+    from prometheus_client import (
+        make_asgi_app,  # type: ignore[reportUnknownVariableType]
+    )
 
     try:
         import uvicorn

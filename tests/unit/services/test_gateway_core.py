@@ -5,23 +5,28 @@ Tests cover:
   1-5: _handle_full_stream_request / _handle_buffered_retryable_request
   6-8: create_app factory
   9-11: _sanitize_headers / _sanitize_body
+  12-15: Static analysis / Pydantic validation (moved from integration)
 """
 
+import inspect
+import re
+import inspect
+import re
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import httpx
 import pytest
 from fastapi import FastAPI
+from pydantic import ValidationError
 from starlette.responses import StreamingResponse
 
 from src.core.constants import ErrorReason
 from src.core.models import CheckResult, RequestDetails
+from src.config.schemas import GatewayPolicyConfig
 from src.services.gateway.gateway_service import (
     GatewayStreamError,
     _handle_buffered_retryable_request,
     _handle_full_stream_request,
-    _sanitize_body,
-    _sanitize_headers,
     create_app,
 )
 
@@ -451,36 +456,110 @@ class TestCreateApp:
             assert "/{full_path:path}" in routes
 
 
+
+
+
 # ---------------------------------------------------------------------------
-# Tests 9-11: Sanitization helpers
+# Tests 12-15: Static analysis / Pydantic validation
+# (Moved from integration/test_gateway_refactor.py)
 # ---------------------------------------------------------------------------
 
 
-class TestSanitizeHeadersCore:
-    """Core sanitization tests for _sanitize_headers."""
+class TestGatewayStaticAnalysis:
+    """Static analysis and Pydantic validation tests for gateway service.
 
-    def test_sanitize_headers_masks_authorization(self):
-        """Authorization header with Bearer token is masked to 'Bearer ***'."""
-        headers = {"authorization": "Bearer secret"}
-        result = _sanitize_headers(headers)
-        assert result["authorization"] == "Bearer ***"
-        assert "secret" not in result["authorization"]
+    These tests verify source code structure and config validation —
+    no HTTP or runtime dependency, pure unit tests.
+    """
 
-    def test_sanitize_headers_masks_api_key(self):
-        """x-api-key header value is completely masked to '***'."""
-        headers = {"x-api-key": "sk-123"}
-        result = _sanitize_headers(headers)
-        assert result["x-api-key"] == "***"
-        assert "sk-123" not in result["x-api-key"]
+    def test_dead_code_removed_in_openai_like_proxy_request(self):
+        """
+        Static check: verify proxy_request in openai_like.py no longer has
+        duplicated if/else branches with identical bodies (dead code removal).
+        """
+        import src.providers.impl.openai_like as oai_mod
 
+        source = inspect.getsource(oai_mod.OpenAILikeProvider.proxy_request)
 
-class TestSanitizeBodyCore:
-    """Core sanitization tests for _sanitize_body."""
+        lines = source.strip().split("\n")
+        assert len(lines) < 50, (
+            f"proxy_request has {len(lines)} lines — expected a thin wrapper < 50 lines. "
+            f"Possible duplicated if/else branches still present."
+        )
 
-    def test_sanitize_body_masks_sensitive_fields(self):
-        """_sanitize_body masks api_key in JSON body for openai_like provider."""
-        body = b'{"api_key":"secret","messages":[]}'
-        result = _sanitize_body(body, "openai_like")
-        assert '"api_key": "***"' in result
-        assert "secret" not in result
-        assert '"messages"' in result
+        for i, line in enumerate(lines):
+            if "if " in line and "else:" in lines[i + 1] if i + 1 < len(lines) else False:
+                pytest.fail(
+                    f"Found if/else at line {i} in proxy_request — "
+                    f"dead code with identical branches should have been removed."
+                )
+
+    def test_no_json_503_in_retry_handler(self):
+        """
+        Static analysis: _handle_buffered_retryable_request has no
+        JSONResponse(status_code=503, content={"error": ...}) in the retry/error
+        handling paths — all replaced by forward_error_to_client().
+        """
+        import src.services.gateway.gateway_service as gw_mod
+
+        source = inspect.getsource(gw_mod._handle_buffered_retryable_request)
+
+        # Count all JSONResponse(status_code=503) occurrences
+        json_503_count = len(
+            re.findall(r"JSONResponse\s*\(\s*status_code\s*=\s*503", source)
+        )
+
+        # There should be exactly 1: the "no available API keys" guard
+        assert json_503_count == 1, (
+            f"Expected exactly 1 JSONResponse(status_code=503) in "
+            f"_handle_buffered_retryable_request (the 'no keys available' guard), "
+            f"but found {json_503_count}. All retry-exhaustion paths should use "
+            f"forward_error_to_client() instead."
+        )
+
+        # Verify forward_error_to_client is used in the handler
+        forward_error_count = len(re.findall(r"forward_error_to_client\(", source))
+        assert forward_error_count >= 3, (
+            f"Expected at least 3 forward_error_to_client calls in "
+            f"_handle_buffered_retryable_request (client error, key fault last, "
+            f"server error last), but found {forward_error_count}."
+        )
+
+    def test_pydantic_rejects_headers_only(self):
+        """
+        Config with debug_mode: "headers_only" → Pydantic validation error.
+        """
+        with pytest.raises(ValidationError) as exc_info:
+            GatewayPolicyConfig(debug_mode="headers_only")
+
+        errors = exc_info.value.errors()
+        assert any(
+            e["loc"] == ("debug_mode",) for e in errors
+        ), f"Expected validation error on 'debug_mode' field, got: {errors}"
+
+    def test_upstream_attempt_used_in_all_handler_paths(self):
+        """
+        Static analysis: every path in both handlers that involves an upstream
+        response ends with discard_response(), forward_error_to_client(),
+        forward_buffered_body(), or forward_success_stream().
+        """
+        import src.services.gateway.gateway_service as gw_mod
+
+        buffered_source = inspect.getsource(gw_mod._handle_buffered_retryable_request)
+        stream_source = inspect.getsource(gw_mod._handle_full_stream_request)
+
+        # Check that all four response_forwarder functions are used
+        for func_name in [
+            "discard_response",
+            "forward_error_to_client",
+            "forward_buffered_body",
+            "forward_success_stream",
+        ]:
+            buffered_count = len(re.findall(rf"{func_name}\(", buffered_source))
+            stream_count = len(re.findall(rf"{func_name}\(", stream_source))
+            total = buffered_count + stream_count
+            assert total >= 1, (
+                f"Expected {func_name} to be used at least once across both handlers, "
+                f"but found 0 occurrences. Every path involving an upstream response "
+                f"must use one of the response_forwarder functions."
+            )
