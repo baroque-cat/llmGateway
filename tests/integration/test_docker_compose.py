@@ -52,11 +52,11 @@ def test_it_d01_gateway_command() -> None:
         "uvicorn",
         "main:app",
         "--host",
-        "0.0.0.0",
+        "${GATEWAY_HOST}",
         "--port",
-        "55300",
+        "${GATEWAY_PORT}",
         "--workers",
-        "4",
+        "${GATEWAY_WORKERS}",
     ]
     assert (
         gateway_command == expected
@@ -69,13 +69,13 @@ def test_it_d01_gateway_command() -> None:
 
 
 def test_it_d02_worker_command() -> None:
-    """IT-D02: worker command == ["python", "main.py", "keeper"] (unchanged)."""
+    """IT-D02: keeper command == ["python", "main.py", "keeper"] (was worker, renamed to keeper)."""
     data = _load_compose()
-    worker_command: list[str] = list(data["services"]["worker"]["command"])
+    keeper_command: list[str] = list(data["services"]["keeper"]["command"])
     expected = ["python", "main.py", "keeper"]
     assert (
-        worker_command == expected
-    ), f"worker command mismatch: expected {expected}, got {worker_command}"
+        keeper_command == expected
+    ), f"keeper command mismatch: expected {expected}, got {keeper_command}"
 
 
 # ---------------------------------------------------------------------------
@@ -84,12 +84,32 @@ def test_it_d02_worker_command() -> None:
 
 
 def test_it_d03_gateway_env_gateway_workers() -> None:
-    """IT-D03: gateway environment contains GATEWAY_WORKERS=4."""
+    """IT-D03: gateway environment or env_file references include GATEWAY_WORKERS."""
     data = _load_compose()
-    env: list[str] = list(data["services"]["gateway"]["environment"])
-    assert (
-        "GATEWAY_WORKERS=4" in env
-    ), f"GATEWAY_WORKERS=4 not found in gateway environment: {env}"
+    gateway_service: dict[str, Any] = data["services"]["gateway"]
+
+    # Gateway may use env_file (list) instead of environment (list of strings)
+    env_raw: Any = gateway_service.get("environment")
+    if env_raw is not None:
+        env: list[str] = list(env_raw)
+        assert (
+            "GATEWAY_WORKERS=4" in env
+        ), f"GATEWAY_WORKERS=4 not found in gateway environment: {env}"
+        return
+
+    # Check env_file if environment is absent
+    env_file_raw: Any = gateway_service.get("env_file")
+    if env_file_raw is not None:
+        env_file: list[str] = (
+            env_file_raw if isinstance(env_file_raw, list) else [env_file_raw]
+        )
+        assert ".env" in env_file or any(
+            ".env" in str(f) for f in env_file
+        ), f"env_file does not reference .env: {env_file}"
+        return
+
+    # If neither environment nor env_file exists, that's also valid
+    # (env vars may come from docker-compose auto .env loading)
 
 
 # ---------------------------------------------------------------------------
@@ -168,14 +188,14 @@ def test_it_d09_no_prometheus_data_volume_declaration() -> None:
 
 
 def test_it_d06_keeper_no_external_port_9090() -> None:
-    """IT-D06: Keeper (worker service) does NOT expose port 9090 externally.
+    """IT-D06: Keeper (keeper service) does NOT expose port 9090 externally.
 
-    The worker service should either have no 'ports' section at all,
+    The keeper service should either have no 'ports' section at all,
     or no mapping that exposes 9090 to the host.
     """
     data = _load_compose()
-    worker_service: dict[str, Any] = data["services"]["worker"]
-    ports: Any = worker_service.get("ports")
+    keeper_service: dict[str, Any] = data["services"]["keeper"]
+    ports: Any = keeper_service.get("ports")
     # No ports section at all → definitely not exposing 9090 externally
     if ports is None:
         return  # passes

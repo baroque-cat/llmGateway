@@ -69,6 +69,10 @@ class ConfigLoader:
         # Step 3 & 4: Build base config and merge (Plan Step 3.3 & 3.4)
         final_config_dict = self._build_and_merge_config(user_config_resolved)
 
+        # Step 4a: Resolve env vars from defaults.py injected during merge
+        # (Plan Step 3.5 — second pass handles defaults-originated ${VAR})
+        final_config_dict = self._resolve_env_vars(final_config_dict)
+
         # Step 5: Validate with Pydantic (Plan Step 4.2 & 4.3)
         try:
             app_config = Config.model_validate(final_config_dict)

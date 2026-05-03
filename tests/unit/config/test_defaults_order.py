@@ -25,9 +25,9 @@ def test_default_config_keys_and_values():
     assert "host" in gateway
     assert "port" in gateway
     assert "workers" in gateway
-    assert gateway["host"] == "0.0.0.0"
-    assert gateway["port"] == 55300
-    assert gateway["workers"] == 4
+    assert gateway["host"] == "${GATEWAY_HOST}"
+    assert gateway["port"] == "${GATEWAY_PORT}"
+    assert gateway["workers"] == "${GATEWAY_WORKERS}"
 
     # Verify database contains pool with min_size, max_size
     assert "database" in defaults

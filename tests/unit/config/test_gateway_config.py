@@ -7,6 +7,7 @@ Tests cover: defaults, custom values, partial overrides, validation errors,
 root Config integration, and YAML loading via ConfigLoader.
 """
 
+import os
 from unittest.mock import mock_open, patch
 
 import pytest
@@ -14,6 +15,18 @@ from pydantic import ValidationError
 
 from src.config.loader import ConfigLoader
 from src.config.schemas import Config, GatewayConfig
+
+# Minimal env vars required after defaults.py now uses ${VAR} references
+_BASE_ENV: dict[str, str] = {
+    "DB_HOST": "localhost",
+    "DB_PORT": "5432",
+    "DB_USER": "test_user",
+    "DB_PASSWORD": "test_password",
+    "DB_NAME": "test_db",
+    "GATEWAY_HOST": "0.0.0.0",
+    "GATEWAY_PORT": "55300",
+    "GATEWAY_WORKERS": "4",
+}
 
 
 class TestGatewayConfigDefaults:
@@ -152,11 +165,12 @@ class TestGatewayConfigYamlLoading:
     """Test GatewayConfig loading via ConfigLoader from YAML."""
 
     def test_yaml_without_gateway_section(self):
-        """UT-G09: YAML without gateway section → config.gateway uses schema defaults."""
+        """UT-G09: YAML without gateway section → config.gateway uses env-resolved defaults."""
         yaml_content = """providers: {}
 logging: {}
 """
         with (
+            patch.dict(os.environ, _BASE_ENV),
             patch("os.path.exists", return_value=True),
             patch("builtins.open", mock_open(read_data=yaml_content)),
         ):
@@ -177,6 +191,7 @@ gateway:
   workers: 2
 """
         with (
+            patch.dict(os.environ, _BASE_ENV),
             patch("os.path.exists", return_value=True),
             patch("builtins.open", mock_open(read_data=yaml_content)),
         ):

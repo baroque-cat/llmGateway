@@ -1,9 +1,24 @@
 """Tests for src/config/__init__.py — load_config and get_config."""
 
+import os
+from unittest.mock import patch
+
 import pytest
 
 from src.config import get_config, load_config
 from src.config.schemas import Config
+
+# Minimal env vars required after defaults.py now uses ${VAR} references
+_BASE_ENV: dict[str, str] = {
+    "DB_HOST": "localhost",
+    "DB_PORT": "5432",
+    "DB_USER": "test_user",
+    "DB_PASSWORD": "test_password",
+    "DB_NAME": "test_db",
+    "GATEWAY_HOST": "0.0.0.0",
+    "GATEWAY_PORT": "55300",
+    "GATEWAY_WORKERS": "4",
+}
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -50,7 +65,8 @@ def minimal_config_file(tmp_path):
 
 def test_load_config_returns_config(minimal_config_file):
     """load_config with a valid YAML file should return a Config object."""
-    config = load_config(minimal_config_file)
+    with patch.dict(os.environ, _BASE_ENV):
+        config = load_config(minimal_config_file)
     assert isinstance(config, Config)
     # Verify some basic fields are populated
     assert "test_provider" in config.providers
@@ -59,7 +75,8 @@ def test_load_config_returns_config(minimal_config_file):
 
 def test_get_config_after_load(minimal_config_file):
     """After calling load_config, get_config should return the same Config object."""
-    config = load_config(minimal_config_file)
+    with patch.dict(os.environ, _BASE_ENV):
+        config = load_config(minimal_config_file)
     retrieved = get_config()
     assert retrieved is config  # same object (singleton)
 

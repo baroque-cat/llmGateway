@@ -4,12 +4,25 @@
 Unit tests for ConfigLoader.load() method.
 """
 
+import os
 from unittest.mock import mock_open, patch
 
 import pytest
 from ruamel.yaml.error import YAMLError
 
 from src.config.loader import ConfigLoader
+
+# Minimal env vars required after defaults.py now uses ${VAR} references
+_BASE_ENV: dict[str, str] = {
+    "DB_HOST": "localhost",
+    "DB_PORT": "5432",
+    "DB_USER": "test_user",
+    "DB_PASSWORD": "test_password",
+    "DB_NAME": "test_db",
+    "GATEWAY_HOST": "0.0.0.0",
+    "GATEWAY_PORT": "55300",
+    "GATEWAY_WORKERS": "4",
+}
 
 
 def test_config_loader_load_success():
@@ -35,6 +48,7 @@ providers:
 """
 
     with (
+        patch.dict(os.environ, _BASE_ENV),
         patch("os.path.exists", return_value=True),
         patch("builtins.open", mock_open(read_data=mock_yaml_content)),
     ):
@@ -102,6 +116,7 @@ providers:
 """
 
     with (
+        patch.dict(os.environ, _BASE_ENV),
         patch("os.path.exists", return_value=True),
         patch("builtins.open", mock_open(read_data=mock_yaml_content)),
     ):
@@ -142,6 +157,7 @@ providers:
 """
 
     with (
+        patch.dict(os.environ, _BASE_ENV),
         patch("os.path.exists", return_value=True),
         patch("builtins.open", mock_open(read_data=mock_yaml_content)),
     ):

@@ -19,9 +19,9 @@ metrics:
 # --- GATEWAY SETTINGS ---
 gateway:
   # Host to bind the API Gateway server to.
-  host: "0.0.0.0"
+  host: "${GATEWAY_HOST}"
   # Port to bind the API Gateway server to.
-  port: 55300
+  port: "${GATEWAY_PORT}"
   # Number of Uvicorn worker processes.
   workers: "${GATEWAY_WORKERS}"
 

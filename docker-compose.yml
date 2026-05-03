@@ -28,15 +28,15 @@ services:
         "uvicorn",
         "main:app",
         "--host",
-        "0.0.0.0",
+        "${GATEWAY_HOST}",
         "--port",
-        "55300",
+        "${GATEWAY_PORT}",
         "--workers",
         "${GATEWAY_WORKERS}",
       ]
     restart: unless-stopped
     ports:
-      - "55300:55300"
+      - "${GATEWAY_PORT}:${GATEWAY_PORT}"
     # All configuration is loaded from the .env file.
     env_file:
       - .env
@@ -51,11 +51,13 @@ services:
     security_opt:
       - no-new-privileges:true
 
-  worker:
+  keeper:
     image: llmgateway:latest
     container_name: llmgateway_keeper
     command: ["python", "main.py", "keeper"]
     restart: unless-stopped
+    environment:
+      - KEEPER_METRICS_PORT=${KEEPER_METRICS_PORT}
     # All configuration is loaded from the .env file.
     env_file:
       - .env

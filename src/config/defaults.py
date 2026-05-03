@@ -17,9 +17,9 @@ def get_default_config() -> dict[str, Any]:
         # The metrics accessor key belongs here in the future when added.
         # --- GATEWAY SETTINGS ---
         "gateway": {
-            "host": "0.0.0.0",
-            "port": 55300,
-            "workers": 4,
+            "host": "${GATEWAY_HOST}",
+            "port": "${GATEWAY_PORT}",
+            "workers": "${GATEWAY_WORKERS}",
         },
         # --- KEEPER SETTINGS ---
         "keeper": {
@@ -28,14 +28,14 @@ def get_default_config() -> dict[str, Any]:
         },
         # --- DATABASE SETTINGS ---
         "database": {
-            "host": "localhost",
-            "port": 5432,
-            "user": "llm_gateway",
+            "host": "${DB_HOST}",
+            "port": "${DB_PORT}",
+            "user": "${DB_USER}",
             # This value is expected to be loaded from an environment variable.
             # Create a .env file in the project root with the line:
             # DB_PASSWORD="your_super_secret_password"
             "password": "${DB_PASSWORD}",
-            "dbname": "llmgateway",
+            "dbname": "${DB_NAME}",
             # Connection pool settings for asyncpg.
             "pool": {
                 "min_size": 1,
