@@ -21,4 +21,4 @@ RUN useradd -m -u 1000 appuser && \
 
 USER appuser
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "55300", "--workers", "4"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "55300"]

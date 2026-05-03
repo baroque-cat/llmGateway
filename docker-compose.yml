@@ -32,13 +32,12 @@ services:
         "--port",
         "55300",
         "--workers",
-        "4",
+        "${GATEWAY_WORKERS}",
       ]
     restart: unless-stopped
     ports:
       - "55300:55300"
     environment:
-      - GATEWAY_WORKERS=4
       - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc
     # All configuration is loaded from the .env file.
     env_file:
