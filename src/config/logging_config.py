@@ -38,7 +38,7 @@ class ComponentNameFilter(logging.Filter):
         ("src.services.key_purger", "purger"),
         ("src.services.db_maintainer", "vacuum"),
         ("src.services.inventory_exporter", "export"),
-        ("src.services.metrics_exporter", "metrics"),
+        ("src.metrics", "metrics"),
         ("src.services.synchronizers", "sync"),
         ("src.db.database", "database"),
         ("src.providers", "provider"),

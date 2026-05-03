@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import os
 import re
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
@@ -20,6 +21,7 @@ from src.core.models import CheckResult
 from src.core.policy_utils import compute_next_check_time
 from src.db import database
 from src.db.database import DatabaseManager
+from src.metrics import get_collector, reset_collector
 from src.providers import get_provider
 from src.services.gateway.gateway_cache import GatewayCache
 from src.services.gateway.response_forwarder import (
@@ -28,7 +30,6 @@ from src.services.gateway.response_forwarder import (
     forward_error_to_client,
     forward_success_stream,
 )
-from src.services.metrics_exporter import MetricsService
 
 # --- Dependency Injection Helpers ---
 # These functions provide a typed and safe way to access app state,
@@ -65,9 +66,7 @@ app_state: dict[str, Any] = {
     "db_manager": None,
     "http_client_factory": None,
     "gateway_cache": None,
-    "metrics_service": None,  # Add metrics service to app state
     "cache_refresh_task": None,
-    "metrics_update_task": None,  # Add metrics update task to app state
 }
 
 # --- Helper Functions ---
@@ -397,35 +396,6 @@ async def _cache_refresh_loop(cache: GatewayCache, interval_sec: int) -> None:
             logger.error("An error occurred in the cache refresh loop.", exc_info=True)
 
 
-async def _metrics_cache_update_loop(
-    metrics_service: MetricsService, interval_sec: int
-) -> None:
-    """
-    An infinite loop that periodically updates the metrics cache.
-    """
-    logger.info(
-        f"Starting metrics cache update loop with an interval of {interval_sec} seconds."
-    )
-    # Perform initial update immediately
-    try:
-        await metrics_service.update_metrics_cache()
-        logger.info("Initial metrics cache update completed.")
-    except Exception:
-        logger.error("Error during initial metrics cache update.", exc_info=True)
-
-    while True:
-        try:
-            await asyncio.sleep(interval_sec)
-            await metrics_service.update_metrics_cache()
-        except asyncio.CancelledError:
-            logger.info("Metrics cache update loop is shutting down.")
-            break
-        except Exception:
-            logger.error(
-                "An error occurred in the metrics cache update loop.", exc_info=True
-            )
-
-
 def _get_token_from_headers(
     authorization: Annotated[str | None, Header()] = None,
     x_goog_api_key: Annotated[str | None, Header()] = None,
@@ -458,6 +428,9 @@ def _validate_metrics_token(
     metrics_config = accessor.get_metrics_config()
     if not metrics_config.enabled:
         raise HTTPException(status_code=404, detail="Metrics endpoint is disabled")
+
+    if not metrics_config.access_token:
+        raise HTTPException(status_code=404, detail="Metrics endpoint is not enabled")
 
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(
@@ -890,30 +863,41 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
             )
             app.state.cache_refresh_task = task
 
-            # Initialize metrics service if enabled and access token is configured
-            metrics_config = accessor.get_metrics_config()
-            if metrics_config.enabled and metrics_config.access_token:
-                app.state.metrics_service = MetricsService(app.state.db_manager)
-                logger.info(
-                    "Metrics service initialized and registered with Prometheus client."
+            # --- Metrics setup: multiprocess if workers > 1 ---
+            gw_workers = accessor.get_gateway_config().workers
+            if gw_workers > 1:
+                multiproc_dir = os.environ.get(
+                    "PROMETHEUS_MULTIPROC_DIR", "/tmp/prometheus_multiproc"
                 )
+                os.environ.setdefault("PROMETHEUS_MULTIPROC_DIR", multiproc_dir)
+                os.makedirs(multiproc_dir, exist_ok=True)
 
-                # Start periodic metrics cache update task
-                metrics_update_task = asyncio.create_task(
-                    _metrics_cache_update_loop(
-                        app.state.metrics_service, interval_sec=30
+                # Reset singleton so the factory picks up the new env var
+                # and creates a multiprocess collector.
+                reset_collector()
+
+            collector = get_collector()
+            _ = collector  # ensure collector is initialized for this worker
+            logger.info(
+                "Metrics collector initialized (%s).",
+                "multiprocess" if gw_workers > 1 else "single-process",
+            )
+
+            # Register cleanup on worker shutdown via atexit
+            import atexit
+
+            def _cleanup_multiproc_files() -> None:
+                """Mark mmap files as dead when the worker exits."""
+                try:
+                    from prometheus_client import multiprocess
+                    multiprocess.mark_process_dead(  # pyright: ignore[reportUnknownMemberType]
+                        os.getpid()
                     )
-                )
-                app.state.metrics_update_task = metrics_update_task
-            else:
-                app.state.metrics_service = None
-                app.state.metrics_update_task = None
-                if metrics_config.enabled and not metrics_config.access_token:
-                    logger.warning(
-                        "Metrics enabled but no access token configured. Metrics endpoint disabled."
-                    )
-                else:
-                    logger.info("Metrics service is disabled.")
+                except Exception:
+                    pass
+
+            if gw_workers > 1:
+                atexit.register(_cleanup_multiproc_files)
 
             # Assign the pre-calculated dispatcher state
             app.state.full_stream_instances = full_stream_instances
@@ -934,8 +918,6 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
         logger.info("Gateway service shutting down...")
         if task := getattr(app.state, "cache_refresh_task", None):
             task.cancel()
-        if metrics_task := getattr(app.state, "metrics_update_task", None):
-            metrics_task.cancel()
         if http_factory := getattr(app.state, "http_client_factory", None):
             await http_factory.close_all()
         await database.close_db_pool()
@@ -948,16 +930,15 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
         request: Request, authorization: Annotated[str | None, Header()] = None
     ) -> Response:
         """
-        Expose metrics in Prometheus format.
-        """
-        metrics_service = request.app.state.metrics_service
-        if not metrics_service:
-            raise HTTPException(
-                status_code=404, detail="Metrics endpoint is not enabled"
-            )
+        Expose metrics in Prometheus format (request-level only).
 
+        Uses ``IMetricsCollector.generate_metrics()`` instead of the
+        old ``MetricsService``.  Key-status and adaptive metrics are
+        now exported by the Keeper on its own ``/metrics`` endpoint.
+        """
         _validate_metrics_token(authorization, request)
-        metrics_data, content_type = metrics_service.get_metrics()
+        collector = get_collector()
+        metrics_data, content_type = collector.generate_metrics()
         return Response(content=metrics_data, media_type=content_type)
 
     _ = metrics_endpoint

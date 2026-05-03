@@ -11,8 +11,8 @@ services:
       - pg_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U llm_gateway -d llmgateway"]
-      interval: 10s
-      timeout: 5s
+      interval: 20s
+      timeout: 10s
       retries: 5
     networks:
       - llmgateway_net
@@ -25,20 +25,28 @@ services:
     container_name: llmgateway_gateway
     command:
       [
-        "python",
-        "main.py",
-        "gateway",
-        "--workers", "1",
+        "uvicorn",
+        "main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "55300",
+        "--workers",
+        "4",
       ]
     restart: unless-stopped
     ports:
       - "55300:55300"
+    environment:
+      - GATEWAY_WORKERS=4
+      - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc
     # All configuration is loaded from the .env file.
     env_file:
       - .env
     volumes:
       - ./config:/app/config:ro
       - ./data:/app/data:rw
+      - prometheus_data:/tmp/prometheus_multiproc
     depends_on:
       database:
         condition: service_healthy
@@ -66,9 +74,11 @@ services:
       - llmgateway_net
     security_opt:
       - no-new-privileges:true
+    # Keeper exposes internal /metrics on port 9090 (not mapped externally)
 
 volumes:
   pg_data:
+  prometheus_data:
 
 networks:
   llmgateway_net:

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import logging
 import re
 from typing import Any, Literal
 
@@ -720,4 +721,39 @@ class Config(BaseModel):
                     f"Provider instance name '{name}' is not filesystem-safe. "
                     "Must match ^[a-zA-Z0-9_-]+$ (alphanumeric, hyphens, underscores only)."
                 )
+        return self
+
+    @model_validator(mode="after")
+    def validate_pool_sizing(self) -> "Config":
+        """Validate DB connection pool sizing against PostgreSQL limits.
+
+        Computes ``worst_case = (gateway.workers + 1) × pool.max_size``
+        and compares with the PostgreSQL limit of 97 user connections
+        (100 − 3 superuser-reserved).
+
+        - ``worst_case > 97`` → ``ValueError`` (blocks startup)
+        - ``worst_case > 77`` (80%) → ``WARNING`` log
+        """
+        pool_max = self.database.pool.max_size
+        gw_workers = self.gateway.workers
+        processes = gw_workers + 1  # +1 for Keeper
+        worst_case = processes * pool_max
+        pg_limit = 97  # 100 minus 3 superuser reserve
+
+        if worst_case > pg_limit:
+            raise ValueError(
+                f"Database connection overflow: {processes} processes "
+                f"({gw_workers} gateway + 1 keeper) × "
+                f"pool.max_size={pool_max} = {worst_case} connections "
+                f"exceeds PostgreSQL limit ({pg_limit}). "
+                f"Reduce gateway.workers or database.pool.max_size."
+            )
+        if worst_case > int(pg_limit * 0.8):
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                f"Pool sizing is aggressive: {processes} processes × "
+                f"pool.max_size={pool_max} = {worst_case} connections "
+                f"({worst_case * 100 // pg_limit}% of {pg_limit}). "
+                f"Consider reducing gateway.workers or database.pool.max_size."
+            )
         return self

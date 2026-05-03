@@ -341,3 +341,101 @@ class IDatabaseMaintainer(ABC):
             The number of tables that were vacuumed.
         """
         raise NotImplementedError
+
+
+# --- Metrics Collector Interfaces ---
+
+
+class IGauge(ABC):
+    """
+    Abstract atomic gauge sensor.
+
+    Implementations provide thread-/process-safe write operations
+    for a single named metric with optional label dimensions.
+    """
+
+    @abstractmethod
+    def set(self, value: float, labels: dict[str, str] | None = None) -> None:
+        """Set the gauge to an absolute value.
+
+        Args:
+            value: The absolute value to set.
+            labels: Optional label key-value pairs for the metric dimension.
+        """
+        pass
+
+    @abstractmethod
+    def inc(self, amount: float = 1, labels: dict[str, str] | None = None) -> None:
+        """Increment the gauge by an amount.
+
+        Args:
+            amount: Value to add (defaults to 1).
+            labels: Optional label key-value pairs for the metric dimension.
+        """
+        pass
+
+
+class IMetricsCollector(ABC):
+    """
+    Abstract contract for metrics collection and export.
+
+    Implementations decouple application code from concrete
+    backends (Prometheus, memory, etc.).  This ABC lives in
+    ``core/interfaces.py`` to follow the established project
+    convention alongside ``IProvider``, ``IResourceSyncer``, etc.
+    """
+
+    @abstractmethod
+    def gauge(self, name: str, description: str, labels: list[str]) -> IGauge:
+        """Register or retrieve a gauge sensor by name.
+
+        Args:
+            name: Unique metric name (e.g. ``"llm_gateway_keys_total"``).
+            description: Human-readable help text.
+            labels: Label dimension names for this gauge.
+
+        Returns:
+            An ``IGauge`` instance that can be used to set/inc values.
+        """
+        pass
+
+    @abstractmethod
+    def counter(self, name: str, description: str, labels: list[str]) -> IGauge:
+        """Register or retrieve a counter sensor by name.
+
+        In Prometheus a Counter is a cumulative metric.  We model
+        it as an ``IGauge`` for simplicity — the ``inc`` method
+        provides cumulative behaviour, and ``set`` is a no-op or
+        reset.
+
+        Args:
+            name: Unique metric name (e.g. ``"llm_gateway_db_vacuum_count"``).
+            description: Human-readable help text.
+            labels: Label dimension names for this counter.
+
+        Returns:
+            An ``IGauge`` instance that can be used to increment.
+        """
+        pass
+
+    @abstractmethod
+    def generate_metrics(self) -> tuple[bytes | str, str]:
+        """Generate the current metrics payload for a ``/metrics`` endpoint.
+
+        Returns:
+            A tuple of ``(body, content_type)``, e.g.
+            ``(b"metric 1.0\\n", "text/plain; ...")``.
+        """
+        pass
+
+    @abstractmethod
+    async def collect_from_db(self, db_manager: DatabaseManager) -> None:
+        """Collect metrics derived from the database.
+
+        Called periodically by the Keeper to refresh DB-derived
+        gauges (key status counts, adaptive batch state, etc.).
+
+        Args:
+            db_manager: The database manager for executing queries.
+        """
+        pass

@@ -3,7 +3,10 @@
 """Tests for DatabaseMaintainer — N26-N30.
 
 Tests the conditional VACUUM ANALYZE implementation with mocked
-connection pool and Prometheus metrics.
+connection pool and metrics collector.  The module-level globals
+(_db_dead_tuples_gauge, etc.) have been replaced by the
+collector-based approach, so we mock ``_db_maintainer_collector``
+to return a ``MemoryMetricsCollector``.
 """
 
 import logging
@@ -12,14 +15,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.core.models import DatabaseTableHealth
+from src.metrics.backends.memory import MemoryMetricsCollector
 from src.services.db_maintainer import DatabaseMaintainer
+
 
 # ---------------------------------------------------------------------------
 # Helpers — async context-manager mocking for pool.acquire()
 # ---------------------------------------------------------------------------
 
 
-def _make_async_cm(return_value):
+def _make_async_cm(return_value: AsyncMock) -> MagicMock:
     """Create an async context manager that yields *return_value*."""
     cm = MagicMock()
     cm.__aenter__ = AsyncMock(return_value=return_value)
@@ -49,6 +54,12 @@ def db_manager() -> MagicMock:
     return MagicMock()
 
 
+@pytest.fixture
+def memory_collector() -> MemoryMetricsCollector:
+    """Provide a fresh MemoryMetricsCollector for each test."""
+    return MemoryMetricsCollector()
+
+
 # ---------------------------------------------------------------------------
 # N26 — one table needs vacuum
 # ---------------------------------------------------------------------------
@@ -56,7 +67,7 @@ def db_manager() -> MagicMock:
 
 @pytest.mark.asyncio
 async def test_run_conditional_vacuum_one_table_needs_vacuum(
-    maintainer: DatabaseMaintainer, db_manager: MagicMock
+    maintainer: DatabaseMaintainer, db_manager: MagicMock, memory_collector: MemoryMetricsCollector
 ) -> None:
     """N26: 3 tables — only api_keys gets VACUUM.
 
@@ -98,11 +109,10 @@ async def test_run_conditional_vacuum_one_table_needs_vacuum(
 
     with (
         patch("src.services.db_maintainer.get_pool", return_value=pool),
-        patch("src.services.db_maintainer._db_dead_tuples_gauge") as mock_tuples_gauge,
-        patch("src.services.db_maintainer._db_dead_ratio_gauge") as mock_ratio_gauge,
         patch(
-            "src.services.db_maintainer._db_vacuum_count_counter"
-        ) as mock_vacuum_counter,
+            "src.services.db_maintainer._db_maintainer_collector",
+            return_value=memory_collector,
+        ),
     ):
         result = await maintainer.run_conditional_vacuum(
             tables, db_manager, threshold=0.3
@@ -113,9 +123,12 @@ async def test_run_conditional_vacuum_one_table_needs_vacuum(
     # VACUUM only called for api_keys
     conn.execute.assert_called_once_with('VACUUM ANALYZE "public.api_keys"')
 
-    # Vacuum counter incremented for api_keys only
-    mock_vacuum_counter.labels.assert_called_with(table="public.api_keys")
-    mock_vacuum_counter.labels.return_value.inc.assert_called_once()
+    # Verify metrics were recorded in the memory collector
+    body, _ = memory_collector.generate_metrics()
+    # Dead tuples gauge should have been set for all 3 tables
+    assert "public.providers" in body
+    assert "public.api_keys" in body
+    assert "public.key_model_status" in body
 
 
 # ---------------------------------------------------------------------------
@@ -125,7 +138,7 @@ async def test_run_conditional_vacuum_one_table_needs_vacuum(
 
 @pytest.mark.asyncio
 async def test_run_conditional_vacuum_no_tables_need_vacuum(
-    maintainer: DatabaseMaintainer, db_manager: MagicMock
+    maintainer: DatabaseMaintainer, db_manager: MagicMock, memory_collector: MemoryMetricsCollector
 ) -> None:
     """N27: All tables below threshold. No VACUUM runs. Returns 0."""
     tables = [
@@ -152,9 +165,10 @@ async def test_run_conditional_vacuum_no_tables_need_vacuum(
 
     with (
         patch("src.services.db_maintainer.get_pool", return_value=pool),
-        patch("src.services.db_maintainer._db_dead_tuples_gauge"),
-        patch("src.services.db_maintainer._db_dead_ratio_gauge"),
-        patch("src.services.db_maintainer._db_vacuum_count_counter"),
+        patch(
+            "src.services.db_maintainer._db_maintainer_collector",
+            return_value=memory_collector,
+        ),
     ):
         result = await maintainer.run_conditional_vacuum(
             tables, db_manager, threshold=0.3
@@ -171,7 +185,7 @@ async def test_run_conditional_vacuum_no_tables_need_vacuum(
 
 @pytest.mark.asyncio
 async def test_run_conditional_vacuum_all_tables_need_vacuum(
-    maintainer: DatabaseMaintainer, db_manager: MagicMock
+    maintainer: DatabaseMaintainer, db_manager: MagicMock, memory_collector: MemoryMetricsCollector
 ) -> None:
     """N28: All tables above threshold. All get VACUUM. Returns count."""
     tables = [
@@ -198,9 +212,10 @@ async def test_run_conditional_vacuum_all_tables_need_vacuum(
 
     with (
         patch("src.services.db_maintainer.get_pool", return_value=pool),
-        patch("src.services.db_maintainer._db_dead_tuples_gauge"),
-        patch("src.services.db_maintainer._db_dead_ratio_gauge"),
-        patch("src.services.db_maintainer._db_vacuum_count_counter"),
+        patch(
+            "src.services.db_maintainer._db_maintainer_collector",
+            return_value=memory_collector,
+        ),
     ):
         result = await maintainer.run_conditional_vacuum(
             tables, db_manager, threshold=0.3
@@ -217,9 +232,9 @@ async def test_run_conditional_vacuum_all_tables_need_vacuum(
 
 @pytest.mark.asyncio
 async def test_run_conditional_vacuum_updates_prometheus_metrics(
-    maintainer: DatabaseMaintainer, db_manager: MagicMock
+    maintainer: DatabaseMaintainer, db_manager: MagicMock, memory_collector: MemoryMetricsCollector
 ) -> None:
-    """N29: Vacuum runs for api_keys. Verify Prometheus gauges and counter updated."""
+    """N29: Vacuum runs for api_keys. Verify metrics gauges and counter updated."""
     tables = [
         DatabaseTableHealth(
             table_name="public.api_keys",
@@ -236,11 +251,10 @@ async def test_run_conditional_vacuum_updates_prometheus_metrics(
 
     with (
         patch("src.services.db_maintainer.get_pool", return_value=pool),
-        patch("src.services.db_maintainer._db_dead_tuples_gauge") as mock_tuples_gauge,
-        patch("src.services.db_maintainer._db_dead_ratio_gauge") as mock_ratio_gauge,
         patch(
-            "src.services.db_maintainer._db_vacuum_count_counter"
-        ) as mock_vacuum_counter,
+            "src.services.db_maintainer._db_maintainer_collector",
+            return_value=memory_collector,
+        ),
     ):
         result = await maintainer.run_conditional_vacuum(
             tables, db_manager, threshold=0.3
@@ -248,17 +262,16 @@ async def test_run_conditional_vacuum_updates_prometheus_metrics(
 
     assert result == 1
 
-    # Verify dead tuples gauge set
-    mock_tuples_gauge.labels.assert_called_with(table="public.api_keys")
-    mock_tuples_gauge.labels.return_value.set.assert_called_with(500)
+    # Verify dead tuples gauge was set
+    body, _ = memory_collector.generate_metrics()
+    assert "500.0" in body
+    assert "public.api_keys" in body
 
-    # Verify dead ratio gauge set
-    mock_ratio_gauge.labels.assert_called_with(table="public.api_keys")
-    mock_ratio_gauge.labels.return_value.set.assert_called_with(0.5)
+    # Verify dead ratio gauge was set (0.5)
+    assert "0.5" in body
 
-    # Verify vacuum count counter incremented
-    mock_vacuum_counter.labels.assert_called_with(table="public.api_keys")
-    mock_vacuum_counter.labels.return_value.inc.assert_called_once()
+    # Verify vacuum counter was incremented (1.0)
+    assert "1.0" in body
 
 
 # ---------------------------------------------------------------------------
@@ -268,17 +281,58 @@ async def test_run_conditional_vacuum_updates_prometheus_metrics(
 
 @pytest.mark.asyncio
 async def test_run_conditional_vacuum_empty_table_list_skips(
-    maintainer: DatabaseMaintainer, db_manager: MagicMock, caplog
+    maintainer: DatabaseMaintainer, db_manager: MagicMock, caplog: pytest.LogCaptureFixture
 ) -> None:
     """N30: tables=[] → returns 0, no VACUUM, warning logged."""
     with (
         patch("src.services.db_maintainer.get_pool"),
-        patch("src.services.db_maintainer._db_dead_tuples_gauge"),
-        patch("src.services.db_maintainer._db_dead_ratio_gauge"),
-        patch("src.services.db_maintainer._db_vacuum_count_counter"),
+        patch(
+            "src.services.db_maintainer._db_maintainer_collector",
+            return_value=MemoryMetricsCollector(),
+        ),
         caplog.at_level(logging.WARNING, logger="src.services.db_maintainer"),
     ):
         result = await maintainer.run_conditional_vacuum([], db_manager, threshold=0.3)
 
     assert result == 0
     assert any("No table health data" in record.message for record in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# record_purged_keys — module-level function
+# ---------------------------------------------------------------------------
+
+
+def test_record_purged_keys_updates_counter(
+    memory_collector: MemoryMetricsCollector,
+) -> None:
+    """Verify record_purged_keys() increments the DB_PURGED_KEYS counter."""
+    with patch(
+        "src.services.db_maintainer._db_maintainer_collector",
+        return_value=memory_collector,
+    ):
+        from src.services.db_maintainer import record_purged_keys
+
+        record_purged_keys("openai", 5)
+
+    body, _ = memory_collector.generate_metrics()
+    assert "openai" in body
+    assert "5.0" in body
+
+
+def test_record_purged_keys_zero_count_no_op(
+    memory_collector: MemoryMetricsCollector,
+) -> None:
+    """Verify record_purged_keys() with count=0 does not create a counter."""
+    with patch(
+        "src.services.db_maintainer._db_maintainer_collector",
+        return_value=memory_collector,
+    ):
+        from src.services.db_maintainer import record_purged_keys
+
+        record_purged_keys("openai", 0)
+
+    # No metrics should have been recorded
+    body, _ = memory_collector.generate_metrics()
+    # The body should only contain the empty metrics structure
+    assert "openai" not in body

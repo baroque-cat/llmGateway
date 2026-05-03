@@ -18,11 +18,18 @@ from src.core.http_client_factory import HttpClientFactory
 from src.core.interfaces import IResourceSyncer, ProviderKeyState
 from src.db import database
 from src.db.database import DatabaseManager
+from src.metrics import get_collector
+from src.metrics.registry import (
+    ADAPTIVE_BACKOFF_EVENTS,
+    ADAPTIVE_BATCH_DELAY,
+    ADAPTIVE_BATCH_SIZE,
+    ADAPTIVE_RATE_LIMIT_EVENTS,
+    ADAPTIVE_RECOVERY_EVENTS,
+)
 from src.services.db_maintainer import DatabaseMaintainer
 from src.services.inventory_exporter import KeyInventoryExporter
 from src.services.key_probe import get_all_probes
 from src.services.key_purger import KeyPurger
-from src.services.metrics_exporter import update_adaptive_controller_state
 from src.services.synchronizers import get_all_syncers
 from src.services.synchronizers.key_sync import read_keys_from_directory
 
@@ -189,6 +196,103 @@ async def run_sync_cycle(
     logger.debug("Synchronization cycle finished.")
 
 
+def _create_adaptive_metrics_callback() -> Callable[..., None]:
+    """Create a callback that writes adaptive controller state to collector gauges.
+
+    Returns a callable with the same signature as the old
+    ``update_adaptive_controller_state``, but writes through the
+    singleton ``IMetricsCollector`` instead of module-level Prometheus
+    objects.
+    """
+
+    def _callback(
+        provider_name: str,
+        batch_size: int,
+        batch_delay: float,
+        rate_limit_events: int,
+        backoff_events: int,
+        recovery_events: int,
+    ) -> None:
+        collector = get_collector()
+
+        collector.gauge(
+            ADAPTIVE_BATCH_SIZE,
+            "Current adaptive batch size per provider",
+            ["provider"],
+        ).set(float(batch_size), {"provider": provider_name})
+
+        collector.gauge(
+            ADAPTIVE_BATCH_DELAY,
+            "Current adaptive batch delay in seconds per provider",
+            ["provider"],
+        ).set(batch_delay, {"provider": provider_name})
+
+        collector.gauge(
+            ADAPTIVE_RATE_LIMIT_EVENTS,
+            "Total number of aggressive (rate-limit) backoff events per provider",
+            ["provider"],
+        ).set(float(rate_limit_events), {"provider": provider_name})
+
+        collector.gauge(
+            ADAPTIVE_BACKOFF_EVENTS,
+            "Total number of moderate (transient-threshold) backoff events per provider",
+            ["provider"],
+        ).set(float(backoff_events), {"provider": provider_name})
+
+        collector.gauge(
+            ADAPTIVE_RECOVERY_EVENTS,
+            "Total number of recovery (ramp-up) events per provider",
+            ["provider"],
+        ).set(float(recovery_events), {"provider": provider_name})
+
+    return _callback
+
+
+async def _start_metrics_server(logger: logging.Logger) -> None:
+    """Start a minimal HTTP server for Prometheus /metrics on port 9090.
+
+    Uses ``prometheus_client.make_asgi_app()`` + uvicorn to avoid
+    pulling in FastAPI just for metrics export.
+    """
+    from prometheus_client import make_asgi_app  # type: ignore[reportUnknownVariableType]
+
+    try:
+        import uvicorn
+    except ImportError:
+        logger.error("uvicorn not available — Keeper /metrics endpoint disabled.")
+        return
+
+    metrics_app = make_asgi_app()  # pyright: ignore[reportUnknownVariableType]
+    config = uvicorn.Config(
+        metrics_app,  # pyright: ignore[reportUnknownArgumentType]
+        host="0.0.0.0",
+        port=9090,
+        log_level="error",
+    )
+    server = uvicorn.Server(config)
+    logger.info("Keeper /metrics endpoint starting on port 9090")
+    await server.serve()
+
+
+async def _collect_db_metrics_loop(
+    db_manager: DatabaseManager, interval_sec: int = 30
+) -> None:
+    """Periodically collect DB-derived metrics via the collector.
+
+    Runs inside the Keeper's asyncio event loop.
+    """
+    logger = logging.getLogger(__name__)
+    while True:
+        try:
+            collector = get_collector()
+            await collector.collect_from_db(db_manager)
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            logger.error("Error collecting DB metrics", exc_info=True)
+        await asyncio.sleep(interval_sec)
+
+
 async def run_keeper() -> None:
     """
     The main async function for the keeper service.
@@ -225,6 +329,18 @@ async def run_keeper() -> None:
         client_factory = HttpClientFactory(accessor)
         logger.info("Long-lived HttpClientFactory created.")
 
+        # --- Initialize the metrics collector (single-process mode) ---
+        _collector = get_collector()
+        logger.info("Metrics collector initialized (single-process).")
+
+        # --- Start the /metrics HTTP server as a background task ---
+        _metrics_task = asyncio.create_task(_start_metrics_server(logger))
+
+        # --- Start periodic DB metrics collection ---
+        _db_metrics_task = asyncio.create_task(
+            _collect_db_metrics_loop(db_manager, interval_sec=30)
+        )
+
         # Step 6: Initial Resource Synchronization.
         # This part is now refactored to use the new two-phase cycle function.
         logger.info("Performing initial resource synchronization...")
@@ -236,11 +352,12 @@ async def run_keeper() -> None:
         logger.info("Initial resource synchronization finished.")
 
         # Step 7: Instantiate Services with Dependencies.
+        adaptive_callback = _create_adaptive_metrics_callback()
         all_probes = get_all_probes(
             accessor,
             db_manager,
             client_factory,
-            on_batch_complete=update_adaptive_controller_state,
+            on_batch_complete=adaptive_callback,
         )
 
         # Step 8: Scheduler Setup.

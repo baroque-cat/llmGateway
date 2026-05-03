@@ -4,45 +4,25 @@
 
 import logging
 
-from prometheus_client import Counter, Gauge
-
 from src.core.accessor import ConfigAccessor
 from src.core.interfaces import IDatabaseMaintainer
 from src.core.models import DatabaseTableHealth
 from src.core.policy_utils import should_vacuum
 from src.db.database import DatabaseManager, get_pool
+from src.metrics import get_collector
+from src.metrics.registry import (
+    DB_DEAD_RATIO,
+    DB_DEAD_TUPLES,
+    DB_PURGED_KEYS,
+    DB_VACUUM_COUNT,
+)
 
 logger = logging.getLogger(__name__)
 
-# --- Prometheus metrics for database health and vacuum operations ---
 
-# Gauge — dead tuple count per table
-_db_dead_tuples_gauge = Gauge(
-    "llm_gateway_db_dead_tuples",
-    "Number of dead tuples per user table",
-    labelnames=["table"],
-)
-
-# Gauge — dead tuple ratio per table
-_db_dead_ratio_gauge = Gauge(
-    "llm_gateway_db_dead_ratio",
-    "Dead tuple ratio per user table",
-    labelnames=["table"],
-)
-
-# Counter — vacuum operations per table
-_db_vacuum_count_counter = Counter(
-    "llm_gateway_db_vacuum_count",
-    "Total number of VACUUM ANALYZE operations per table",
-    labelnames=["table"],
-)
-
-# Counter — purged keys per provider
-_purged_keys_total_counter = Counter(
-    "llm_gateway_purged_keys_total",
-    "Total number of API keys purged per provider",
-    labelnames=["provider"],
-)
+def _db_maintainer_collector():
+    """Lazy collector accessor for the metrics."""
+    return get_collector()
 
 
 class DatabaseMaintainer(IDatabaseMaintainer):
@@ -89,21 +69,38 @@ class DatabaseMaintainer(IDatabaseMaintainer):
             )
             return 0
 
+        collector = _db_maintainer_collector()
+        dead_tuples_gauge = collector.gauge(
+            DB_DEAD_TUPLES,
+            "Number of dead tuples per user table",
+            ["table"],
+        )
+        dead_ratio_gauge = collector.gauge(
+            DB_DEAD_RATIO,
+            "Dead tuple ratio per user table",
+            ["table"],
+        )
+        vacuum_counter = collector.counter(
+            DB_VACUUM_COUNT,
+            "Total number of VACUUM ANALYZE operations per table",
+            ["table"],
+        )
+
         vacuumed = 0
         pool = get_pool()
 
         for health in tables:
-            # Update Prometheus gauges with current state.
-            _db_dead_tuples_gauge.labels(table=health.table_name).set(health.n_dead_tup)
-            _db_dead_ratio_gauge.labels(table=health.table_name).set(
-                health.dead_tuple_ratio
+            # Update gauges with current state.
+            dead_tuples_gauge.set(
+                float(health.n_dead_tup), {"table": health.table_name}
             )
+            dead_ratio_gauge.set(health.dead_tuple_ratio, {"table": health.table_name})
 
             if should_vacuum(health, threshold):
                 async with pool.acquire() as conn:
                     # VACUUM ANALYZE must run outside a transaction block.
                     await conn.execute(f'VACUUM ANALYZE "{health.table_name}"')
-                _db_vacuum_count_counter.labels(table=health.table_name).inc()
+                vacuum_counter.inc(labels={"table": health.table_name})
                 vacuumed += 1
                 logger.info(
                     "Smart VACUUM: VACUUM ANALYZE on '%s' (dead=%.2f%%, " "n_dead=%d).",
@@ -150,4 +147,10 @@ def record_purged_keys(provider_name: str, count: int) -> None:
         count: Number of keys purged.
     """
     if count > 0:
-        _purged_keys_total_counter.labels(provider=provider_name).inc(count)
+        collector = _db_maintainer_collector()
+        purged_counter = collector.counter(
+            DB_PURGED_KEYS,
+            "Total number of API keys purged per provider",
+            ["provider"],
+        )
+        purged_counter.inc(float(count), {"provider": provider_name})

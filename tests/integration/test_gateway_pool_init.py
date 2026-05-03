@@ -65,9 +65,6 @@ async def test_gateway_pool_init_custom_params():
             "src.services.gateway.gateway_service._cache_refresh_loop",
             new_callable=AsyncMock,
         ) as mock_refresh_loop,
-        patch(
-            "src.services.gateway.gateway_service.MetricsService",
-        ) as mock_metrics_cls,
     ):
         # Configure DatabaseManager mock
         mock_dm_instance = MagicMock()
@@ -84,12 +81,6 @@ async def test_gateway_pool_init_custom_params():
         mock_hcf_instance = MagicMock()
         mock_hcf_instance.close_all = AsyncMock()
         mock_hcf_cls.return_value = mock_hcf_instance
-
-        # Configure MetricsService mock
-        mock_metrics_instance = MagicMock()
-        mock_metrics_instance.start = AsyncMock()
-        mock_metrics_instance.stop = AsyncMock()
-        mock_metrics_cls.return_value = mock_metrics_instance
 
         # Create the app and trigger lifespan via TestClient
         app = create_app(accessor)
