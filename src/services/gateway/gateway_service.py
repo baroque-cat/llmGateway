@@ -3,7 +3,6 @@
 import asyncio
 import json
 import logging
-import os
 import re
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
@@ -21,7 +20,11 @@ from src.core.models import CheckResult
 from src.core.policy_utils import compute_next_check_time
 from src.db import database
 from src.db.database import DatabaseManager
-from src.metrics import get_collector, reset_collector
+from src.metrics.auth import (
+    MetricsAuthError,
+    validate_metrics_access,
+    validate_metrics_token,
+)
 from src.providers import get_provider
 from src.services.gateway.gateway_cache import GatewayCache
 from src.services.gateway.response_forwarder import (
@@ -408,38 +411,6 @@ def _get_token_from_headers(
     if authorization and authorization.lower().startswith("bearer "):
         return authorization.split(" ", 1)[1]
     return x_goog_api_key
-
-
-def _validate_metrics_token(
-    authorization: str | None,
-    request: Request,
-) -> None:
-    """
-    Validates the Bearer token for accessing the /metrics endpoint.
-
-    Args:
-        authorization: The Authorization header value
-        request: FastAPI request object to get the accessor
-
-    Raises:
-        HTTPException: If the token is missing or invalid
-    """
-    accessor = _get_config_accessor(request)
-    metrics_config = accessor.get_metrics_config()
-    if not metrics_config.enabled:
-        raise HTTPException(status_code=404, detail="Metrics endpoint is disabled")
-
-    if not metrics_config.access_token:
-        raise HTTPException(status_code=404, detail="Metrics endpoint is not enabled")
-
-    if not authorization or not authorization.lower().startswith("bearer "):
-        raise HTTPException(
-            status_code=401, detail="Missing or invalid Authorization header"
-        )
-
-    token = authorization.split(" ", 1)[1]
-    if token != metrics_config.access_token:
-        raise HTTPException(status_code=403, detail="Invalid metrics access token")
 
 
 async def _handle_full_stream_request(
@@ -863,42 +834,6 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
             )
             app.state.cache_refresh_task = task
 
-            # --- Metrics setup: multiprocess if workers > 1 ---
-            gw_workers = accessor.get_gateway_config().workers
-            if gw_workers > 1:
-                multiproc_dir = os.environ.get(
-                    "PROMETHEUS_MULTIPROC_DIR", "/tmp/prometheus_multiproc"
-                )
-                os.environ.setdefault("PROMETHEUS_MULTIPROC_DIR", multiproc_dir)
-                os.makedirs(multiproc_dir, exist_ok=True)
-
-                # Reset singleton so the factory picks up the new env var
-                # and creates a multiprocess collector.
-                reset_collector()
-
-            collector = get_collector()
-            _ = collector  # ensure collector is initialized for this worker
-            logger.info(
-                "Metrics collector initialized (%s).",
-                "multiprocess" if gw_workers > 1 else "single-process",
-            )
-
-            # Register cleanup on worker shutdown via atexit
-            import atexit
-
-            def _cleanup_multiproc_files() -> None:
-                """Mark mmap files as dead when the worker exits."""
-                try:
-                    from prometheus_client import multiprocess
-                    multiprocess.mark_process_dead(  # pyright: ignore[reportUnknownMemberType]
-                        os.getpid()
-                    )
-                except Exception:
-                    pass
-
-            if gw_workers > 1:
-                atexit.register(_cleanup_multiproc_files)
-
             # Assign the pre-calculated dispatcher state
             app.state.full_stream_instances = full_stream_instances
             app.state.gemini_stream_instances = gemini_stream_instances
@@ -930,16 +865,35 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
         request: Request, authorization: Annotated[str | None, Header()] = None
     ) -> Response:
         """
-        Expose metrics in Prometheus format (request-level only).
+        Expose metrics in Prometheus format via auth-proxy to Keeper.
 
-        Uses ``IMetricsCollector.generate_metrics()`` instead of the
-        old ``MetricsService``.  Key-status and adaptive metrics are
-        now exported by the Keeper on its own ``/metrics`` endpoint.
+        Validates the Bearer token using ``src.metrics.auth`` domain
+        functions and proxies the request to ``http://keeper:9090/metrics``
+        inside the Docker network.
         """
-        _validate_metrics_token(authorization, request)
-        collector = get_collector()
-        metrics_data, content_type = collector.generate_metrics()
-        return Response(content=metrics_data, media_type=content_type)
+        accessor = _get_config_accessor(request)
+        try:
+            expected_token = validate_metrics_access(accessor)
+        except MetricsAuthError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.detail)
+
+        raw_token = _get_token_from_headers(authorization)
+        try:
+            validate_metrics_token(raw_token, expected_token)
+        except MetricsAuthError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.detail)
+
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                keeper_resp = await client.get(
+                    "http://keeper:9090/metrics",
+                )
+                return Response(
+                    content=keeper_resp.content,
+                    media_type=keeper_resp.headers.get("content-type", "text/plain"),
+                )
+        except httpx.TransportError:
+            raise HTTPException(status_code=502, detail="Keeper metrics unavailable")
 
     _ = metrics_endpoint
 

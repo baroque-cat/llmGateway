@@ -5,9 +5,10 @@ Test IDs:
   IT-D01 – gateway command is uvicorn-based with host/port/workers
   IT-D02 – worker command is ["python", "main.py", "keeper"]
   IT-D03 – gateway environment contains GATEWAY_WORKERS=4
-  IT-D04 – gateway environment contains PROMETHEUS_MULTIPROC_DIR
-  IT-D05 – gateway volumes contain prometheus_data mount
   IT-D06 – Keeper does NOT expose port 9090 externally (internal only)
+  IT-D07 – gateway environment does NOT contain PROMETHEUS_MULTIPROC_DIR
+  IT-D08 – gateway volumes do NOT contain prometheus_data mount
+  IT-D09 – prometheus_data volume declaration removed from global volumes
   IT-DF01 – Dockerfile CMD contains uvicorn main:app
 """
 
@@ -25,7 +26,9 @@ def _load_compose() -> dict[str, Any]:
     """Load docker-compose.yml using ruamel.yaml."""
     yaml = YAML()
     with open(COMPOSE_FILE) as f:
-        return cast(dict[str, Any], yaml.load(f))  # pyright: ignore[reportUnknownMemberType]
+        return cast(
+            dict[str, Any], yaml.load(f)
+        )  # pyright: ignore[reportUnknownMemberType]
 
 
 def _read_dockerfile() -> str:
@@ -55,9 +58,9 @@ def test_it_d01_gateway_command() -> None:
         "--workers",
         "4",
     ]
-    assert gateway_command == expected, (
-        f"gateway command mismatch: expected {expected}, got {gateway_command}"
-    )
+    assert (
+        gateway_command == expected
+    ), f"gateway command mismatch: expected {expected}, got {gateway_command}"
 
 
 # ---------------------------------------------------------------------------
@@ -70,9 +73,9 @@ def test_it_d02_worker_command() -> None:
     data = _load_compose()
     worker_command: list[str] = list(data["services"]["worker"]["command"])
     expected = ["python", "main.py", "keeper"]
-    assert worker_command == expected, (
-        f"worker command mismatch: expected {expected}, got {worker_command}"
-    )
+    assert (
+        worker_command == expected
+    ), f"worker command mismatch: expected {expected}, got {worker_command}"
 
 
 # ---------------------------------------------------------------------------
@@ -84,40 +87,78 @@ def test_it_d03_gateway_env_gateway_workers() -> None:
     """IT-D03: gateway environment contains GATEWAY_WORKERS=4."""
     data = _load_compose()
     env: list[str] = list(data["services"]["gateway"]["environment"])
-    assert "GATEWAY_WORKERS=4" in env, (
-        f"GATEWAY_WORKERS=4 not found in gateway environment: {env}"
-    )
+    assert (
+        "GATEWAY_WORKERS=4" in env
+    ), f"GATEWAY_WORKERS=4 not found in gateway environment: {env}"
 
 
 # ---------------------------------------------------------------------------
-# IT-D04: gateway environment PROMETHEUS_MULTIPROC_DIR
+# IT-D07: gateway environment does NOT contain PROMETHEUS_MULTIPROC_DIR
 # ---------------------------------------------------------------------------
 
 
-def test_it_d04_gateway_env_prometheus_multiproc_dir() -> None:
-    """IT-D04: gateway environment contains
-    PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc.
+def test_it_d07_gateway_no_prometheus_multiproc_dir() -> None:
+    """IT-D07: gateway environment does NOT contain PROMETHEUS_MULTIPROC_DIR.
+
+    If the gateway service has no 'environment' key at all, the test passes
+    trivially (no env vars exist). If it does have an environment list,
+    we verify that PROMETHEUS_MULTIPROC_DIR is absent.
     """
     data = _load_compose()
-    env: list[str] = list(data["services"]["gateway"]["environment"])
-    assert "PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc" in env, (
-        f"PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc not found "
+    gateway_service: dict[str, Any] = data["services"]["gateway"]
+    env_raw: Any = gateway_service.get("environment")
+    # No environment section → PROMETHEUS_MULTIPROC_DIR definitely absent
+    if env_raw is None:
+        return  # passes
+    env: list[str] = list(env_raw)
+    assert "PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc" not in env, (
+        f"PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc should not be "
         f"in gateway environment: {env}"
+    )
+    # Also ensure no env var starts with PROMETHEUS_MULTIPROC_DIR at all
+    for entry in env:
+        assert not entry.startswith(
+            "PROMETHEUS_MULTIPROC_DIR"
+        ), f"Found env var starting with PROMETHEUS_MULTIPROC_DIR: {entry}"
+
+
+# ---------------------------------------------------------------------------
+# IT-D08: gateway volumes do NOT contain prometheus_data mount
+# ---------------------------------------------------------------------------
+
+
+def test_it_d08_gateway_no_prometheus_data_volume() -> None:
+    """IT-D08: gateway volumes do NOT contain prometheus_data:/tmp/prometheus_multiproc.
+
+    If the gateway service has no 'volumes' key at all, the test passes
+    trivially. If it does have a volumes list, we verify that the
+    prometheus_data mount is absent.
+    """
+    data = _load_compose()
+    gateway_service: dict[str, Any] = data["services"]["gateway"]
+    volumes_raw: Any = gateway_service.get("volumes")
+    # No volumes section → prometheus_data mount definitely absent
+    if volumes_raw is None:
+        return  # passes
+    volumes: list[str] = list(volumes_raw)
+    assert "prometheus_data:/tmp/prometheus_multiproc" not in volumes, (
+        f"prometheus_data:/tmp/prometheus_multiproc should not be "
+        f"in gateway volumes: {volumes}"
     )
 
 
 # ---------------------------------------------------------------------------
-# IT-D05: gateway volumes prometheus_data mount
+# IT-D09: prometheus_data volume declaration removed from global volumes
 # ---------------------------------------------------------------------------
 
 
-def test_it_d05_gateway_volumes_prometheus_data() -> None:
-    """IT-D05: gateway volumes contain prometheus_data:/tmp/prometheus_multiproc."""
+def test_it_d09_no_prometheus_data_volume_declaration() -> None:
+    """IT-D09: prometheus_data volume declaration removed from global volumes section."""
     data = _load_compose()
-    volumes: list[str] = list(data["services"]["gateway"]["volumes"])
-    assert "prometheus_data:/tmp/prometheus_multiproc" in volumes, (
-        f"prometheus_data:/tmp/prometheus_multiproc not found "
-        f"in gateway volumes: {volumes}"
+    top_level_volumes: dict[str, Any] = data.get("volumes", {})
+    assert "prometheus_data" not in top_level_volumes, (
+        f"prometheus_data should not be in global volumes: "
+        f"{list(top_level_volumes.keys())}"
     )
 
 
@@ -141,9 +182,9 @@ def test_it_d06_keeper_no_external_port_9090() -> None:
     # If ports section exists, verify 9090 is not mapped externally
     for port_mapping in ports:
         port_str = str(port_mapping)
-        assert not port_str.startswith("9090"), (
-            f"Keeper exposes port 9090 externally: {port_str}"
-        )
+        assert not port_str.startswith(
+            "9090"
+        ), f"Keeper exposes port 9090 externally: {port_str}"
 
 
 # ---------------------------------------------------------------------------

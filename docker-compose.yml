@@ -37,15 +37,12 @@ services:
     restart: unless-stopped
     ports:
       - "55300:55300"
-    environment:
-      - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc
     # All configuration is loaded from the .env file.
     env_file:
       - .env
     volumes:
       - ./config:/app/config:ro
       - ./data:/app/data:rw
-      - prometheus_data:/tmp/prometheus_multiproc
     depends_on:
       database:
         condition: service_healthy
@@ -77,7 +74,6 @@ services:
 
 volumes:
   pg_data:
-  prometheus_data:
 
 networks:
   llmgateway_net:
