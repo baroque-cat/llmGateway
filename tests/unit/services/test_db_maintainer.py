@@ -18,7 +18,6 @@ from src.core.models import DatabaseTableHealth
 from src.metrics.backends.memory import MemoryMetricsCollector
 from src.services.db_maintainer import DatabaseMaintainer
 
-
 # ---------------------------------------------------------------------------
 # Helpers — async context-manager mocking for pool.acquire()
 # ---------------------------------------------------------------------------
@@ -67,7 +66,9 @@ def memory_collector() -> MemoryMetricsCollector:
 
 @pytest.mark.asyncio
 async def test_run_conditional_vacuum_one_table_needs_vacuum(
-    maintainer: DatabaseMaintainer, db_manager: MagicMock, memory_collector: MemoryMetricsCollector
+    maintainer: DatabaseMaintainer,
+    db_manager: MagicMock,
+    memory_collector: MemoryMetricsCollector,
 ) -> None:
     """N26: 3 tables — only api_keys gets VACUUM.
 
@@ -138,7 +139,9 @@ async def test_run_conditional_vacuum_one_table_needs_vacuum(
 
 @pytest.mark.asyncio
 async def test_run_conditional_vacuum_no_tables_need_vacuum(
-    maintainer: DatabaseMaintainer, db_manager: MagicMock, memory_collector: MemoryMetricsCollector
+    maintainer: DatabaseMaintainer,
+    db_manager: MagicMock,
+    memory_collector: MemoryMetricsCollector,
 ) -> None:
     """N27: All tables below threshold. No VACUUM runs. Returns 0."""
     tables = [
@@ -185,7 +188,9 @@ async def test_run_conditional_vacuum_no_tables_need_vacuum(
 
 @pytest.mark.asyncio
 async def test_run_conditional_vacuum_all_tables_need_vacuum(
-    maintainer: DatabaseMaintainer, db_manager: MagicMock, memory_collector: MemoryMetricsCollector
+    maintainer: DatabaseMaintainer,
+    db_manager: MagicMock,
+    memory_collector: MemoryMetricsCollector,
 ) -> None:
     """N28: All tables above threshold. All get VACUUM. Returns count."""
     tables = [
@@ -232,7 +237,9 @@ async def test_run_conditional_vacuum_all_tables_need_vacuum(
 
 @pytest.mark.asyncio
 async def test_run_conditional_vacuum_updates_prometheus_metrics(
-    maintainer: DatabaseMaintainer, db_manager: MagicMock, memory_collector: MemoryMetricsCollector
+    maintainer: DatabaseMaintainer,
+    db_manager: MagicMock,
+    memory_collector: MemoryMetricsCollector,
 ) -> None:
     """N29: Vacuum runs for api_keys. Verify metrics gauges and counter updated."""
     tables = [
@@ -281,7 +288,9 @@ async def test_run_conditional_vacuum_updates_prometheus_metrics(
 
 @pytest.mark.asyncio
 async def test_run_conditional_vacuum_empty_table_list_skips(
-    maintainer: DatabaseMaintainer, db_manager: MagicMock, caplog: pytest.LogCaptureFixture
+    maintainer: DatabaseMaintainer,
+    db_manager: MagicMock,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """N30: tables=[] → returns 0, no VACUUM, warning logged."""
     with (

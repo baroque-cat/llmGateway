@@ -274,6 +274,3 @@ class TestMetricsEndpointAuthProxy:
 
             assert response.status_code == 200
             assert "text/plain" in response.headers["content-type"]
-
-
-

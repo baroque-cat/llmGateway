@@ -18,13 +18,13 @@ def test_key_export_snapshot_creation_all_fields() -> None:
     """All 5 fields are accessible and match the values passed at creation."""
     snapshot = KeyExportSnapshot(
         key_id=1,
-        key_prefix="sk-abc12345",
+        key_value="sk-abc12345",
         model_name="gemini-3-pro",
         status="valid",
         next_check_time="2026-04-30T14:00:00Z",
     )
     assert snapshot.key_id == 1
-    assert snapshot.key_prefix == "sk-abc12345"
+    assert snapshot.key_value == "sk-abc12345"
     assert snapshot.model_name == "gemini-3-pro"
     assert snapshot.status == "valid"
     assert snapshot.next_check_time == "2026-04-30T14:00:00Z"
@@ -39,7 +39,7 @@ def test_key_export_snapshot_frozen_immutable() -> None:
     """Assigning to a field on a frozen dataclass raises FrozenInstanceError."""
     snapshot = KeyExportSnapshot(
         key_id=1,
-        key_prefix="sk-abc12345",
+        key_value="sk-abc12345",
         model_name="gemini-3-pro",
         status="valid",
         next_check_time="2026-04-30T14:00:00Z",
@@ -60,7 +60,7 @@ def test_key_export_snapshot_field_count() -> None:
     field_names = {f.name for f in fields}
     assert field_names == {
         "key_id",
-        "key_prefix",
+        "key_value",
         "model_name",
         "status",
         "next_check_time",
@@ -76,7 +76,7 @@ def test_key_export_snapshot_to_dict_conversion() -> None:
     """dataclasses.asdict(snapshot) produces a dict with 5 keys matching values."""
     snapshot = KeyExportSnapshot(
         key_id=1,
-        key_prefix="sk-abc12345",
+        key_value="sk-abc12345",
         model_name="gemini-3-pro",
         status="valid",
         next_check_time="2026-04-30T14:00:00Z",
@@ -86,8 +86,39 @@ def test_key_export_snapshot_to_dict_conversion() -> None:
     assert len(result) == 5
     assert result == {
         "key_id": 1,
-        "key_prefix": "sk-abc12345",
+        "key_value": "sk-abc12345",
         "model_name": "gemini-3-pro",
         "status": "valid",
         "next_check_time": "2026-04-30T14:00:00Z",
     }
+
+
+# ---------------------------------------------------------------------------
+# 3.5: key_value preserves the full key without truncation
+# ---------------------------------------------------------------------------
+
+
+def test_key_export_snapshot_key_value_preserves_full_key() -> None:
+    """key_value stores the complete API key without any truncation."""
+    full_key_value = "sk-abcdefghij0123456789ABCDEFGHIJ0123456789"
+    snapshot = KeyExportSnapshot(
+        key_id=1,
+        key_value=full_key_value,
+        model_name="gemini-3-pro",
+        status="valid",
+        next_check_time="2026-04-30T14:00:00Z",
+    )
+    assert snapshot.key_value == full_key_value
+
+
+def test_key_export_snapshot_key_value_not_truncated() -> None:
+    """key_value length exceeds 10 chars for long keys — no truncation applied."""
+    long_key = "sk-abcdefghij0123456789ABCDEFGHIJ0123456789"
+    snapshot = KeyExportSnapshot(
+        key_id=1,
+        key_value=long_key,
+        model_name="gemini-3-pro",
+        status="valid",
+        next_check_time="2026-04-30T14:00:00Z",
+    )
+    assert len(snapshot.key_value) > 10

@@ -58,7 +58,7 @@ class KeyInventoryExporter(IKeyInventoryExporter):
             next_check: datetime | None = row["next_check_time"]
             snapshot = KeyExportSnapshot(
                 key_id=row["key_id"],
-                key_prefix=key_value[:10],
+                key_value=key_value,
                 model_name=row["model_name"],
                 status=row["status"],
                 next_check_time=(
@@ -116,7 +116,7 @@ class KeyInventoryExporter(IKeyInventoryExporter):
                 next_check: datetime | None = row["next_check_time"]
                 snapshot = KeyExportSnapshot(
                     key_id=row["key_id"],
-                    key_prefix=key_value[:10],
+                    key_value=key_value,
                     model_name=row["model_name"],
                     status=status,
                     next_check_time=(

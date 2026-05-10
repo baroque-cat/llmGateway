@@ -108,9 +108,6 @@ def test_full_config_gateway_and_database_pool(mock_env):
     assert config.database.pool.max_size == 15
 
 
-
-
-
 def test_minimal_config_gateway_defaults(mock_env):
     """IT-Y07: Load config/example_minimal_config.yaml → config.gateway.host == "0.0.0.0", port == 55300, workers == 4 (defaults applied)."""
     loader = ConfigLoader(path="config/example_minimal_config.yaml")

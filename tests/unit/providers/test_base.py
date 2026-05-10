@@ -135,7 +135,10 @@ class TestErrorParsingBase:
         data2 = {"a": {"b": "value"}}
         assert provider._extract_json_value(data2, "a.b.c") is None
 
-    @pytest.mark.xfail(reason="_extract_json_value expects Dict[str, Any]; None is outside the method's contract", strict=True)
+    @pytest.mark.xfail(
+        reason="_extract_json_value expects Dict[str, Any]; None is outside the method's contract",
+        strict=True,
+    )
     def test_extract_json_value_non_dict_data(self):
         """Test extraction with non-dictionary data structures."""
         provider = self.create_mock_provider()

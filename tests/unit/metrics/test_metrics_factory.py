@@ -15,7 +15,6 @@ from src.metrics import get_collector, reset_collector
 from src.metrics.backends.memory import MemoryMetricsCollector
 from src.metrics.backends.prometheus import PrometheusMetricsCollector
 
-
 # ---------------------------------------------------------------------------
 # Helpers — clean up env and singleton before/after each test
 # ---------------------------------------------------------------------------

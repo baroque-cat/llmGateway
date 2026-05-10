@@ -326,7 +326,7 @@ async def test_scheduler_job_execution_creates_files(tmp_path):
 
         first_record = json.loads(snapshot_lines[0])
         assert first_record["key_id"] == 1
-        assert first_record["key_prefix"] == "sk-abcdefg"
+        assert first_record["key_value"] == "sk-abcdefghij1234567890"
         assert first_record["model_name"] == "gemini-pro"
         assert first_record["status"] == "valid"
         assert "next_check_time" in first_record

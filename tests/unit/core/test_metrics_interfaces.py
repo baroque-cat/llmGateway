@@ -11,7 +11,6 @@ import pytest
 
 from src.core.interfaces import IGauge, IMetricsCollector
 
-
 # ---------------------------------------------------------------------------
 # UT-IF01 — IMetricsCollector() raises TypeError (abstract class)
 # ---------------------------------------------------------------------------

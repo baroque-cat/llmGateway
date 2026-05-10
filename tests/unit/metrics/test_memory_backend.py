@@ -21,7 +21,6 @@ from src.metrics import get_collector, reset_collector
 from src.metrics.backends.memory import MemoryMetricsCollector
 from src.metrics.registry import KEY_STATUS_TOTAL
 
-
 # ---------------------------------------------------------------------------
 # UT-MB01 — gauge() returns IGauge
 # ---------------------------------------------------------------------------

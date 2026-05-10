@@ -10,7 +10,6 @@ import pytest
 
 from src.metrics.contracts import GaugeSpec, MetricValue
 
-
 # ---------------------------------------------------------------------------
 # UT-CT01 — GaugeSpec creation
 # ---------------------------------------------------------------------------

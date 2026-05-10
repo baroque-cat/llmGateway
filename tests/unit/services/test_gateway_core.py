@@ -456,9 +456,6 @@ class TestCreateApp:
             assert "/{full_path:path}" in routes
 
 
-
-
-
 # ---------------------------------------------------------------------------
 # Tests 12-15: Static analysis / Pydantic validation
 # (Moved from integration/test_gateway_refactor.py)
@@ -488,7 +485,11 @@ class TestGatewayStaticAnalysis:
         )
 
         for i, line in enumerate(lines):
-            if "if " in line and "else:" in lines[i + 1] if i + 1 < len(lines) else False:
+            if (
+                "if " in line and "else:" in lines[i + 1]
+                if i + 1 < len(lines)
+                else False
+            ):
                 pytest.fail(
                     f"Found if/else at line {i} in proxy_request — "
                     f"dead code with identical branches should have been removed."

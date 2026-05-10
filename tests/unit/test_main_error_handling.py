@@ -54,7 +54,10 @@ class TestConfigErrorBlocksModuleImport:
                 side_effect=FileNotFoundError("config.yaml not found"),
             ),
             patch("src.config.logging_config.setup_logging"),
-            patch("src.services.gateway.gateway_service.create_app", return_value=MagicMock(spec=FastAPI)),
+            patch(
+                "src.services.gateway.gateway_service.create_app",
+                return_value=MagicMock(spec=FastAPI),
+            ),
             patch("src.core.accessor.ConfigAccessor", return_value=MagicMock()),
         ):
             with pytest.raises(FileNotFoundError, match="config.yaml not found"):
@@ -63,9 +66,14 @@ class TestConfigErrorBlocksModuleImport:
     def test_err_02_value_error_blocks_import(self) -> None:
         """ERR-02: load_config → ValueError → import raises ValueError."""
         with (
-            patch("src.config.load_config", side_effect=ValueError("Invalid config value")),
+            patch(
+                "src.config.load_config", side_effect=ValueError("Invalid config value")
+            ),
             patch("src.config.logging_config.setup_logging"),
-            patch("src.services.gateway.gateway_service.create_app", return_value=MagicMock(spec=FastAPI)),
+            patch(
+                "src.services.gateway.gateway_service.create_app",
+                return_value=MagicMock(spec=FastAPI),
+            ),
             patch("src.core.accessor.ConfigAccessor", return_value=MagicMock()),
         ):
             with pytest.raises(ValueError, match="Invalid config value"):
@@ -82,20 +90,28 @@ class TestConfigErrorBlocksModuleImport:
         with (
             patch("src.config.load_config", side_effect=SystemExit(1)),
             patch("src.config.logging_config.setup_logging"),
-            patch("src.services.gateway.gateway_service.create_app", return_value=MagicMock(spec=FastAPI)),
+            patch(
+                "src.services.gateway.gateway_service.create_app",
+                return_value=MagicMock(spec=FastAPI),
+            ),
             patch("src.core.accessor.ConfigAccessor", return_value=MagicMock()),
         ):
             with pytest.raises(SystemExit) as exc_info:
                 import main  # pyright: ignore[reportUnusedImport]  # noqa: F811
 
-            assert exc_info.value.code == 1, "SystemExit code must be 1 for config validation failure"
+            assert (
+                exc_info.value.code == 1
+            ), "SystemExit code must be 1 for config validation failure"
 
     def test_err_04_generic_exception_blocks_import(self) -> None:
         """ERR-04: load_config → generic Exception → import raises that Exception."""
         with (
             patch("src.config.load_config", side_effect=Exception("Unexpected error")),
             patch("src.config.logging_config.setup_logging"),
-            patch("src.services.gateway.gateway_service.create_app", return_value=MagicMock(spec=FastAPI)),
+            patch(
+                "src.services.gateway.gateway_service.create_app",
+                return_value=MagicMock(spec=FastAPI),
+            ),
             patch("src.core.accessor.ConfigAccessor", return_value=MagicMock()),
         ):
             with pytest.raises(Exception, match="Unexpected error"):
@@ -111,14 +127,19 @@ class TestConfigErrorBlocksModuleImport:
         with (
             patch("src.config.load_config", side_effect=FileNotFoundError("not found")),
             patch("src.config.logging_config.setup_logging"),
-            patch("src.services.gateway.gateway_service.create_app", return_value=MagicMock(spec=FastAPI)),
+            patch(
+                "src.services.gateway.gateway_service.create_app",
+                return_value=MagicMock(spec=FastAPI),
+            ),
             patch("src.core.accessor.ConfigAccessor", return_value=MagicMock()),
         ):
             with pytest.raises(FileNotFoundError):
                 import main  # noqa: F811
 
         # main should NOT be in sys.modules after a failed import
-        assert "main" not in sys.modules, "main must not remain in sys.modules after failed import"
+        assert (
+            "main" not in sys.modules
+        ), "main must not remain in sys.modules after failed import"
 
         # Second: simulate a successful import
         mock_config = MagicMock()
@@ -128,11 +149,15 @@ class TestConfigErrorBlocksModuleImport:
         with (
             patch("src.config.load_config", return_value=mock_config),
             patch("src.config.logging_config.setup_logging"),
-            patch("src.services.gateway.gateway_service.create_app", return_value=mock_app),
+            patch(
+                "src.services.gateway.gateway_service.create_app", return_value=mock_app
+            ),
             patch("src.core.accessor.ConfigAccessor", return_value=mock_accessor),
         ):
             import main  # noqa: F811
 
             # Verify the import succeeded and app was created
             assert hasattr(main, "app"), "main.app must exist after successful import"
-            assert main.app is mock_app, "main.app must be the return value of create_app()"
+            assert (
+                main.app is mock_app
+            ), "main.app must be the return value of create_app()"

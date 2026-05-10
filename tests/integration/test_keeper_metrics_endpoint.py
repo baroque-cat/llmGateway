@@ -25,7 +25,6 @@ from src.metrics.registry import (
     KEY_STATUS_TOTAL,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -79,7 +78,9 @@ class TestKeeperMetricsEndpoint:
         response = client.get("/metrics")
         assert response.status_code == 200
 
-    def test_it_km02_contains_key_status_total(self, fresh_registry, keeper_metrics_app):
+    def test_it_km02_contains_key_status_total(
+        self, fresh_registry, keeper_metrics_app
+    ):
         """IT-KM02: Output contains llm_gateway_keys_total with
         provider/model/status labels."""
         from fastapi.testclient import TestClient
@@ -103,13 +104,15 @@ class TestKeeperMetricsEndpoint:
         # NOTE: prometheus_client sorts labels alphabetically, so the
         # output order is {model=...,provider=...,status=...} rather than
         # the creation order {provider=...,model=...,status=...}.
-        assert 'llm_gateway_keys_total{' in body
+        assert "llm_gateway_keys_total{" in body
         assert 'provider="openai"' in body
         assert 'model="gpt-4o"' in body
         assert 'status="valid"' in body
         assert " 7.0" in body or " 7" in body
 
-    def test_it_km03_contains_adaptive_batch_size(self, fresh_registry, keeper_metrics_app):
+    def test_it_km03_contains_adaptive_batch_size(
+        self, fresh_registry, keeper_metrics_app
+    ):
         """IT-KM03: Output contains llm_gateway_adaptive_batch_size with
         provider label."""
         from fastapi.testclient import TestClient

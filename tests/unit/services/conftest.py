@@ -99,13 +99,9 @@ def mock_run_keeper_dependencies():
                 return_value=mock_db_manager,
             )
         )
+        stack.enter_context(patch("src.services.keeper.HttpClientFactory", mock_hcf))
         stack.enter_context(
-            patch("src.services.keeper.HttpClientFactory", mock_hcf)
-        )
-        stack.enter_context(
-            patch(
-                "src.services.keeper.run_sync_cycle", new_callable=AsyncMock
-            )
+            patch("src.services.keeper.run_sync_cycle", new_callable=AsyncMock)
         )
         stack.enter_context(
             patch("src.services.keeper.get_all_probes", return_value=[])

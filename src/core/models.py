@@ -153,14 +153,14 @@ class KeyExportSnapshot:
 
     Fields:
         key_id: The database primary key of the API key.
-        key_prefix: The first 10 characters of the key value (for safe identification).
+        key_value: The full API key value as returned by the database query.
         model_name: The model name associated with this key-status pair.
         status: The current status string (e.g., "valid", "rate_limited").
         next_check_time: ISO 8601 timestamp of the next scheduled health check.
     """
 
     key_id: int
-    key_prefix: str
+    key_value: str
     model_name: str
     status: str
     next_check_time: str

@@ -129,7 +129,7 @@ class TestKeyInventoryExporter:
 
     @pytest.mark.asyncio
     async def test_export_snapshot_ndjson_contains_required_fields(self) -> None:
-        """Each NDJSON record has key_id, key_prefix, model_name, status, next_check_time."""
+        """Each NDJSON record has key_id, key_value, model_name, status, next_check_time."""
         exporter = KeyInventoryExporter()
         rows = _make_snapshot_rows(2, status="valid")
         mock_pool = _make_mock_pool(rows)
@@ -144,7 +144,7 @@ class TestKeyInventoryExporter:
         records = mock_write.call_args[0][1]
         required_fields = {
             "key_id",
-            "key_prefix",
+            "key_value",
             "model_name",
             "status",
             "next_check_time",
@@ -154,13 +154,13 @@ class TestKeyInventoryExporter:
                 record.keys()
             ), f"Missing fields: {required_fields - record.keys()}"
 
-    # ── 5.3: key_prefix is first 10 chars ─────────────────────────────────
+    # ── 5.3: key_value contains full key ──────────────────────────────────
 
     @pytest.mark.asyncio
-    async def test_export_snapshot_key_prefix_is_first_10_chars(self) -> None:
-        """key_prefix == key_value[:10] for each record."""
+    async def test_export_snapshot_key_value_contains_full_key(self) -> None:
+        """key_value in each NDJSON record equals the full key from the DB row (not truncated)."""
         exporter = KeyInventoryExporter()
-        rows = _make_snapshot_rows(3, key_value_prefix="sk-ant-api0")
+        rows = _make_snapshot_rows(3, key_value_prefix="sk-ant-api03-")
         mock_pool = _make_mock_pool(rows)
         mock_write = MagicMock()
 
@@ -173,10 +173,9 @@ class TestKeyInventoryExporter:
         records = mock_write.call_args[0][1]
         for record in records:
             original_row = next(r for r in rows if r["key_id"] == record["key_id"])
-            expected_prefix: str = original_row["key_value"][:10]
             assert (
-                record["key_prefix"] == expected_prefix
-            ), f"Expected key_prefix '{expected_prefix}', got '{record['key_prefix']}'"
+                record["key_value"] == original_row["key_value"]
+            ), f"Expected key_value '{original_row['key_value']}', got '{record['key_value']}'"
 
     # ── 5.4: export_inventory creates status subdirectories ───────────────
 

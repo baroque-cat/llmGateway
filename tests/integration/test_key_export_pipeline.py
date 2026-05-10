@@ -126,17 +126,17 @@ async def test_full_snapshot_export_pipeline(tmp_path: Path) -> None:
 
     for record in records:
         assert "key_id" in record
-        assert "key_prefix" in record
+        assert "key_value" in record
         assert "model_name" in record
         assert "status" in record
         assert "next_check_time" in record
 
-    # Verify key_prefix is first 10 chars of key_value
-    for row, record in zip(MOCK_SNAPSHOT_ROWS, records):
-        expected_prefix: str = row["key_value"][:10]  # type: ignore[union-attr]
+    # Verify key_value is the full key (no truncation)
+    for row, record in zip(MOCK_SNAPSHOT_ROWS, records, strict=True):
+        expected_value: str = row["key_value"]  # type: ignore[union-attr]
         assert (
-            record["key_prefix"] == expected_prefix
-        ), f"Expected key_prefix '{expected_prefix}', got '{record['key_prefix']}'"
+            record["key_value"] == expected_value
+        ), f"Expected key_value '{expected_value}', got '{record['key_value']}'"
 
 
 @pytest.mark.asyncio
@@ -178,8 +178,8 @@ async def test_full_inventory_export_pipeline(tmp_path: Path) -> None:
         record["status"] == "valid"
     ), f"Expected status 'valid', got '{record['status']}'"
     assert (
-        record["key_prefix"] == "sk-abcdefg"
-    ), f"Expected key_prefix 'sk-abcdefg', got '{record['key_prefix']}'"
+        record["key_value"] == "sk-abcdefghij123456"
+    ), f"Expected key_value 'sk-abcdefghij123456', got '{record['key_value']}'"
 
 
 @pytest.mark.asyncio

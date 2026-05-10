@@ -398,5 +398,3 @@ class TestAnthropicProvider:
         assert not result.available
         assert result.error_reason == ErrorReason.NO_QUOTA
         assert result.status_code == 401
-
-    

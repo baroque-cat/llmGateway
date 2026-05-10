@@ -21,7 +21,6 @@ from src.metrics.registry import (
     METRIC_DESCRIPTIONS,
 )
 
-
 # ---------------------------------------------------------------------------
 # UT-REG01 — KEY_STATUS_TOTAL == "llm_gateway_keys_total"
 # ---------------------------------------------------------------------------

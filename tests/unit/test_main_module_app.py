@@ -56,7 +56,9 @@ class TestModuleLevelApp:
         with (
             patch("src.config.load_config", return_value=mock_config),
             patch("src.config.logging_config.setup_logging"),
-            patch("src.services.gateway.gateway_service.create_app", return_value=mock_app),
+            patch(
+                "src.services.gateway.gateway_service.create_app", return_value=mock_app
+            ),
             patch("src.core.accessor.ConfigAccessor", return_value=mock_accessor),
         ):
             import main  # noqa: F811
@@ -65,7 +67,9 @@ class TestModuleLevelApp:
             assert hasattr(main, "app"), "main.app attribute must exist after import"
 
             # main.app must be the object returned by create_app()
-            assert main.app is mock_app, "main.app must be the return value of create_app()"
+            assert (
+                main.app is mock_app
+            ), "main.app must be the return value of create_app()"
 
             # Verify the mock was created with FastAPI spec (confirms intended type)
             assert mock_app._spec_class is FastAPI
@@ -79,7 +83,9 @@ class TestModuleLevelApp:
         with (
             patch("src.config.load_config", return_value=mock_config) as mock_load,
             patch("src.config.logging_config.setup_logging"),
-            patch("src.services.gateway.gateway_service.create_app", return_value=mock_app),
+            patch(
+                "src.services.gateway.gateway_service.create_app", return_value=mock_app
+            ),
             patch("src.core.accessor.ConfigAccessor", return_value=mock_accessor),
         ):
             import main  # pyright: ignore[reportUnusedImport]  # noqa: F811
@@ -95,7 +101,9 @@ class TestModuleLevelApp:
         with (
             patch("src.config.load_config", return_value=mock_config),
             patch("src.config.logging_config.setup_logging") as mock_setup,
-            patch("src.services.gateway.gateway_service.create_app", return_value=mock_app),
+            patch(
+                "src.services.gateway.gateway_service.create_app", return_value=mock_app
+            ),
             patch("src.core.accessor.ConfigAccessor", return_value=mock_accessor),
         ):
             import main  # pyright: ignore[reportUnusedImport]  # noqa: F811
@@ -112,7 +120,9 @@ class TestModuleLevelApp:
         with (
             patch("src.config.load_config", return_value=mock_config),
             patch("src.config.logging_config.setup_logging"),
-            patch("src.services.gateway.gateway_service.create_app", return_value=mock_app) as mock_create,
+            patch(
+                "src.services.gateway.gateway_service.create_app", return_value=mock_app
+            ) as mock_create,
             patch("src.core.accessor.ConfigAccessor", return_value=mock_accessor),
         ):
             import main  # pyright: ignore[reportUnusedImport]  # noqa: F811
@@ -147,7 +157,9 @@ class TestMainBlock:
         with (
             patch("src.config.load_config", return_value=mock_config),
             patch("src.config.logging_config.setup_logging"),
-            patch("src.services.gateway.gateway_service.create_app", return_value=mock_app),
+            patch(
+                "src.services.gateway.gateway_service.create_app", return_value=mock_app
+            ),
             patch("src.core.accessor.ConfigAccessor", return_value=mock_accessor),
             patch("uvicorn.run") as mock_uvicorn_run,
             patch.object(sys, "argv", ["main.py"]),
@@ -159,15 +171,19 @@ class TestMainBlock:
 
             # Verify uvicorn.run was called with the module-level app
             call_args = mock_uvicorn_run.call_args
-            assert call_args.args[0] is mock_app, (
-                "uvicorn.run first positional arg must be the module-level app"
-            )
+            assert (
+                call_args.args[0] is mock_app
+            ), "uvicorn.run first positional arg must be the module-level app"
 
             # Verify keyword arguments match expected __main__ block values
             call_kwargs = call_args.kwargs
             assert call_kwargs["workers"] == 1, "workers must be 1 in __main__ block"
-            assert call_kwargs["host"] == "0.0.0.0", "host must come from config.gateway.host"
-            assert call_kwargs["port"] == 8000, "port must come from config.gateway.port"
+            assert (
+                call_kwargs["host"] == "0.0.0.0"
+            ), "host must come from config.gateway.host"
+            assert (
+                call_kwargs["port"] == 8000
+            ), "port must come from config.gateway.port"
             assert call_kwargs["access_log"] is False, "access_log must be False"
 
     def test_ut_m05_main_block_keeper_arg_runs_keeper(self) -> None:
@@ -181,10 +197,14 @@ class TestMainBlock:
         with (
             patch("src.config.load_config", return_value=mock_config),
             patch("src.config.logging_config.setup_logging"),
-            patch("src.services.gateway.gateway_service.create_app", return_value=mock_app),
+            patch(
+                "src.services.gateway.gateway_service.create_app", return_value=mock_app
+            ),
             patch("src.core.accessor.ConfigAccessor", return_value=mock_accessor),
             patch("uvicorn.run") as mock_uvicorn_run,
-            patch("src.services.keeper.run_keeper", new_callable=AsyncMock) as mock_keeper,
+            patch(
+                "src.services.keeper.run_keeper", new_callable=AsyncMock
+            ) as mock_keeper,
             patch.object(sys, "argv", ["main.py", "keeper"]),
         ):
             runpy.run_path("main.py", run_name="__main__")
@@ -210,7 +230,9 @@ class TestMainBlock:
         with (
             patch("src.config.load_config", return_value=mock_config),
             patch("src.config.logging_config.setup_logging"),
-            patch("src.services.gateway.gateway_service.create_app", return_value=mock_app),
+            patch(
+                "src.services.gateway.gateway_service.create_app", return_value=mock_app
+            ),
             patch("src.core.accessor.ConfigAccessor", return_value=mock_accessor),
             patch("uvicorn.run") as mock_uvicorn_run,
             patch.object(sys, "argv", ["main.py"]),

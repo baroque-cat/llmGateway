@@ -239,9 +239,7 @@ async def test_no_run_periodic_vacuum_job_registered(
 ) -> None:
     """M18: 'run_periodic_vacuum' is NOT in scheduler jobs after keeper setup."""
     deps = mock_run_keeper_dependencies
-    with patch(
-        "asyncio.sleep", new_callable=AsyncMock, side_effect=KeyboardInterrupt
-    ):
+    with patch("asyncio.sleep", new_callable=AsyncMock, side_effect=KeyboardInterrupt):
         await run_keeper()
 
     # Verify no job with id "run_periodic_vacuum" was added
@@ -261,9 +259,7 @@ async def test_key_purge_cron_job_registered(
 ) -> None:
     """M19: Worker registers cron job 'key_purge' with day_of_week='sun', hour=4, minute=0."""
     deps = mock_run_keeper_dependencies
-    with patch(
-        "asyncio.sleep", new_callable=AsyncMock, side_effect=KeyboardInterrupt
-    ):
+    with patch("asyncio.sleep", new_callable=AsyncMock, side_effect=KeyboardInterrupt):
         await run_keeper()
 
     # Find the key_purge job among add_job calls
@@ -289,9 +285,7 @@ async def test_smart_vacuum_interval_job_registered(
 ) -> None:
     """M20: Worker registers interval job 'smart_vacuum' with minutes=60."""
     deps = mock_run_keeper_dependencies
-    with patch(
-        "asyncio.sleep", new_callable=AsyncMock, side_effect=KeyboardInterrupt
-    ):
+    with patch("asyncio.sleep", new_callable=AsyncMock, side_effect=KeyboardInterrupt):
         await run_keeper()
 
     # Find the smart_vacuum job among add_job calls

@@ -22,7 +22,6 @@ from src.metrics.registry import (
     METRIC_DESCRIPTIONS,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -137,7 +136,12 @@ async def test_collect_from_db_updates_gauge_values() -> None:
     mock_db.keys.get_status_summary = AsyncMock(
         return_value=[
             {"provider": "openai", "model": "gpt-4", "status": "valid", "count": 5},
-            {"provider": "anthropic", "model": "__ALL_MODELS__", "status": "valid", "count": 3},
+            {
+                "provider": "anthropic",
+                "model": "__ALL_MODELS__",
+                "status": "valid",
+                "count": 3,
+            },
         ]
     )
 

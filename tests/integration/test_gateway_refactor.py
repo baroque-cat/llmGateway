@@ -286,9 +286,6 @@ async def test_unsafe_400_fatal():
 # ============================================================================
 
 
-
-
-
 @pytest.mark.asyncio
 async def test_startup_warning_debug_plus_retry(caplog):
     """
@@ -490,9 +487,6 @@ async def test_no_warning_retry_without_debug(caplog):
         f"Expected no debug-related WARNING, but got: "
         f"{[r.message for r in debug_warning_logs]}"
     )
-
-
-
 
 
 # ============================================================================
@@ -1259,12 +1253,6 @@ async def test_last_error_response_is_upstream_response_not_json_503():
     assert (
         response.status_code == 500
     ), f"Expected original upstream status 500, got {response.status_code}"
-
-
-
-
-
-
 
 
 # ============================================================================

@@ -421,6 +421,3 @@ class TestProxyStealthRemoval:
         assert (
             "pool_list_path" not in cfg_dict
         ), f"'pool_list_path' should not appear in defaults, got keys: {list(cfg_dict.keys())}"
-
-
-

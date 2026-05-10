@@ -224,6 +224,3 @@ def test_should_vacuum_zero_dead_tuples() -> None:
         dead_tuple_ratio=0.0,
     )
     assert should_vacuum(health, threshold=0.3) is False
-
-
-
