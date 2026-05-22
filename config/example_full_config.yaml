@@ -64,32 +64,17 @@ providers:
     enabled: true
 
     api_base_url: "https://generativelanguage.googleapis.com"
-    default_model: "gemini-2.5-flash"
-    shared_key_status: false
     # Set to true to give this instance its own HTTP client pool (high-load instances)
     dedicated_http_client: false
 
-    # Defined models for this provider
-    models:
+    # Defined models for this provider (used by Keeper for health checks)
+    default_model:
       gemini-2.5-flash:
         endpoint_suffix: ":generateContent"
         test_payload:
           contents:
             - parts:
                 - text: "Hello"
-
-      gemini-2.5-pro:
-        endpoint_suffix: ":generateContent"
-        test_payload:
-          contents:
-            - parts:
-                - text: "Hello"
-
-      imagen-3.0-generate-002:
-        endpoint_suffix: ":predict"
-        test_payload:
-          instances:
-            - prompt: "test image"
 
     # Access control for the Gateway API
     access_control:
@@ -218,13 +203,12 @@ providers:
     provider_type: "openai_like"
     enabled: true
 
-    api_base_url: "https://api.deepseek.com/v1"
-    default_model: "deepseek-chat"
+    api_base_url: "https://api.deepseek.com"
     dedicated_http_client: false
 
-    models:
+    default_model:
       deepseek-chat:
-        endpoint_suffix: "/chat/completions"
+        endpoint_suffix: "/v1/chat/completions"
         test_payload:
           messages:
             - role: "user"
@@ -244,10 +228,9 @@ providers:
     enabled: true
 
     api_base_url: "https://api.anthropic.com"
-    default_model: "claude-sonnet-4-20250514"
     dedicated_http_client: false
 
-    models:
+    default_model:
       claude-sonnet-4-20250514:
         endpoint_suffix: "/v1/messages"
         test_payload:

@@ -71,14 +71,12 @@ class KeyProbe(IResourceProbe):
         if model_name == ALL_MODELS_MARKER:
             # Get provider config to resolve a real model name
             provider_config = self.accessor.get_provider_or_raise(provider_name)
-            # Use default_model or first available model from config
+            # Use first model from default_model dict for health check
             if provider_config.default_model:
-                actual_model_name = provider_config.default_model
-            elif provider_config.models:
-                actual_model_name = next(iter(provider_config.models.keys()))
+                actual_model_name = next(iter(provider_config.default_model.keys()))
             else:
                 logger.error(
-                    f'Cannot resolve model for shared key check: no default_model or models configured for provider "{provider_name}"'
+                    f'Cannot resolve model for shared key check: no default_model configured for provider "{provider_name}"'
                 )
                 return CheckResult.fail(
                     ErrorReason.BAD_REQUEST, "No model available for shared key check"

@@ -140,7 +140,7 @@ async def test_gateway_dispatcher_routing_debug_mode():
         ),
         # Single model instance -> _handle_full_stream_request
         (
-            {"models": {"gpt-4": ModelInfo()}},
+            {"default_model": {"gpt-4": ModelInfo()}},
             "_handle_full_stream_request",
         ),
         # Gemini provider -> _handle_full_stream_request
@@ -148,15 +148,15 @@ async def test_gateway_dispatcher_routing_debug_mode():
             {"provider_type": "gemini"},
             "_handle_full_stream_request",
         ),
-        # Streaming mode disabled -> _handle_buffered_retryable_request (partial stream)
+        # Streaming mode disabled -> _handle_full_stream_request (default transparent proxy)
         (
             {"streaming_mode": StreamingMode.DISABLED},
-            "_handle_buffered_retryable_request",
+            "_handle_full_stream_request",
         ),
-        # Default case (multi-model, non-gemini, no debug, no retry) -> _handle_buffered_retryable_request
+        # Default case (multi-model, non-gemini, no debug, no retry) -> _handle_full_stream_request
         (
-            {"models": {"gpt-4": ModelInfo(), "gpt-3.5-turbo": ModelInfo()}},
-            "_handle_buffered_retryable_request",
+            {"default_model": {"gpt-4": ModelInfo(), "gpt-3.5-turbo": ModelInfo()}},
+            "_handle_full_stream_request",
         ),
     ],
 )

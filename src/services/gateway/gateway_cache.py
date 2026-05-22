@@ -5,7 +5,6 @@ import collections
 import logging
 
 from src.core.accessor import ConfigAccessor
-from src.core.constants import ALL_MODELS_MARKER
 from src.db.database import DatabaseManager
 
 logger = logging.getLogger(__name__)
@@ -94,9 +93,8 @@ class GatewayCache:
                 for record in valid_keys_data:
                     key_id = record["key_id"]
                     provider_name = record["provider_name"]
-                    model_name = record["model_name"]
                     key_value = record["key_value"]
-                    pool_key = f"{provider_name}:{model_name}"
+                    pool_key = provider_name
 
                     new_key_pool[pool_key].append((key_id, key_value))
 
@@ -137,7 +135,6 @@ class GatewayCache:
     def get_key_from_pool(
         self,
         provider_name: str,
-        model_name: str,
         exclude_key_ids: set[int] | None = None,
     ) -> tuple[int, str] | None:
         """
@@ -148,20 +145,12 @@ class GatewayCache:
 
         Args:
             provider_name: The name of the provider instance.
-            model_name: The name of the requested model.
             exclude_key_ids: A set of key IDs to ignore during selection.
 
         Returns:
             A tuple of (key_id, key_value) if a key is available, otherwise None.
         """
-        # Check if provider has shared_key_status enabled
-        provider_config = self.accessor.get_provider(provider_name)
-
-        if provider_config and provider_config.shared_key_status:
-            # For shared keys, look in the virtual model pool
-            pool_key = f"{provider_name}:{ALL_MODELS_MARKER}"
-        else:
-            pool_key = f"{provider_name}:{model_name}"
+        pool_key = provider_name
 
         key_queue = self._key_pool.get(pool_key)
 
@@ -185,38 +174,19 @@ class GatewayCache:
 
         return None
 
-    # --- REFACTORED: Method is now aware of shared_key_status ---
-    async def remove_key_from_pool(
-        self, provider_name: str, model_name: str, key_id: int
-    ) -> None:
+    async def remove_key_from_pool(self, provider_name: str, key_id: int) -> None:
         """
         Immediately removes a specific key from the live key pool cache.
 
-        If the provider has 'shared_key_status' enabled, this method will
-        remove the key from the virtual model pool (ALL_MODELS_MARKER).
-        Otherwise, it removes the key only from the specific model's pool.
         This is a write operation and is protected by a lock.
 
         Args:
             provider_name: The name of the provider instance.
-            model_name: The name of the model that triggered the failure.
             key_id: The database ID of the key to remove.
         """
         async with self._refresh_lock:
-            provider_config = self.accessor.get_provider(provider_name)
-
-            # --- NEW: Logic to decide removal strategy ---
-            if provider_config and provider_config.shared_key_status:
-                # Remove the key only from the virtual model pool
-                logger.debug(
-                    f"Removing shared key_id {key_id} from virtual pool '{provider_name}:shared' for provider '{provider_name}'."
-                )
-                pool_key = f"{provider_name}:{ALL_MODELS_MARKER}"
-                self._remove_from_single_pool(pool_key, key_id)
-            else:
-                # Granular removal: remove the key only from the specific pool.
-                pool_key = f"{provider_name}:{model_name}"
-                self._remove_from_single_pool(pool_key, key_id)
+            pool_key = provider_name
+            self._remove_from_single_pool(pool_key, key_id)
 
     def _remove_from_single_pool(self, pool_key: str, key_id: int) -> None:
         """
@@ -234,11 +204,9 @@ class GatewayCache:
         new_queue = collections.deque([info for info in key_queue if info[0] != key_id])
 
         if len(new_queue) < initial_size:
-            # Format the pool key for logging: replace __ALL_MODELS__ with 'shared'
-            formatted_pool_key = pool_key.replace(ALL_MODELS_MARKER, "shared")
             self._key_pool[pool_key] = new_queue
             logger.debug(
-                f"Removed failed key_id {key_id} from live cache pool '{formatted_pool_key}'. "
+                f"Removed failed key_id {key_id} from live cache pool '{pool_key}'. "
                 f"Pool size changed from {initial_size} to {len(new_queue)}."
             )
         else:

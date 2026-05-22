@@ -65,7 +65,7 @@ def get_default_config() -> dict[str, Any]:
                 "api_base_url": "https://api.example.com/v1",
                 # Set to true to give this instance its own HTTP client pool (high-load instances)
                 "dedicated_http_client": False,
-                "models": {},
+                "default_model": {},
                 "access_control": {
                     "gateway_access_token": "${LLM_PROVIDER_DEFAULT_TOKEN}",
                 },

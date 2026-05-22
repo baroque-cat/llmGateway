@@ -29,7 +29,7 @@ def _create_mock_accessor(
 
     provider_config = ProviderConfig(provider_type="openai_like")
     provider_config.enabled = True
-    provider_config.models = {"gpt-4": ModelInfo()}
+    provider_config.default_model = {"gpt-4": ModelInfo()}
     provider_config.gateway_policy = MagicMock()
     provider_config.gateway_policy.streaming_mode = StreamingMode.AUTO.value
     provider_config.gateway_policy.debug_mode = DebugMode.DISABLED.value

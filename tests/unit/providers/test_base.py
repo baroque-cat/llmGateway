@@ -1371,3 +1371,43 @@ class TestCheckFastFailRemoved:
         assert not hasattr(
             provider, "_check_fast_fail"
         ), "_check_fast_fail should not exist on AIBaseProvider"
+
+
+class TestInspectDefaultModel:
+    """Test suite verifying inspect() reads keys from config.default_model."""
+
+    @pytest.mark.asyncio
+    async def test_inspect_returns_keys_from_default_model(self):
+        """
+        Verify that inspect() returns list(self.config.default_model.keys())
+        when using a concrete provider with the real inspect() implementation.
+        """
+        mock_config = MagicMock(spec=ProviderConfig)
+        mock_config.error_parsing = ErrorParsingConfig(enabled=False, rules=[])
+        mock_config.provider_type = "openai"
+        mock_config.api_base_url = "https://api.openai.com/v1"
+        mock_config.default_model = {
+            "model-a": MagicMock(),
+            "model-b": MagicMock(),
+        }
+        mock_config.access_control = MagicMock()
+        mock_config.access_control.gateway_access_token = "test_token"
+        mock_config.health_policy = MagicMock()
+        mock_config.proxy_config = MagicMock()
+        mock_config.proxy_config.mode = "none"
+        mock_config.timeouts = MagicMock()
+        mock_config.timeouts.total = 30.0
+        mock_config.timeouts.connect = 10.0
+        mock_config.timeouts.read = 30.0
+        mock_config.timeouts.write = 30.0
+
+        from src.providers.impl.openai_like import OpenAILikeProvider
+
+        provider = OpenAILikeProvider("test_provider", mock_config)
+
+        # inspect() returns list(self.config.default_model.keys())
+        mock_client = MagicMock(spec=httpx.AsyncClient)
+        result = await provider.inspect(mock_client, "test_token")
+        assert result == ["model-a", "model-b"], (
+            f"Expected ['model-a', 'model-b'], got {result}"
+        )

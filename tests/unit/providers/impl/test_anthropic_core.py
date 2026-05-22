@@ -303,7 +303,7 @@ class TestAnthropicProvider:
         provider = self.create_mock_provider(
             error_config=ErrorParsingConfig(enabled=True, rules=[])
         )
-        provider.config.models = {
+        provider.config.default_model = {
             "claude-3-opus-20240229": ModelInfo(
                 endpoint_suffix="/v1/messages",
                 test_payload={"messages": [{"role": "user", "content": "hi"}]},
@@ -366,7 +366,7 @@ class TestAnthropicProvider:
                 ],
             )
         )
-        provider.config.models = {
+        provider.config.default_model = {
             "claude-3-opus-20240229": ModelInfo(
                 endpoint_suffix="/v1/messages",
                 test_payload={"messages": [{"role": "user", "content": "hi"}]},

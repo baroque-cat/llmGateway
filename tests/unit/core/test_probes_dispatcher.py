@@ -354,5 +354,139 @@ def test_ut_h11_health_policy_config_without_batch_fields():
     assert policy.adaptive_batching.max_batch_delay_sec == 120.0
 
 
+# ----------------------------------------------------------------------
+# Test: ALL_MODELS_MARKER resolution from default_model
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_shared_key_check_resolved_from_default_model() -> None:
+    """Test _check_resource() resolves ALL_MODELS_MARKER from default_model dict.
+
+    With model_name = "__ALL_MODELS__" and provider_config.default_model = {"gemini-2.5-flash": ModelInfo()},
+    verify actual_model_name resolves to "gemini-2.5-flash".
+    """
+    from src.config.schemas import (
+        DatabaseConfig,
+        DatabaseRetryConfig,
+        HealthPolicyConfig,
+        ModelInfo,
+        ProviderConfig,
+    )
+    from src.core.constants import ALL_MODELS_MARKER
+    from src.core.models import CheckResult
+    from src.services.key_probe import KeyProbe
+
+    provider_name = "gemini-pro-home"
+
+    # Build mocked dependencies for KeyProbe
+    accessor = MagicMock()
+    accessor.get_keeper_concurrency.return_value = 10
+    accessor.get_database_config.return_value = DatabaseConfig(
+        retry=DatabaseRetryConfig(
+            max_attempts=3,
+            base_delay_sec=0.01,
+            backoff_factor=1.0,
+            jitter=False,
+        )
+    )
+    accessor.get_provider_or_raise.return_value = ProviderConfig(
+        provider_type="openai_like",
+        default_model={"gemini-2.5-flash": ModelInfo()},
+    )
+    # Use a HealthPolicyConfig with valid defaults (task_timeout_sec must be large enough)
+    policy = HealthPolicyConfig(
+        task_timeout_sec=900, verification_attempts=1, verification_delay_sec=60
+    )
+    accessor.get_health_policy.return_value = policy
+
+    db_manager = MagicMock()
+    client_factory = MagicMock()
+    client_factory.get_client_for_provider = AsyncMock(return_value=MagicMock())
+
+    probe = KeyProbe(accessor, db_manager, client_factory)
+
+    # Mock the provider instance returned by get_provider()
+    mock_provider_instance = MagicMock()
+    mock_provider_instance.check = AsyncMock(
+        return_value=CheckResult.success("OK")
+    )
+
+    resource = {
+        "key_id": 99,
+        "key_value": "sk-test-shared",
+        "model_name": ALL_MODELS_MARKER,
+        "provider_name": provider_name,
+        "failing_since": None,
+    }
+
+    with patch(
+        "src.services.key_probe.get_provider",
+        return_value=mock_provider_instance,
+    ):
+        result = await probe._check_resource(resource)
+
+    # Should succeed — the model was resolved and the mock returned success
+    assert result.ok is True
+
+    # Verify provider_instance.check was called with the resolved model name
+    mock_provider_instance.check.assert_called_once()
+    # check() is called as: check(client=client, token=key_value, model=actual_model_name)
+    assert mock_provider_instance.check.call_args.kwargs["model"] == "gemini-2.5-flash"
+
+
+@pytest.mark.asyncio
+async def test_empty_default_model_shared_key_returns_bad_request() -> None:
+    """Test _check_resource() returns BAD_REQUEST when default_model is empty.
+
+    With model_name = "__ALL_MODELS__" and provider_config.default_model = {} (empty),
+    verify the check returns CheckResult.fail(ErrorReason.BAD_REQUEST, ...).
+    """
+    from src.config.schemas import (
+        DatabaseConfig,
+        DatabaseRetryConfig,
+        ProviderConfig,
+    )
+    from src.core.constants import ALL_MODELS_MARKER, ErrorReason
+    from src.services.key_probe import KeyProbe
+
+    provider_name = "empty-provider"
+
+    accessor = MagicMock()
+    accessor.get_keeper_concurrency.return_value = 10
+    accessor.get_database_config.return_value = DatabaseConfig(
+        retry=DatabaseRetryConfig(
+            max_attempts=3,
+            base_delay_sec=0.01,
+            backoff_factor=1.0,
+            jitter=False,
+        )
+    )
+    # Empty default_model — no models configured
+    accessor.get_provider_or_raise.return_value = ProviderConfig(
+        provider_type="openai_like",
+        default_model={},
+    )
+
+    db_manager = MagicMock()
+    client_factory = MagicMock()
+
+    probe = KeyProbe(accessor, db_manager, client_factory)
+
+    resource = {
+        "key_id": 99,
+        "key_value": "sk-test-shared-empty",
+        "model_name": ALL_MODELS_MARKER,
+        "provider_name": provider_name,
+        "failing_since": None,
+    }
+
+    result = await probe._check_resource(resource)
+
+    assert result.ok is False
+    assert result.error_reason == ErrorReason.BAD_REQUEST
+    assert "No model available" in result.message
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

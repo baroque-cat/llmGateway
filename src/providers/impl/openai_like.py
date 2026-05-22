@@ -173,7 +173,7 @@ class OpenAILikeProvider(AIBaseProvider):
                 ErrorReason.INVALID_KEY, "Token is empty or invalid."
             )
 
-        model_info = self.config.models.get(model)
+        model_info = self.config.default_model.get(model)
         if not model_info:
             msg = f"Configuration for model '{model}' not found in provider '{self.name}'."
             logger.error(msg)
@@ -256,7 +256,7 @@ class OpenAILikeProvider(AIBaseProvider):
         logger.debug(
             f"Inspecting models for provider '{self.name}' by reading from config."
         )
-        return list(self.config.models.keys())
+        return list(self.config.default_model.keys())
 
     # --- REFACTORED: Now uses the centralized helper method from AIBaseProvider ---
     async def proxy_request(

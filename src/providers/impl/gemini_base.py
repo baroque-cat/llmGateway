@@ -99,7 +99,7 @@ class GeminiBaseProvider(AIBaseProvider):
         logger.debug(
             f"Inspecting models for provider '{self.name}' by reading from config."
         )
-        return list(self.config.models.keys())
+        return list(self.config.default_model.keys())
 
     async def parse_request_details(self, path: str, content: bytes) -> RequestDetails:
         """

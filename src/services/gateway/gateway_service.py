@@ -13,7 +13,10 @@ from fastapi.responses import JSONResponse
 
 # Import core application components
 from src.core.accessor import ConfigAccessor
-from src.core.constants import ErrorReason  # Added explicitly for error type checking
+from src.core.constants import (  # Added explicitly for error type checking
+    ALL_MODELS_MARKER,
+    ErrorReason,
+)
 from src.core.http_client_factory import HttpClientFactory
 from src.core.interfaces import IProvider
 from src.core.models import CheckResult
@@ -339,7 +342,6 @@ async def _report_key_failure(
     db_manager: DatabaseManager,
     key_id: int,
     provider_name: str,
-    model_name: str,
     result: CheckResult,
     accessor: ConfigAccessor,
 ) -> None:
@@ -349,6 +351,9 @@ async def _report_key_failure(
 
     Computes ``next_check_time`` from the provider's ``HealthPolicyConfig``
     based on the error reason, respecting the configured cooldown intervals.
+
+    In transparent proxy mode, model_name is always ALL_MODELS_MARKER since
+    the gateway no longer tracks per-model key status.
     """
     try:
         provider_config = accessor.get_provider_or_raise(provider_name)
@@ -366,7 +371,7 @@ async def _report_key_failure(
         )
         await db_manager.keys.update_status(
             key_id=key_id,
-            model_name=model_name,
+            model_name=ALL_MODELS_MARKER,
             provider_name=provider_name,
             result=result,
             next_check_time=next_check,
@@ -414,22 +419,23 @@ def _get_token_from_headers(
 
 
 async def _handle_full_stream_request(
-    request: Request, provider: IProvider, instance_name: str, model_name: str
+    request: Request, provider: IProvider, instance_name: str
 ) -> Response:
     """
     Handles requests where both request and response can be streamed (full-duplex).
     Does NOT read the request body into memory.
+
+    In transparent proxy mode, model_name is set to ALL_MODELS_MARKER since the
+    gateway no longer validates or inspects model names.
     """
     cache = _get_gateway_cache(request)
     http_factory = _get_http_client_factory(request)
     db_manager = _get_db_manager(request)
     accessor = _get_config_accessor(request)
 
-    key_info = cache.get_key_from_pool(instance_name, model_name)
+    key_info = cache.get_key_from_pool(instance_name)
     if not key_info:
-        logger.warning(
-            f"No valid API keys available in pool for '{instance_name}:{model_name}'."
-        )
+        logger.warning(f"No valid API keys available in pool for '{instance_name}'.")
         return JSONResponse(
             status_code=503, content={"error": "No available API keys."}
         )
@@ -457,7 +463,7 @@ async def _handle_full_stream_request(
             request_method=request.method,
             request_path=str(request.url),
             provider_name=instance_name,
-            model_name=model_name,
+            model_name=ALL_MODELS_MARKER,
         )
 
     elif check_result.error_reason.is_client_error():
@@ -498,12 +504,10 @@ async def _handle_full_stream_request(
         # Report and remove the failed key from the live cache.
         asyncio.create_task(
             _report_key_failure(
-                db_manager, key_id, instance_name, model_name, check_result, accessor
+                db_manager, key_id, instance_name, check_result, accessor
             )
         )
-        asyncio.create_task(
-            cache.remove_key_from_pool(instance_name, model_name, key_id)
-        )
+        asyncio.create_task(cache.remove_key_from_pool(instance_name, key_id))
         return await forward_error_to_client(
             upstream_response, check_result, body_bytes
         )
@@ -528,19 +532,11 @@ async def _handle_buffered_retryable_request(
 
     request_body = await request.body()
     try:
-        details = await provider.parse_request_details(
+        _ = await provider.parse_request_details(
             path=request.url.path, content=request_body
         )
     except ValueError as e:
         return JSONResponse(status_code=400, content={"error": f"Bad request: {e}"})
-
-    if details.model_name not in provider_config.models:
-        return JSONResponse(
-            status_code=400,
-            content={
-                "error": f"Model '{details.model_name}' is not permitted for this instance."
-            },
-        )
 
     failed_key_ids: set[int] = set()
     total_attempts = 0
@@ -550,7 +546,7 @@ async def _handle_buffered_retryable_request(
     while True:
         total_attempts += 1
         key_info = cache.get_key_from_pool(
-            instance_name, details.model_name, exclude_key_ids=failed_key_ids
+            instance_name, exclude_key_ids=failed_key_ids
         )
         if not key_info:
             return JSONResponse(
@@ -589,7 +585,7 @@ async def _handle_buffered_retryable_request(
                     request_method=request.method,
                     request_path=str(request.url),
                     provider_name=instance_name,
-                    model_name=details.model_name,
+                    model_name=ALL_MODELS_MARKER,
                 )
 
         reason = check_result.error_reason
@@ -631,14 +627,11 @@ async def _handle_buffered_retryable_request(
                     db_manager,
                     key_id,
                     instance_name,
-                    details.model_name,
                     check_result,
                     accessor,
                 )
             )
-            asyncio.create_task(
-                cache.remove_key_from_pool(instance_name, details.model_name, key_id)
-            )
+            asyncio.create_task(cache.remove_key_from_pool(instance_name, key_id))
 
             key_error_attempts += 1
             server_error_attempts = 0
@@ -690,16 +683,11 @@ async def _handle_buffered_retryable_request(
                         db_manager,
                         key_id,
                         instance_name,
-                        details.model_name,
                         check_result,
                         accessor,
                     )
                 )
-                asyncio.create_task(
-                    cache.remove_key_from_pool(
-                        instance_name, details.model_name, key_id
-                    )
-                )
+                asyncio.create_task(cache.remove_key_from_pool(instance_name, key_id))
 
                 # Fall through to Key Rotation logic
                 key_error_attempts += 1
@@ -742,9 +730,7 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
 
             # Initialize data structures for the dispatcher logic.
             full_stream_instances: set[str] = set()
-            gemini_stream_instances: set[str] = set()
-            single_model_map: dict[str, str] = {}
-            debug_mode_map: dict[str, str] = {}  # NEW: Track debug mode per provider
+            debug_mode_map: dict[str, str] = {}  # Track debug mode per provider
 
             # Iterate through all enabled providers to analyze and log their mode.
             for name, config in accessor.get_enabled_providers().items():
@@ -771,40 +757,23 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
                 # Determine the effective streaming mode for this provider.
                 effective_streaming_mode = config.gateway_policy.streaming_mode
 
-                # If debug mode is enabled, force disable streaming regardless of other settings.
-                # Debug mode requires buffering the entire request/response for logging.
+                # If debug mode is enabled, force buffered requests.
                 if effective_debug_mode != "disabled":
                     mode = "DEBUG MODE"
                     reason = f"Debug mode '{effective_debug_mode}' enabled - forcing buffered requests"
-                # If streaming is explicitly disabled, skip all other rules.
+                # If retry is enabled, force buffered requests.
+                elif config.gateway_policy.retry.enabled:
+                    mode = "PARTIAL STREAM"
+                    reason = "Retry policy is enabled"
+                # Streaming explicitly disabled.
                 elif effective_streaming_mode == "disabled":
                     mode = "PARTIAL STREAM"
                     reason = "Streaming is explicitly disabled"
+                # Default: full-stream transparent proxy for all instances.
                 else:
-                    # Rule 1 (Highest priority): Retry policy forces partial streaming.
-                    if config.gateway_policy.retry.enabled:
-                        mode = "PARTIAL STREAM"
-                        reason = "Retry policy is enabled"
-
-                    # Rule 2: Single-model instances can be fully streamed.
-                    elif len(config.models) == 1:
-                        mode = "FULL STREAM"
-                        reason = "Single model configured, no parsing needed"
-                        # Update state for the dispatcher.
-                        full_stream_instances.add(name)
-                        single_model_map[name] = list(config.models.keys())[0]
-
-                    # Rule 3: Special case for Gemini's URL-based model selection.
-                    elif config.provider_type == "gemini":
-                        mode = "FULL STREAM"
-                        reason = "Provider type 'gemini' allows model parsing from URL"
-                        # Update state for the dispatcher.
-                        gemini_stream_instances.add(name)
-
-                    # Rule 4 (Default): Multi-model instances require body parsing.
-                    else:
-                        mode = "PARTIAL STREAM"
-                        reason = "Multiple models require request body parsing"
+                    mode = "FULL STREAM"
+                    reason = "Transparent proxy mode - all requests forwarded without buffering"
+                    full_stream_instances.add(name)
 
                 # Log the determined mode and reason for operational clarity.
                 logger.info(
@@ -836,8 +805,6 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
 
             # Assign the pre-calculated dispatcher state
             app.state.full_stream_instances = full_stream_instances
-            app.state.gemini_stream_instances = gemini_stream_instances
-            app.state.single_model_map = single_model_map
             app.state.debug_mode_map = debug_mode_map
 
         except Exception as e:
@@ -938,7 +905,7 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
         )
 
         # Dispatch to the correct handler based on pre-calculated logic.
-        # Debug mode has highest priority and forces buffered requests.
+        # Debug mode and retry policy force buffered request handling.
         if (
             effective_debug_mode != "disabled"
             or provider_config.gateway_policy.retry.enabled
@@ -946,36 +913,9 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
             return await _handle_buffered_retryable_request(
                 request, provider, instance_name
             )
-        elif instance_name in request.app.state.full_stream_instances:
-            model_name = request.app.state.single_model_map[instance_name]
-            return await _handle_full_stream_request(
-                request, provider, instance_name, model_name
-            )
-        elif instance_name in request.app.state.gemini_stream_instances:
-            try:
-                # For Gemini, we can parse the model from the URL without reading the body.
-                details = await provider.parse_request_details(
-                    path=request.url.path, content=b""
-                )
-                if details.model_name not in provider_config.models:
-                    return JSONResponse(
-                        status_code=400,
-                        content={
-                            "error": f"Model '{details.model_name}' is not permitted."
-                        },
-                    )
-                return await _handle_full_stream_request(
-                    request, provider, instance_name, details.model_name
-                )
-            except ValueError as e:
-                return JSONResponse(
-                    status_code=400, content={"error": f"Bad request: {e}"}
-                )
 
-        # The default case for multi-model, non-Gemini providers: buffer request, stream response.
-        return await _handle_buffered_retryable_request(
-            request, provider, instance_name
-        )
+        # Default: full-stream transparent proxy for all instances.
+        return await _handle_full_stream_request(request, provider, instance_name)
 
     _ = catch_all_endpoint
 

@@ -10,8 +10,6 @@ Tests cover:
 
 import inspect
 import re
-import inspect
-import re
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import httpx
@@ -20,9 +18,9 @@ from fastapi import FastAPI
 from pydantic import ValidationError
 from starlette.responses import StreamingResponse
 
+from src.config.schemas import GatewayPolicyConfig, ModelInfo
 from src.core.constants import ErrorReason
 from src.core.models import CheckResult, RequestDetails
-from src.config.schemas import GatewayPolicyConfig
 from src.services.gateway.gateway_service import (
     GatewayStreamError,
     _handle_buffered_retryable_request,
@@ -64,7 +62,7 @@ def _make_mock_request(
     mock_accessor = MagicMock()
     # Default provider config
     mock_provider_config = MagicMock()
-    mock_provider_config.models = {"gpt-4": MagicMock()}
+    mock_provider_config.default_model = {"gpt-4": ModelInfo()}
     mock_provider_config.gateway_policy = MagicMock()
     mock_provider_config.gateway_policy.retry = MagicMock()
     mock_provider_config.gateway_policy.retry.enabled = False
@@ -81,8 +79,6 @@ def _make_mock_request(
     request.app.state.accessor = mock_accessor
     request.app.state.debug_mode_map = {"openai": "disabled"}
     request.app.state.full_stream_instances = {"openai"}
-    request.app.state.gemini_stream_instances = set()
-    request.app.state.single_model_map = {"openai": "gpt-4"}
 
     return request
 
@@ -135,7 +131,7 @@ class TestFullStreamRequest:
             new=AsyncMock(return_value=mock_streaming_response),
         ) as mock_forward:
             result = await _handle_full_stream_request(
-                request, provider, "openai", "gpt-4"
+                request, provider, "openai"
             )
 
             assert result is mock_streaming_response
@@ -150,7 +146,7 @@ class TestFullStreamRequest:
         # Make cache return no key
         request.app.state.gateway_cache.get_key_from_pool = Mock(return_value=None)
 
-        result = await _handle_full_stream_request(request, provider, "openai", "gpt-4")
+        result = await _handle_full_stream_request(request, provider, "openai")
 
         # Should return a 503 JSONResponse
         assert result.status_code == 503
@@ -189,7 +185,7 @@ class TestFullStreamRequest:
                 new=AsyncMock(return_value=streaming_result),
             ):
                 result = await _handle_full_stream_request(
-                    request, provider, "openai", "gpt-4"
+                    request, provider, "openai"
                 )
                 # The StreamingResponse is returned; the error happens when
                 # the client reads the stream, not during the handler call.
@@ -384,7 +380,7 @@ class TestCreateApp:
             ) as mock_dm_cls,
             patch(
                 "src.services.gateway.gateway_service.HttpClientFactory"
-            ) as mock_hcf_cls,
+            ),
             patch("src.services.gateway.gateway_service.GatewayCache") as mock_gc_cls,
             patch(
                 "src.services.gateway.gateway_service._cache_refresh_loop",
@@ -410,7 +406,7 @@ class TestCreateApp:
             ) as mock_dm_cls,
             patch(
                 "src.services.gateway.gateway_service.HttpClientFactory"
-            ) as mock_hcf_cls,
+            ),
             patch("src.services.gateway.gateway_service.GatewayCache") as mock_gc_cls,
             patch(
                 "src.services.gateway.gateway_service._cache_refresh_loop",
@@ -439,7 +435,7 @@ class TestCreateApp:
             ) as mock_dm_cls,
             patch(
                 "src.services.gateway.gateway_service.HttpClientFactory"
-            ) as mock_hcf_cls,
+            ),
             patch("src.services.gateway.gateway_service.GatewayCache") as mock_gc_cls,
             patch(
                 "src.services.gateway.gateway_service._cache_refresh_loop",

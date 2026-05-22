@@ -302,10 +302,20 @@ class KeyRepository:
                     (key_id, ALL_MODELS_MARKER) for key_id in current_key_ids_in_db
                 }
             else:
+                # If provider_models is empty but default_model has entries,
+                # use default_model keys as fallback to ensure key_model_status rows
+                # are created for transparent proxy operation.
+                effective_models = provider_models
+                if (
+                    not effective_models
+                    and provider_config
+                    and provider_config.default_model
+                ):
+                    effective_models = list(provider_config.default_model.keys())
                 desired_model_state = {
                     (key_id, model)
                     for key_id in current_key_ids_in_db
-                    for model in provider_models
+                    for model in effective_models
                 }
 
             # Get the current state from the DB.
@@ -588,12 +598,15 @@ class KeyRepository:
         SELECT
             k.id AS key_id,
             p.name as provider_name,
-            s.model_name,
+            COALESCE(s.model_name, '__ALL_MODELS__') AS model_name,
             k.key_value
-        FROM key_model_status AS s
-        JOIN api_keys AS k ON s.key_id = k.id
+        FROM api_keys AS k
         JOIN providers AS p ON k.provider_id = p.id
-        WHERE s.status = 'valid'
+        LEFT JOIN key_model_status AS s ON s.key_id = k.id
+        WHERE s.status IS NULL OR (
+            s.status = 'valid'
+            AND s.status NOT IN ('invalid_key', 'no_access', 'no_quota', 'no_model')
+        )
         """
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(query)

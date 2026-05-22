@@ -33,7 +33,7 @@ class TestAnthropicProviderFactory:
         config = ProviderConfig(
             provider_type="anthropic",
             api_base_url="https://api.anthropic.com",
-            models={"claude-3-opus": ModelInfo()},
+            default_model={"claude-3-opus": ModelInfo()},
         )
         provider = get_provider("test_anthropic", config)
         assert isinstance(provider, AnthropicProvider)
@@ -65,8 +65,7 @@ providers:
     provider_type: anthropic
     enabled: true
     api_base_url: https://api.anthropic.com
-    default_model: claude-3-opus
-    models:
+    default_model:
       claude-3-opus:
         endpoint_suffix: /v1/messages
         test_payload:
@@ -103,12 +102,11 @@ providers:
             assert provider_config.provider_type == "anthropic"
             assert provider_config.enabled is True
             assert provider_config.api_base_url == "https://api.anthropic.com"
-            assert provider_config.default_model == "claude-3-opus"
-
-            # Verify models
-            assert "claude-3-opus" in provider_config.models
-            assert "claude-3-sonnet" in provider_config.models
-            model_info = provider_config.models["claude-3-opus"]
+            # Verify default_model is a dict with both models
+            assert isinstance(provider_config.default_model, dict)
+            assert "claude-3-opus" in provider_config.default_model
+            assert "claude-3-sonnet" in provider_config.default_model
+            model_info = provider_config.default_model["claude-3-opus"]
             assert model_info.endpoint_suffix == "/v1/messages"
             assert model_info.test_payload == {"max_tokens": 10, "messages": []}
 
@@ -129,7 +127,7 @@ providers:
   anthropic_test:
     provider_type: anthropic
     api_base_url: https://api.anthropic.com
-    models:
+    default_model:
       claude-3-opus: {}
 """
         with (
@@ -145,8 +143,8 @@ providers:
             assert isinstance(provider, AnthropicProvider)
             assert provider.name == "anthropic_test"
             assert provider.config.api_base_url == "https://api.anthropic.com"
-            # Models dict contains ModelInfo instances
-            assert "claude-3-opus" in provider.config.models
-            model_info = provider.config.models["claude-3-opus"]
+            # default_model dict contains ModelInfo instances
+            assert "claude-3-opus" in provider.config.default_model
+            model_info = provider.config.default_model["claude-3-opus"]
             assert model_info.endpoint_suffix == ""
             assert model_info.test_payload == {}

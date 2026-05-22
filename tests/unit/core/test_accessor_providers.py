@@ -7,7 +7,7 @@ Includes tests moved from integration/test_ghost_provider_integration.py:
   - test_empty_enabled_providers_handling
 """
 
-from src.config.schemas import Config, ProviderConfig
+from src.config.schemas import Config, ModelInfo, ProviderConfig
 from src.core.accessor import ConfigAccessor
 
 
@@ -47,19 +47,19 @@ def test_complete_ghost_provider_workflow():
             enabled=True,
             provider_type="openai_like",
             api_base_url="http://active.com",
-            default_model="model1",
+            default_model={"model1": ModelInfo()},
         ),
         "disabled_provider": ProviderConfig(
             enabled=False,
             provider_type="openai_like",
             api_base_url="http://disabled.com",
-            default_model="model2",
+            default_model={"model2": ModelInfo()},
         ),
         "ghost_provider": ProviderConfig(
             enabled=True,
             provider_type="openai_like",
             api_base_url="http://ghost.com",
-            default_model="model3",
+            default_model={"model3": ModelInfo()},
         ),
     }
 
@@ -82,13 +82,13 @@ def test_complete_ghost_provider_workflow():
             enabled=True,
             provider_type="openai_like",
             api_base_url="http://active.com",
-            default_model="model1",
+            default_model={"model1": ModelInfo()},
         ),
         "disabled_provider": ProviderConfig(
             enabled=False,
             provider_type="openai_like",
             api_base_url="http://disabled.com",
-            default_model="model2",
+            default_model={"model2": ModelInfo()},
         ),
         # ghost_provider is completely removed
     }
@@ -144,3 +144,65 @@ def test_empty_enabled_providers_handling():
     accessor = ConfigAccessor(config)
     enabled_providers = accessor.get_enabled_providers()
     assert len(enabled_providers) == 0
+
+
+# --- Tests for get_model_info and get_default_model_info ---
+
+
+def test_get_model_info_from_default_model():
+    """Test get_model_info retrieves the correct ModelInfo and returns None for unknown models."""
+    config = Config()
+    expected_model_info = ModelInfo(
+        endpoint_suffix="/v1/chat", test_payload={"dummy": "payload"}
+    )
+    config.providers = {
+        "my-provider": ProviderConfig(
+            enabled=True,
+            provider_type="openai_like",
+            default_model={"gpt-4": expected_model_info},
+        ),
+    }
+
+    accessor = ConfigAccessor(config)
+
+    # Verify retrieval of an existing model
+    result = accessor.get_model_info("my-provider", "gpt-4")
+    assert result is expected_model_info
+
+    # Verify retrieval of a non-existent model returns None
+    result_none = accessor.get_model_info("my-provider", "nonexistent")
+    assert result_none is None
+
+
+def test_get_default_model_info_returns_first_value():
+    """Test get_default_model_info returns the first value from the default_model dict."""
+    config = Config()
+    model_a = ModelInfo(endpoint_suffix="/v1/chat", test_payload={})
+    model_b = ModelInfo(endpoint_suffix="/v1/completions", test_payload={})
+    config.providers = {
+        "my-provider": ProviderConfig(
+            enabled=True,
+            provider_type="openai_like",
+            default_model={"gpt-4": model_a, "gpt-3.5": model_b},
+        ),
+    }
+
+    accessor = ConfigAccessor(config)
+    result = accessor.get_default_model_info("my-provider")
+    assert result is model_a
+
+
+def test_get_default_model_info_returns_none_for_empty():
+    """Test get_default_model_info returns None when default_model dict is empty."""
+    config = Config()
+    config.providers = {
+        "my-provider": ProviderConfig(
+            enabled=True,
+            provider_type="openai_like",
+            default_model={},
+        ),
+    }
+
+    accessor = ConfigAccessor(config)
+    result = accessor.get_default_model_info("my-provider")
+    assert result is None

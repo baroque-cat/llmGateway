@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from starlette.responses import StreamingResponse
 
 from src.config.schemas import ModelInfo
-from src.core.constants import ErrorReason, StreamingMode
+from src.core.constants import ALL_MODELS_MARKER, ErrorReason, StreamingMode
 from src.core.models import CheckResult, RequestDetails
 
 
@@ -30,7 +30,7 @@ async def test_gateway_routes_to_full_stream_handler_when_auto_with_eligible_pro
     accessor = MagicMock()
     # Create a config with single model, streaming_mode=AUTO
     provider_config = create_mock_provider_config(
-        models={"gpt-4": ModelInfo()},  # single model
+        default_model={"gpt-4": ModelInfo()},  # single model
         streaming_mode=StreamingMode.AUTO,  # placeholder
     )
 
@@ -170,7 +170,7 @@ async def test_gateway_routes_to_full_stream_handler_for_gemini_provider():
     # Create a config with multiple models, streaming_mode=AUTO, provider_type=gemini
     provider_config = create_mock_provider_config(
         provider_type="gemini",
-        models={
+        default_model={
             "gemini-2.5-pro": ModelInfo(),
             "gemini-2.0-flash": ModelInfo(),
         },  # multiple models, Gemini can parse from URL
@@ -304,16 +304,9 @@ async def test_gateway_routes_to_full_stream_handler_for_gemini_provider():
             assert isinstance(
                 content_arg, AsyncGenerator
             ), "Content should be an async generator"
-            # Verify parse_request_details was called with correct path
-
-            mock_provider.parse_request_details.assert_called_once()
-            parse_args = mock_provider.parse_request_details.call_args
-            # Should be called with path and empty bytes (since gemini can parse from URL)
-            assert (
-                parse_args.kwargs["path"]
-                == "/v1beta/models/gemini-2.5-pro:generateContent"
-            )
-            assert parse_args.kwargs["content"] == b""
+            # In transparent proxy mode, parse_request_details is NOT called
+            # — the gateway no longer parses or validates model names.
+            mock_provider.parse_request_details.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -363,7 +356,6 @@ async def test_gateway_full_stream_read_error_converted_to_gateway_stream_error(
     # Mock provider
     provider = MagicMock()
     instance_name = "test_instance"
-    model_name = "gpt-4"
 
     # Create mock upstream response with aiter_bytes() that raises ReadError
     mock_upstream_response = MagicMock(spec=httpx.Response)
@@ -383,7 +375,7 @@ async def test_gateway_full_stream_read_error_converted_to_gateway_stream_error(
     )
 
     response = await _handle_full_stream_request(
-        req, provider, instance_name, model_name
+        req, provider, instance_name
     )
 
     # Handler returns StreamingResponse
@@ -396,7 +388,7 @@ async def test_gateway_full_stream_read_error_converted_to_gateway_stream_error(
 
     # Verify GatewayStreamError attributes
     assert exc_info.value.provider_name == instance_name
-    assert exc_info.value.model_name == model_name
+    assert exc_info.value.model_name == ALL_MODELS_MARKER
     assert exc_info.value.error_reason == ErrorReason.STREAM_DISCONNECT
 
     # Verify that httpx.ReadError was intercepted (not raised directly)

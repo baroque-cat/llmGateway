@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.config.schemas import ProviderConfig, RetryOnErrorConfig
+from src.config.schemas import ModelInfo, ProviderConfig, RetryOnErrorConfig
 from src.core.constants import ErrorReason
 from src.core.models import CheckResult
 
@@ -42,7 +42,7 @@ async def test_server_error_then_key_error_synergy_original_error_forwarded():
 
     # Setup Config: server attempts = 2, key attempts = 2
     provider_config = ProviderConfig(provider_type="openai_like")
-    provider_config.models = {"gpt-4": {}}
+    provider_config.default_model = {"gpt-4": ModelInfo()}
     provider_config.gateway_policy.retry.enabled = True
     provider_config.gateway_policy.retry.on_server_error = RetryOnErrorConfig(
         attempts=2, backoff_sec=0.1
@@ -137,11 +137,11 @@ async def test_server_error_then_key_error_synergy_original_error_forwarded():
     assert req.app.state.gateway_cache.get_key_from_pool.call_count == 4
     # 3. Key 1 removed from pool after fatal error
     req.app.state.gateway_cache.remove_key_from_pool.assert_any_call(
-        instance_name, "gpt-4", 1
+        instance_name, 1
     )
     # 4. Key 2 removed from pool after server error exhaustion
     req.app.state.gateway_cache.remove_key_from_pool.assert_any_call(
-        instance_name, "gpt-4", 2
+        instance_name, 2
     )
     # 5. DB updated for both keys (each key failure triggers update_status)
     assert req.app.state.db_manager.keys.update_status.call_count == 2
@@ -184,7 +184,7 @@ async def test_counter_reset_on_key_rotation_unchanged():
 
     # Setup Config: server attempts = 2, key attempts = 2
     provider_config = ProviderConfig(provider_type="openai_like")
-    provider_config.models = {"gpt-4": {}}
+    provider_config.default_model = {"gpt-4": ModelInfo()}
     provider_config.gateway_policy.retry.enabled = True
     provider_config.gateway_policy.retry.on_server_error = RetryOnErrorConfig(
         attempts=2, backoff_sec=0.1
@@ -282,10 +282,10 @@ async def test_counter_reset_on_key_rotation_unchanged():
     assert req.app.state.gateway_cache.get_key_from_pool.call_count == 4
     # 3. Both keys removed from pool after key errors
     req.app.state.gateway_cache.remove_key_from_pool.assert_any_call(
-        instance_name, "gpt-4", 1
+        instance_name, 1
     )
     req.app.state.gateway_cache.remove_key_from_pool.assert_any_call(
-        instance_name, "gpt-4", 2
+        instance_name, 2
     )
     # 4. DB updated for both keys
     assert req.app.state.db_manager.keys.update_status.call_count == 2

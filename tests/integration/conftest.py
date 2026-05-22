@@ -48,7 +48,7 @@ def make_mock_request(
 def create_mock_provider_config(
     *,
     provider_type: str = "openai_like",
-    models: dict[str, ModelInfo] | None = None,
+    default_model: dict[str, ModelInfo] | None = None,
     streaming_mode: StreamingMode = StreamingMode.AUTO,
     debug_mode: DebugMode = DebugMode.DISABLED,
     retry_enabled: bool = False,
@@ -56,11 +56,11 @@ def create_mock_provider_config(
     retry_on_server_error: RetryOnErrorConfig | None = None,
 ) -> ProviderConfig:
     """Helper to create a ProviderConfig with specified settings."""
-    if models is None:
-        models = {"gpt-4": ModelInfo()}
+    if default_model is None:
+        default_model = {"gpt-4": ModelInfo()}
     config = ProviderConfig(provider_type=provider_type)
     config.enabled = True
-    config.models = models
+    config.default_model = default_model
     config.gateway_policy = GatewayPolicyConfig()
     config.gateway_policy.streaming_mode = streaming_mode.value  # expects string
     config.gateway_policy.debug_mode = debug_mode.value

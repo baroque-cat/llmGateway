@@ -212,7 +212,7 @@ class AnthropicProvider(AIBaseProvider):
             )
 
         # Validate model exists in configuration
-        model_info = self.config.models.get(model)
+        model_info = self.config.default_model.get(model)
         if not model_info:
             msg = f"Configuration for model '{model}' not found in provider '{self.name}'."
             logger.error(msg)
@@ -290,7 +290,7 @@ class AnthropicProvider(AIBaseProvider):
         logger.debug(
             f"Inspecting models for Anthropic provider '{self.name}' from configuration."
         )
-        return list(self.config.models.keys())
+        return list(self.config.default_model.keys())
 
     async def proxy_request(
         self,

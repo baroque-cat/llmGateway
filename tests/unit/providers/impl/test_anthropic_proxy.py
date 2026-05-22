@@ -27,7 +27,7 @@ class TestAnthropicProxy:
 
     @pytest.mark.asyncio
     async def test_inspect_returns_model_list_from_config(self):
-        """Test that inspect returns a list of keys from self.config.models."""
+        """Test that inspect returns a list of keys from self.config.default_model."""
         provider = self.create_mock_provider()
         mock_client = AsyncMock(spec=httpx.AsyncClient)
         token = "test_token"

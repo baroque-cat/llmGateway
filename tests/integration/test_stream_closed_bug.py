@@ -50,7 +50,7 @@ def create_provider_config(
 ) -> ProviderConfig:
     """Create a provider config with specific error parsing settings."""
     config = ProviderConfig(provider_type="openai_like")
-    config.models = {"gpt-4": ModelInfo()}
+    config.default_model = {"gpt-4": ModelInfo()}
     config.gateway_policy = GatewayPolicyConfig()
     if retry_enabled:
         config.gateway_policy.retry = RetryPolicyConfig(

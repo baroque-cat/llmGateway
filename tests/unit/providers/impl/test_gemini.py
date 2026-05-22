@@ -42,8 +42,7 @@ class TestGeminiErrorParsing:
         # Set up other required config fields
         mock_config.provider_type = "gemini"
         mock_config.api_base_url = "https://generativelanguage.googleapis.com/v1"
-        mock_config.default_model = "gemini-pro"
-        mock_config.models = {}
+        mock_config.default_model = {"gemini-pro": ModelInfo()}
         mock_config.access_control = MagicMock()
         mock_config.access_control.gateway_access_token = "test_token"
         mock_config.health_policy = MagicMock()
@@ -211,7 +210,7 @@ class TestGeminiErrorParsing:
         provider = self.create_mock_provider(
             error_config=ErrorParsingConfig(enabled=True, rules=[])
         )
-        provider.config.models = {
+        provider.config.default_model = {
             "gemini-pro": ModelInfo(
                 endpoint_suffix=":generateContent",
                 test_payload={"contents": [{"parts": [{"text": "hi"}]}]},
@@ -273,7 +272,7 @@ class TestGeminiErrorParsing:
                 ],
             )
         )
-        provider.config.models = {
+        provider.config.default_model = {
             "gemini-pro": ModelInfo(
                 endpoint_suffix=":generateContent",
                 test_payload={"contents": [{"parts": [{"text": "hi"}]}]},
@@ -351,8 +350,7 @@ class TestGeminiProxyRequest:
         mock_config.error_parsing = ErrorParsingConfig(enabled=False, rules=[])
         mock_config.provider_type = "gemini"
         mock_config.api_base_url = "https://generativelanguage.googleapis.com/v1"
-        mock_config.default_model = "gemini-pro"
-        mock_config.models = {}
+        mock_config.default_model = {"gemini-pro": ModelInfo()}
         mock_config.access_control = MagicMock()
         mock_config.access_control.gateway_access_token = "test_token"
         mock_config.health_policy = MagicMock()
@@ -478,8 +476,7 @@ class TestGeminiParseRequestDetails:
         mock_config.error_parsing = ErrorParsingConfig(enabled=False, rules=[])
         mock_config.provider_type = "gemini"
         mock_config.api_base_url = "https://generativelanguage.googleapis.com/v1"
-        mock_config.default_model = "gemini-pro"
-        mock_config.models = {}
+        mock_config.default_model = {"gemini-pro": ModelInfo()}
         mock_config.access_control = MagicMock()
         mock_config.access_control.gateway_access_token = "test_token"
         mock_config.health_policy = MagicMock()
@@ -531,3 +528,46 @@ class TestGeminiParseRequestDetails:
 
         with pytest.raises(ValueError, match="Could not extract model name from path"):
             await provider.parse_request_details(path, content)
+
+
+class TestGeminiParseDetailsFromUrl:
+    """Test suite for Gemini parse_request_details extracting model from URL."""
+
+    def create_mock_provider(self):
+        """Helper to create a mock GeminiProvider with minimal configuration."""
+        mock_config = MagicMock(spec=ProviderConfig)
+        mock_config.error_parsing = ErrorParsingConfig(enabled=False, rules=[])
+        mock_config.provider_type = "gemini"
+        mock_config.api_base_url = "https://generativelanguage.googleapis.com/v1"
+        mock_config.default_model = {"gemini-pro": ModelInfo()}
+        mock_config.access_control = MagicMock()
+        mock_config.access_control.gateway_access_token = "test_token"
+        mock_config.health_policy = MagicMock()
+        mock_config.proxy_config = MagicMock()
+        mock_config.proxy_config.mode = "none"
+        mock_config.timeouts = MagicMock()
+        mock_config.timeouts.total = 30.0
+        mock_config.timeouts.connect = 10.0
+        mock_config.timeouts.read = 30.0
+        mock_config.timeouts.write = 30.0
+
+        provider = GeminiProvider("test_provider", mock_config)
+        return provider
+
+    @pytest.mark.asyncio
+    async def test_gemini_full_stream_extracts_model_from_url_for_logs(self):
+        """
+        Verify that parse_request_details extracts the model name from the
+        URL path even when the request body is empty (full-stream mode).
+        """
+        provider = self.create_mock_provider()
+
+        path = "/v1beta/models/gemini-2.5-pro:generateContent"
+        content = b""
+
+        result = await provider.parse_request_details(path, content)
+
+        assert isinstance(result, RequestDetails)
+        assert result.model_name == "gemini-2.5-pro", (
+            f"Expected 'gemini-2.5-pro', got '{result.model_name}'"
+        )

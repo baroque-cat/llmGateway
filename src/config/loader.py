@@ -145,7 +145,7 @@ class ConfigLoader:
 
             # 2. Merge the user's specific configuration for this instance.
             # Since we have removed automatic template injection (provider_templates.py),
-            # the user config must contain all necessary fields (api_base_url, models, etc.).
+            # the user config must contain all necessary fields (api_base_url, default_model, etc.).
             final_provider_instance = always_merger.merge(
                 provider_base, user_provider_conf
             )

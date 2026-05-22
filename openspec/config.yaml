@@ -1,0 +1,83 @@
+schema: qa-driven
+
+context: |
+  Tech stack: Python ≥3.13.5, Poetry (primary) + uv (Docker), fully async (async/await)
+  Package manager: Poetry (dev), uv (Docker/resolution)
+  Web framework: FastAPI ≥0.120 + Uvicorn ASGI server (port 55300)
+  Database: PostgreSQL 18 via raw asyncpg (no ORM) — 5 tables: providers, proxies, provider_proxy_status, api_keys, key_model_status
+  LLM providers: No SDKs — raw httpx HTTP/2 calls to upstream APIs
+  Scheduler: APScheduler with AsyncIOScheduler (background jobs)
+  Configuration: Pydantic v2 BaseModel schema (src/config/schemas.py), YAML loader with env-var substitution + deepmerge for defaults
+  Metrics: Prometheus (single + multiprocess backends via PROMETHEUS_MULTIPROC_DIR env var), metric prefix llm_gateway_*
+  Docker: docker-compose up —build -d (PostgreSQL + Keeper + Conductor)
+  Architecture: Clean Architecture / Hexagonal — layered async monolith with two runtime modes (Keeper background worker + Gateway FastAPI frontend)
+  Folder src/config/ — Configuration layer (Pydantic schemas, YAML loader, defaults, error formatting)
+  Folder src/core/ — Domain logic + abstractions (enums: ErrorReason/Status/DebugMode/StreamingMode/ProxyMode/ProviderType, interfaces: IProvider/IResourceSyncer/IResourceProbe/IMetricsCollector, dataclasses: CheckResult/RequestDetails, ConfigAccessor facade, HttpClientFactory, adaptive batching, retry utilities)
+  Folder src/core/batching/ — AdaptiveBatchController (self-tuning batch size/delay)
+  Folder src/db/ — Data access layer (Repository Pattern: ProviderRepository/KeyRepository/ProxyRepository, DatabaseManager facade, raw asyncpg connection pool)
+  Folder src/metrics/ — Observability (IMetricsCollector with pluggable backends: Prometheus + in-memory, metric registry, endpoint auth)
+  Folder src/providers/ — Strategy Pattern for LLM adapters (AIBaseProvider Template Method, impl/: OpenAILikeProvider/AnthropicProvider/GeminiProvider, factory via _PROVIDER_CLASSES registry)
+  Folder src/services/ — Application orchestration: Keeper (keeper.py, key_probe.py, key_sync.py, key_purger.py, db_maintainer.py, inventory_exporter.py) and Gateway (gateway_service.py FastAPI app, gateway_cache.py in-memory key pools, response_forwarder.py, sanitize_content.py)
+  Folder tests/ — 120 test files mirroring src/: unit/, integration/, e2e/, security/, test_batching/
+  Domain: LLM provider API key management — Keeper (background health monitoring, key sync, purge, vacuum, inventory export) and Conductor (API gateway with key rotation, retry, streaming, debug modes)
+  Key entities: Provider / Provider Instance — API Key — Key-Model Status — Proxy — Health Policy — Retry Policy — ErrorReason
+  Design patterns: Dependency Inversion (interfaces in core/), Facade (ConfigAccessor, DatabaseManager), Template Method (AIBaseProvider, IResourceProbe), Strategy (provider adapters), Repository (db/database.py), Singleton (config, metrics collector), Two-Phase Apply-State Sync
+  Error classification (docs/ERRORS.md): Fatal (INVALID_KEY/NO_ACCESS/NO_QUOTA/NO_MODEL) → immediate ban; Retryable (RATE_LIMITED/SERVER_ERROR/TIMEOUT/NETWORK_ERROR/OVERLOADED/SERVICE_UNAVAILABLE) → verification loop; Client (BAD_REQUEST/UNKNOWN) → soft penalty
+  Health lifecycle: key → failing → quarantine → stop checking → purge (configurable thresholds per provider)
+  Debug mode: DISABLED / NO_CONTENT (metadata only) / FULL_BODY (redact secrets). Enabling debug force-disables streaming and retry.
+  Key files: API keys synced from data/<provider>/ directory (.txt / .ndjson), exported as NDJSON snapshots + status-grouped inventories
+  Config schema root: Config (DatabaseConfig, LoggingConfig, KeeperConfig, MetricsConfig, GatewayConfig, dict of ProviderConfig)
+  Docker: astral/uv:python3.13-trixie-slim base, CMD uvicorn main:app --host 0.0.0.0 --port 55300
+  CI: GitHub Actions quality.yml — pyright strict, ruff check, black --check, pytest --cov=src, codecov push
+  We value backwards compatibility for all public provider interfaces (IProvider, IResourceSyncer, IResourceProbe)
+
+rules:
+  proposal:
+    - Identify affected modules from the src/ structure (config, core, db, metrics, providers, services)
+    - Specify which runtime mode is affected: Keeper, Conductor, or both
+    - Flag any database schema changes (tables: providers, proxies, provider_proxy_status, api_keys, key_model_status)
+    - Mark breaking changes to IProvider/IResourceSyncer/IResourceProbe/IMetricsCollector interfaces with **BREAKING**
+    - If adding a new ProviderType, specify the new enum value and the provider adapter class
+    - List any new dependencies and justify each
+    - Include migration path for config schema changes (Pydantic model evolution)
+    - Mention impact on health policy lifecycle (check → quarantine → stop → purge)
+    - Reference affected docs (ERRORS.md, DEBUG_MODE.md) if behavior changes
+
+  specs:
+    - Use Given/When/Then format for all scenarios
+    - Cover happy path, error cases, and edge cases for every behavior change
+    - Every new ProviderType adapter MUST have scenarios for: parse_request_details, check, inspect, proxy_request
+    - Include error scenarios covering all three tiers: fatal (INVALID_KEY/NO_ACCESS/NO_QUOTA/NO_MODEL), retryable (RATE_LIMITED/SERVER_ERROR/TIMEOUT/NETWORK_ERROR/OVERLOADED/SERVICE_UNAVAILABLE), client (BAD_REQUEST/UNKNOWN)
+    - For Keeper changes: include sync phase scenarios (read + apply), probe batch scenarios, and purge scenarios
+    - For Gateway changes: include routing scenarios (full stream vs buffered retryable), cache behavior, and key rotation scenarios
+    - Every database schema change MUST have scenarios for migration, rollback, and data integrity
+    - Every new metric MUST have scenarios for emission and label correctness
+    - Include concurrency scenarios for shared-state components (gateway cache, connection pool)
+
+  design:
+    - Document database schema changes explicitly (table DDL, column types, constraints, indexes)
+    - Include API contract diff when provider interfaces change (IProvider methods, ConfigAccessor methods)
+    - List new Pydantic config models with their fields and validation rules
+    - Justify every new dependency with version constraint and purpose
+    - Document new ProviderType enum values and their adapter class registration
+    - State whether the change is Keeper-only, Gateway-only, or shared (affects core/)
+    - Include connection pool sizing impact if DB access patterns change
+    - Describe async flow: coroutine chains, lock acquisition order, potential deadlocks
+    - Document metrics additions: metric name, type (gauge/counter/histogram), labels
+    - Include rollout strategy (can old and new code coexist? data migration needed?)
+
+  tasks:
+    - Group database migration tasks under a separate heading
+    - Group tasks by module: core/ → providers/ → db/ → services/ → config/ → metrics/
+    - Every behavior change MUST have a corresponding test task (unit + integration)
+    - Include type-checking task: run pyright and fix all errors
+    - Include linting task: run ruff check src/ tests/ and fix all issues
+    - Include formatting task: run black src/ tests/ (no errors)
+    - Include CI verification task: confirm quality.yml passes (pyright + ruff + black + pytest + coverage)
+    - For provider adapter changes: add test_<provider>.py under tests/unit/providers/impl/
+    - For Keeper changes: add test under tests/unit/services/ or tests/integration/
+    - For Gateway changes: add test under tests/unit/services/gateway/
+    - Keep tasks atomic — each task should be completable in a single focused session
+    - Tasks MUST use absolute imports (src.*), never relative imports
+    - Tasks MUST follow type-strict conventions: all functions annotated, no bare generics
+    - Include docstring task: verify Google-style docstrings on all new public entities

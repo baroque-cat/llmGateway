@@ -55,8 +55,7 @@ def create_mock_anthropic_provider():
         mock_config.worker_health_policy = worker_health_policy
         mock_config.provider_type = "anthropic"
         mock_config.api_base_url = api_base_url
-        mock_config.default_model = "claude-3-opus-20240229"
-        mock_config.models = models
+        mock_config.default_model = models
         mock_config.access_control = MagicMock()
         mock_config.access_control.gateway_access_token = "test_token"
         mock_config.health_policy = MagicMock()

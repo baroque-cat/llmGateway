@@ -37,7 +37,7 @@ def _make_openai_provider_config_with_error_parsing(
     """Create an OpenAI-like ProviderConfig with error_parsing enabled."""
     config = ProviderConfig(provider_type="openai_like")
     config.api_base_url = "https://api.test.com/v1"
-    config.models = {"gpt-4": ModelInfo(endpoint_suffix="/chat/completions")}
+    config.default_model = {"gpt-4": ModelInfo(endpoint_suffix="/chat/completions")}
     config.error_parsing = ErrorParsingConfig(enabled=True, rules=rules)
     return config
 
@@ -48,7 +48,7 @@ def _make_gemini_provider_config_with_error_parsing(
     """Create a Gemini ProviderConfig with error_parsing enabled."""
     config = ProviderConfig(provider_type="gemini")
     config.api_base_url = "https://generativelanguage.googleapis.com/v1beta"
-    config.models = {
+    config.default_model = {
         "gemini-pro": ModelInfo(endpoint_suffix="/models/gemini-pro:generateContent")
     }
     config.error_parsing = ErrorParsingConfig(enabled=True, rules=rules)
@@ -237,7 +237,7 @@ async def test_gateway_error_body_preservation_without_fast_status_mapping() -> 
 
     # Create a provider config WITHOUT error_parsing (disabled by default)
     config = ProviderConfig(provider_type="openai_like")
-    config.models = {"gpt-4": ModelInfo()}
+    config.default_model = {"gpt-4": ModelInfo()}
     # Explicitly verify error_parsing is disabled
     assert config.error_parsing.enabled is False
 
@@ -265,7 +265,7 @@ async def test_gateway_error_body_preservation_without_fast_status_mapping() -> 
     # Mock the cache to return a key
     req.app.state.gateway_cache.get_key_from_pool.return_value = (1, "test-key")
 
-    response = await _handle_full_stream_request(req, provider, provider_name, "gpt-4")
+    response = await _handle_full_stream_request(req, provider, provider_name)
 
     # The response should be a Response (not JSONResponse 503)
     # because BAD_REQUEST is a client_error → stream is read and forwarded

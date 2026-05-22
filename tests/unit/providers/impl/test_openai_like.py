@@ -42,8 +42,7 @@ class TestOpenAILikeErrorParsing:
         # Set up other required config fields
         mock_config.provider_type = "openai"
         mock_config.api_base_url = "https://api.openai.com/v1"
-        mock_config.default_model = "gpt-4"
-        mock_config.models = {}
+        mock_config.default_model = {"gpt-4": ModelInfo()}
         mock_config.access_control = MagicMock()
         mock_config.access_control.gateway_access_token = "test_token"
         mock_config.health_policy = MagicMock()
@@ -196,7 +195,7 @@ class TestOpenAILikeErrorParsing:
         provider_disabled = self.create_mock_provider(
             error_config=ErrorParsingConfig(enabled=False, rules=[])
         )
-        provider_disabled.config.models = {
+        provider_disabled.config.default_model = {
             "gpt-4": ModelInfo(
                 endpoint_suffix="/chat/completions",
                 test_payload={"messages": [{"role": "user", "content": "hi"}]},
@@ -242,7 +241,7 @@ class TestOpenAILikeErrorParsing:
                 ],
             )
         )
-        provider_enabled.config.models = {
+        provider_enabled.config.default_model = {
             "gpt-4": ModelInfo(
                 endpoint_suffix="/chat/completions",
                 test_payload={"messages": [{"role": "user", "content": "hi"}]},
@@ -282,7 +281,7 @@ class TestOpenAILikeErrorParsing:
         provider = self.create_mock_provider(
             error_config=ErrorParsingConfig(enabled=True, rules=[])
         )
-        provider.config.models = {
+        provider.config.default_model = {
             "gpt-4": ModelInfo(
                 endpoint_suffix="/chat/completions",
                 test_payload={"messages": [{"role": "user", "content": "hi"}]},
@@ -344,7 +343,7 @@ class TestOpenAILikeErrorParsing:
                 ],
             )
         )
-        provider.config.models = {
+        provider.config.default_model = {
             "gpt-4": ModelInfo(
                 endpoint_suffix="/chat/completions",
                 test_payload={"messages": [{"role": "user", "content": "hi"}]},
@@ -425,8 +424,7 @@ class TestOpenAILikeProxyRequest:
         mock_config.error_parsing = ErrorParsingConfig(enabled=False, rules=[])
         mock_config.provider_type = "openai"
         mock_config.api_base_url = "https://api.openai.com/v1"
-        mock_config.default_model = "gpt-4"
-        mock_config.models = {}
+        mock_config.default_model = {"gpt-4": ModelInfo()}
         mock_config.access_control = MagicMock()
         mock_config.access_control.gateway_access_token = "test_token"
         mock_config.health_policy = MagicMock()
@@ -620,8 +618,7 @@ class TestOpenAILikeParseRequestDetails:
         mock_config.error_parsing = ErrorParsingConfig(enabled=False, rules=[])
         mock_config.provider_type = "openai"
         mock_config.api_base_url = "https://api.openai.com/v1"
-        mock_config.default_model = "gpt-4"
-        mock_config.models = {}
+        mock_config.default_model = {"gpt-4": ModelInfo()}
         mock_config.access_control = MagicMock()
         mock_config.access_control.gateway_access_token = "test_token"
         mock_config.health_policy = MagicMock()
@@ -670,3 +667,74 @@ class TestOpenAILikeParseRequestDetails:
 
         with pytest.raises(ValueError, match="Failed to parse request body as JSON"):
             await provider.parse_request_details(path, body)
+
+
+class TestOpenAILikeHealthCheck:
+    """Test suite for OpenAILikeProvider health check using default_model."""
+
+    @pytest.mark.asyncio
+    async def test_health_check_url_uses_default_model(self):
+        """
+        Verify that check() uses self.config.default_model.get(model) to
+        retrieve ModelInfo and constructs the health-check URL using the
+        retrieved endpoint_suffix.
+        """
+        from unittest.mock import MagicMock
+
+        mock_config = MagicMock(spec=ProviderConfig)
+        mock_config.error_parsing = ErrorParsingConfig(enabled=False, rules=[])
+        mock_config.provider_type = "openai"
+        mock_config.api_base_url = "https://api.openai.com/v1"
+
+        # Configure default_model with a specific ModelInfo
+        mock_config.default_model = {
+            "gpt-4": ModelInfo(
+                endpoint_suffix="/chat/completions",
+                test_payload={"messages": [{"role": "user", "content": "hi"}]},
+            )
+        }
+
+        mock_config.access_control = MagicMock()
+        mock_config.access_control.gateway_access_token = "test_token"
+        mock_config.health_policy = MagicMock()
+        mock_config.proxy_config = MagicMock()
+        mock_config.proxy_config.mode = "none"
+        mock_config.timeouts = MagicMock()
+        mock_config.timeouts.total = 30.0
+        mock_config.timeouts.connect = 10.0
+        mock_config.timeouts.read = 30.0
+        mock_config.timeouts.write = 30.0
+        mock_config.timeouts.pool = 35.0
+
+        provider = OpenAILikeProvider("test_provider", mock_config)
+
+        # Mock the HTTP client to capture the URL used
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.elapsed = MagicMock()
+        mock_response.elapsed.total_seconds.return_value = 0.123
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.post = AsyncMock(return_value=mock_response)
+
+        result = await provider.check(mock_client, "test_token", model="gpt-4")
+
+        # Verify the URL was constructed using ModelInfo.endpoint_suffix
+        mock_client.post.assert_called_once()
+        # First positional arg is the URL, forwarded from check()'s api_url
+        actual_url = mock_client.post.call_args[0][0]
+        expected_url = "https://api.openai.com/v1/chat/completions"
+        assert actual_url == expected_url, (
+            f"Expected URL '{expected_url}', got '{actual_url}'"
+        )
+
+        # Verify the payload includes the model and the test_payload contents
+        payload = mock_client.post.call_args[1]["json"]
+        assert payload["model"] == "gpt-4"
+        assert payload["messages"] == [{"role": "user", "content": "hi"}]
+
+        # Verify the result is successful
+        assert result.available
+        assert result.response_time == 0.123
+        assert result.status_code == 200

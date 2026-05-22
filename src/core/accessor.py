@@ -189,7 +189,7 @@ class ConfigAccessor:
         """
         provider = self.get_provider(provider_name)
         if provider:
-            return provider.models.get(model_name)
+            return provider.default_model.get(model_name)
         return None
 
     def get_default_model_info(self, provider_name: str) -> ModelInfo | None:
@@ -205,7 +205,7 @@ class ConfigAccessor:
         """
         provider = self.get_provider(provider_name)
         if provider and provider.default_model:
-            return provider.models.get(provider.default_model)
+            return next(iter(provider.default_model.values()), None)
         return None
 
     # --- Step 5: Gateway and Pool Configuration Accessors ---

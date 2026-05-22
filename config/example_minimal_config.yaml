@@ -22,10 +22,6 @@ database:
   user: "${DB_USER}"
   password: "${DB_PASSWORD}"
   dbname: "${DB_NAME}"
-  # Smart vacuum policy — uses defaults (interval_minutes: 60, dead_tuple_ratio_threshold: 0.3)
-  # vacuum_policy:
-  #   interval_minutes: 60
-  #   dead_tuple_ratio_threshold: 0.3
 
 # --- PROVIDER SETTINGS ---
 providers:
@@ -33,11 +29,10 @@ providers:
   gemini-minimal:
     provider_type: "gemini"
     enabled: true
-    
+
     api_base_url: "https://generativelanguage.googleapis.com"
-    default_model: "gemini-2.5-flash"
-    
-    models:
+
+    default_model:
       gemini-2.5-flash:
         endpoint_suffix: ":generateContent"
         test_payload:
@@ -47,21 +42,3 @@ providers:
 
     access_control:
       gateway_access_token: "${GEMINI_MINIMAL_TOKEN}"
-    
-    # You can override specific policies here if needed:
-    # worker_health_policy:
-    #   on_success_hr: 24
-    #   verification_attempts: 3
-    #   verification_delay_sec: 65
-    #   purge:
-    #     after_days: 180          # Purge permanently stopped keys after 180 days
-    #   adaptive_batching:           # Optional: tune adaptive batch behaviour
-    #     start_batch_size: 30       # Initial batch size (default: 30)
-    #     start_batch_delay_sec: 15.0  # Initial batch delay (default: 15.0)
-    #     min_batch_size: 5
-    #     max_batch_size: 200
-    #
-    # gateway_policy:
-    #   retry:
-    #     on_key_error:
-    #       backoff_sec: 0.1 # Protect DB from key storms

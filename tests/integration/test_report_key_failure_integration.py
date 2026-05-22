@@ -64,7 +64,6 @@ async def test_report_key_failure_integration_next_check_from_policy() -> None:
         db_manager=db_manager,
         key_id=42,
         provider_name="test-provider",
-        model_name="gpt-4",
         result=result,
         accessor=accessor,
     )
@@ -101,7 +100,6 @@ async def test_report_key_failure_integration_next_check_from_policy() -> None:
 
     # 6. Verify other kwargs are correct
     assert call_kwargs.get("key_id") == 42
-    assert call_kwargs.get("model_name") == "gpt-4"
     assert call_kwargs.get("provider_name") == "test-provider"
     assert call_kwargs.get("result") == result
 

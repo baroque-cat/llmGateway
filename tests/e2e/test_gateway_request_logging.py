@@ -20,16 +20,16 @@ from src.core.models import CheckResult
 def create_mock_provider_config(
     *,
     provider_type: str = "openai_like",
-    models: dict[str, ModelInfo] | None = None,
+    default_model: dict[str, ModelInfo] | None = None,
     streaming_mode: StreamingMode = StreamingMode.AUTO,
     debug_mode: DebugMode = DebugMode.DISABLED,
 ) -> ProviderConfig:
     """Helper to create a ProviderConfig with specified settings."""
-    if models is None:
-        models = {"gpt-4": ModelInfo()}
+    if default_model is None:
+        default_model = {"gpt-4": ModelInfo()}
     config = ProviderConfig(provider_type=provider_type)
     config.enabled = True
-    config.models = models
+    config.default_model = default_model
     config.gateway_policy = MagicMock()
     config.gateway_policy.streaming_mode = streaming_mode.value
     config.gateway_policy.debug_mode = debug_mode.value
@@ -160,7 +160,7 @@ async def test_gateway_request_logging():
         # Check format components
         assert "GATEWAY_ACCESS |" in log_message
         assert "->" in log_message
-        assert "test_instance:gpt-4" in log_message
+        assert "test_instance:shared" in log_message
         assert "200 OK -> VALID" in log_message
         # Ensure duration is logged (contains 's)')
         assert "s)" in log_message

@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import Request, Response
 
-from src.config.schemas import HealthPolicyConfig
+from src.config.schemas import HealthPolicyConfig, ModelInfo
 from src.core.constants import ErrorReason
 from src.core.models import CheckResult
 from src.services.gateway.gateway_service import _handle_buffered_retryable_request
@@ -72,7 +72,7 @@ def mock_provider():
 def setup_provider_config(mock_app_state):
     """Helper to setup the provider config with retry policies."""
     provider_config = MagicMock()
-    provider_config.models = {"gpt-4": MagicMock()}
+    provider_config.default_model = {"gpt-4": ModelInfo()}
 
     # Enable Retry
     provider_config.gateway_policy.retry.enabled = True

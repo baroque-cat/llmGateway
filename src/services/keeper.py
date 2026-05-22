@@ -152,7 +152,7 @@ async def run_sync_cycle(
             # For KeySyncer (always runs for enabled providers)
             key_path = os.path.join("data", provider_name, "raw")
             keys_from_file, file_map = read_keys_from_directory(key_path)
-            models_from_config = list(provider_config.models.keys())
+            models_from_config = list(provider_config.default_model.keys())
             key_state: ProviderKeyState = {
                 "keys_from_files": keys_from_file,
                 "models_from_config": models_from_config,

@@ -147,7 +147,6 @@ class TestReportKeyFailureNextCheck:
                 db_manager=db_manager,
                 key_id=1,
                 provider_name="test-provider",
-                model_name="gpt-4",
                 result=result,
                 accessor=accessor,
             )
@@ -198,7 +197,6 @@ class TestReportKeyFailureNextCheck:
             db_manager=db_manager,
             key_id=1,
             provider_name="test-provider",
-            model_name="gpt-4",
             result=result,
             accessor=accessor,
         )

@@ -284,3 +284,41 @@ class TestStreamMonitor:
 
         # Verify upstream response was closed
         mock_httpx_response.aclose.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_format_model_name_all_models_marker(self, mock_logger):
+        """Verify ALL_MODELS_MARKER is formatted as 'shared' in log output."""
+        mock_response = AsyncMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.reason_phrase = "OK"
+        mock_response.headers = {"content-type": "application/json"}
+        mock_response.aclose = AsyncMock()
+
+        async def chunk_iterator():
+            yield b"chunk1"
+
+        mock_response.aiter_bytes.return_value = chunk_iterator()
+
+        monitor = StreamMonitor(
+            upstream_response=mock_response,
+            client_ip="10.0.0.5",
+            request_method="POST",
+            request_path="/v1/chat/completions",
+            provider_name="test-provider",
+            model_name=ALL_MODELS_MARKER,
+            check_result=CheckResult.success(),
+        )
+
+        # Verify _format_model_name directly
+        formatted = monitor._format_model_name()
+        assert formatted == "shared"
+
+        # Consume the stream to trigger _finalize_logging
+        async for _ in monitor:
+            pass
+
+        # Verify log output uses "shared" (not the raw marker)
+        mock_logger.info.assert_called_once()
+        log_message = mock_logger.info.call_args[0][0]
+        assert "test-provider:shared" in log_message
+        assert ALL_MODELS_MARKER not in log_message

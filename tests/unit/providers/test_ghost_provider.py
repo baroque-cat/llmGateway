@@ -2,7 +2,7 @@
 Simple tests for ghost provider handling logic without complex DB mocking.
 """
 
-from src.config.schemas import Config, ProviderConfig
+from src.config.schemas import Config, ModelInfo, ProviderConfig
 from src.core.accessor import ConfigAccessor
 
 
@@ -14,19 +14,19 @@ def test_enabled_providers_filtering():
             enabled=True,
             provider_type="openai_like",
             api_base_url="http://test.com",
-            default_model="test-model",
+            default_model={"test-model": ModelInfo()},
         ),
         "disabled_provider": ProviderConfig(
             enabled=False,
             provider_type="openai_like",
             api_base_url="http://test2.com",
-            default_model="test-model2",
+            default_model={"test-model2": ModelInfo()},
         ),
         "another_enabled": ProviderConfig(
             enabled=True,
             provider_type="gemini",
             api_base_url="http://test3.com",
-            default_model="test-model3",
+            default_model={"test-model3": ModelInfo()},
         ),
     }
 

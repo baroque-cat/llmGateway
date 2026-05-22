@@ -298,3 +298,57 @@ async def test_smart_vacuum_interval_job_registered(
     assert smart_vacuum_call is not None, "smart_vacuum job should be registered"
     kwargs = smart_vacuum_call[1]
     assert kwargs["minutes"] == 60
+
+
+# ---------------------------------------------------------------------------
+# Test: models_from_config extracted from default_model.keys()
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_models_extracted_from_default_model_for_sync() -> None:
+    """Test that run_sync_cycle extracts model names from provider_config.default_model.keys().
+
+    Creates a mock provider config with default_model = {"gpt-4": ModelInfo(), "gpt-3.5": ModelInfo()},
+    and verifies models_from_config is ["gpt-4", "gpt-3.5"] by capturing the desired_state
+    passed to a mock syncer.
+    """
+    from src.config.schemas import ModelInfo, ProviderConfig
+    from src.services.keeper import run_sync_cycle
+
+    provider_name = "openai"
+
+    accessor = MagicMock()
+    accessor.get_enabled_providers.return_value = {
+        provider_name: ProviderConfig(
+            provider_type="openai_like",
+            default_model={
+                "gpt-4": ModelInfo(),
+                "gpt-3.5": ModelInfo(),
+            },
+        )
+    }
+
+    db_manager = MagicMock()
+    db_manager.providers.get_id_map = AsyncMock(return_value={})
+
+    # Create a mock syncer to capture the desired_state passed to apply_state
+    mock_syncer = MagicMock()
+    mock_syncer.get_resource_type.return_value = "keys"
+    mock_syncer.apply_state = AsyncMock()
+
+    with patch(
+        "src.services.keeper.read_keys_from_directory", return_value=([], {})
+    ):
+        await run_sync_cycle(accessor, db_manager, [mock_syncer])
+
+    # Verify apply_state was called
+    mock_syncer.apply_state.assert_called_once()
+    _, desired_state = mock_syncer.apply_state.call_args[0]
+
+    # Check that models_from_config was extracted from default_model.keys()
+    assert provider_name in desired_state
+    assert desired_state[provider_name]["models_from_config"] == [
+        "gpt-4",
+        "gpt-3.5",
+    ]

@@ -64,7 +64,7 @@ def create_provider_config_with_catch_all_rule() -> ProviderConfig:
         on_server_error=RetryOnErrorConfig(attempts=2, backoff_sec=0.1),
     )
     config = ProviderConfig(provider_type="openai_like")
-    config.models = {"gpt-4": ModelInfo()}
+    config.default_model = {"gpt-4": ModelInfo()}
     config.gateway_policy = GatewayPolicyConfig(retry=retry_policy)
 
     # Error parsing configuration with specific rule and catch-all rule
