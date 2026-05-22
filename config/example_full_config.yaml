@@ -304,3 +304,222 @@ providers:
 
     proxy_config:
       mode: "none"
+
+  # Example 4: Alibaba Qwen via DashScope (Dual-Protocol Provider)
+  # DashScope offers TWO API protocols from the same api_base_url:
+  #   1. OpenAI-compatible:    https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
+  #   2. DashScope native SDK: https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation
+  #
+  # Because the transparent proxy passes the client's original path through
+  # unchanged (it never validates or transforms the body), BOTH protocols can
+  # flow through the SAME provider instance simultaneously:
+  #   - OpenAI-compatible clients send: POST /compatible-mode/v1/chat/completions
+  #     → upstream URL: https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
+  #   - DashScope native clients send: POST /api/v1/services/aigc/text-generation/generation
+  #     → upstream URL: https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation
+  #
+  # HOWEVER, there is one critical difference: ERROR BODY FORMATS.
+  #
+  # OpenAI-compatible errors are nested under an "error" key:
+  #   {"error": {"code": "Arrearage", "message": "Access denied...", "type": "..."}}
+  #
+  # DashScope native errors place fields at the JSON root level (NO "error" wrapper):
+  #   {"code": "Arrearage", "message": "Access denied...", "request_id": "..."}
+  #
+  # If you use only error_path: "error.code" rules, DashScope native errors
+  # will silently degrade to BAD_REQUEST because _extract_json_value() cannot
+  # find the "error" key in the root JSON object (it returns None → rule skipped).
+  #
+  # SOLUTION: Define DUAL-FORMAT rules — one set for the OpenAI-compatible
+  # nested format ("error.code" / "error.message"), and a second set for the
+  # DashScope-native flat format ("code" / "message"). These two sets are
+  # naturally mutually exclusive: a given error body either HAS an "error" key
+  # (OpenAI-compatible) or does NOT (DashScope native), so exactly one set matches.
+  #
+  # IMPORTANT FOR THE KEEPER:
+  # The keeper performs health checks against the URL defined by endpoint_suffix
+  # (below). It does NOT see mixed traffic — it only hits one endpoint. Here,
+  # endpoint_suffix points to the OpenAI-compatible endpoint, so the keeper
+  # only receives OpenAI-formatted errors. The keeper has a special 400→INVALID_KEY
+  # override (because a pre-determined test payload means 400 = bad key).
+  # However, _refine_error_reason() runs AFTER that override and can reclassify
+  # the error — for example, "Arrearage" (billing) → NO_QUOTA instead of INVALID_KEY.
+  #
+  # If you later switch endpoint_suffix to the DashScope native path, the dual-format
+  # rules will handle the native error format correctly in the keeper as well.
+  qwen-home:
+    # provider_type is the Keeper's protocol for health checks.
+    # The gateway uses it to instantiate the correct provider class
+    # (OpenAILikeProvider → Authorization: Bearer, Content-Type: application/json).
+    provider_type: "openai_like"
+    enabled: true
+
+    # Base URL for ALL DashScope API calls (both compatible-mode and native SDK).
+    # The client's original request path is appended directly to this URL.
+    api_base_url: "https://dashscope.aliyuncs.com"
+    dedicated_http_client: false
+
+    # Models used by the Keeper for health checks.
+    # endpoint_suffix is the URL path appended to api_base_url for the test request.
+    # Here we use the OpenAI-compatible endpoint for health checks.
+    # To check the native endpoint instead, change to:
+    #   endpoint_suffix: "/api/v1/services/aigc/text-generation/generation"
+    default_model:
+      qwen3-max-2026-01-23:
+        endpoint_suffix: "/compatible-mode/v1/chat/completions"
+        test_payload:
+          messages:
+            - role: "user"
+              content: "Hi"
+          max_tokens: 1
+
+    access_control:
+      gateway_access_token: "${QWEN_HOME_TOKEN}"
+
+    proxy_config:
+      mode: "none"
+
+    timeouts:
+      connect: 15.0
+      read: 300.0
+      write: 35.0
+      pool: 35.0
+
+    worker_health_policy:
+      on_server_error_min: 30
+      on_overload_min: 30
+      on_other_error_hr: 1
+      on_success_hr: 24
+      on_rate_limit_hr: 1
+      on_no_quota_hr: 6
+      on_invalid_key_days: 10
+      on_no_access_days: 10
+      quarantine_after_days: 30
+      quarantine_recheck_interval_days: 10
+      stop_checking_after_days: 90
+      amnesty_threshold_days: 2.0
+      adaptive_batching:
+        start_batch_size: 10
+        start_batch_delay_sec: 30.0
+      task_timeout_sec: 900
+      verification_attempts: 3
+      verification_delay_sec: 65
+
+    # --- Dual-Format Error Parsing for Mixed OpenAI-Compatible + DashScope Native Traffic ---
+    #
+    # This configuration distinguishes error types WITHIN HTTP 400 responses.
+    # DashScope uses HTTP 400 for billing errors ("Arrearage"), auth failures,
+    # content safety ("DataInspectionFailed"), and invalid parameters —
+    # unlike OpenAI which uses distinct status codes (401, 402, etc.).
+    #
+    # Two matching modes are supported:
+    #   DOT-PATH MODE: error_path like "error.code" extracts a JSON field from
+    #     the parsed body via _extract_json_value(). The extracted string value
+    #     is matched against match_pattern (case-insensitive regex).
+    #     Missing intermediate keys return None → rule is silently skipped.
+    #
+    #   FULLTEXT MODE: error_path "$" applies match_pattern against the entire
+    #     raw response body (UTF-8 decoded). Useful for catch-all rules or when
+    #     the JSON structure is unpredictable.
+    #
+    # Priority determines which rule "wins" when multiple rules match the same
+    # error response. Higher = higher priority. Rules within the same status_code
+    # MUST have unique priorities (enforced by Pydantic validator).
+    #
+    # The dual-format pattern below uses slightly LOWER priorities for DashScope
+    # native rules than their OpenAI counterparts (95 vs 100, 85 vs 90, etc.).
+    # Since the two formats are mutually exclusive (a response either HAS an
+    # "error" key or does NOT), the priority offset is a safety measure — not
+    # strictly required, but ensures predictable behavior if both formats
+    # somehow coexist in a single response.
+    error_parsing:
+      enabled: true
+      rules:
+        # === OpenAI-compatible format: {"error": {"code": "...", "message": "..."}} ===
+
+        - status_code: 400
+          error_path: "error.code"
+          match_pattern: "Arrearage"
+          map_to: "no_quota"
+          priority: 100
+          description: "OpenAI-compatible: billing/account arrears → treat as NO_QUOTA (fatal, key banned)"
+
+        - status_code: 400
+          error_path: "error.code"
+          match_pattern: "InvalidApiKey"
+          map_to: "invalid_key"
+          priority: 90
+          description: "OpenAI-compatible: invalid API key → treat as INVALID_KEY (fatal, key banned)"
+
+        - status_code: 400
+          error_path: "error.message"
+          match_pattern: "Access denied"
+          map_to: "no_access"
+          priority: 80
+          description: "OpenAI-compatible: region/permission denied → treat as NO_ACCESS (fatal, key banned)"
+
+        # === DashScope native format: {"code": "...", "message": "..."} (flat, no "error" wrapper) ===
+
+        - status_code: 400
+          error_path: "code"
+          match_pattern: "Arrearage"
+          map_to: "no_quota"
+          priority: 95
+          description: "DashScope native: billing/account arrears → treat as NO_QUOTA (fatal, key banned)"
+
+        - status_code: 400
+          error_path: "code"
+          match_pattern: "InvalidApiKey"
+          map_to: "invalid_key"
+          priority: 85
+          description: "DashScope native: invalid API key → treat as INVALID_KEY (fatal, key banned)"
+
+        - status_code: 400
+          error_path: "code"
+          match_pattern: "APIConnectionError"
+          map_to: "network_error"
+          priority: 78
+          description: "DashScope native: upstream connection error → treat as NETWORK_ERROR"
+
+        - status_code: 400
+          error_path: "message"
+          match_pattern: "Access denied"
+          map_to: "no_access"
+          priority: 75
+          description: "DashScope native: region/permission denied → treat as NO_ACCESS (fatal, key banned)"
+
+        # === Catch-all rule — triggers when no specific rule matches ===
+        # Without this, unmatched 400 errors would fall through to the provider's
+        # _map_status_code_to_reason(400) → BAD_REQUEST (client error, no key penalty).
+        # This catch-all preserves that behavior explicitly.
+
+        - status_code: 400
+          error_path: "$"
+          match_pattern: ".*"
+          map_to: "bad_request"
+          priority: 0
+          description: "Catch-all: any unrecognized 400 → BAD_REQUEST (no key penalty for unknown error types)"
+
+        # === Rate limiting (both protocols use the same HTTP 429) ===
+
+        - status_code: 429
+          error_path: "$"
+          match_pattern: ".*"
+          map_to: "rate_limited"
+          priority: 0
+          description: "Any 429 → RATE_LIMITED (key penalized, retry after cooldown)"
+
+    gateway_policy:
+      streaming_mode: "auto"
+      debug_mode: "disabled"
+
+      retry:
+        enabled: true
+        on_key_error:
+          attempts: 3
+          backoff_sec: 0.1
+          backoff_factor: 1.5
+        on_server_error:
+          attempts: 5
+          backoff_sec: 0.5
+          backoff_factor: 2.0
