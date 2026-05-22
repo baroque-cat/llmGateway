@@ -33,7 +33,6 @@ class ProviderKeyState(TypedDict):
     """Represents the desired state for keys of a single provider."""
 
     keys_from_files: set[str]
-    models_from_config: list[str]
     file_map: dict[str, float]
 
 

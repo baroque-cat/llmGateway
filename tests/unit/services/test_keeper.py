@@ -301,17 +301,16 @@ async def test_smart_vacuum_interval_job_registered(
 
 
 # ---------------------------------------------------------------------------
-# Test: models_from_config extracted from default_model.keys()
+# Test: models_from_config is not part of the desired state
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_models_extracted_from_default_model_for_sync() -> None:
-    """Test that run_sync_cycle extracts model names from provider_config.default_model.keys().
+async def test_models_from_config_not_in_desired_state() -> None:
+    """Test that run_sync_cycle does NOT include models_from_config in desired state.
 
-    Creates a mock provider config with default_model = {"gpt-4": ModelInfo(), "gpt-3.5": ModelInfo()},
-    and verifies models_from_config is ["gpt-4", "gpt-3.5"] by capturing the desired_state
-    passed to a mock syncer.
+    After removing shared_key_status, models_from_config is no longer computed
+    or passed — only keys_from_files and file_map are in the ProviderKeyState.
     """
     from src.config.schemas import ModelInfo, ProviderConfig
     from src.services.keeper import run_sync_cycle
@@ -346,9 +345,8 @@ async def test_models_extracted_from_default_model_for_sync() -> None:
     mock_syncer.apply_state.assert_called_once()
     _, desired_state = mock_syncer.apply_state.call_args[0]
 
-    # Check that models_from_config was extracted from default_model.keys()
+    # Check that only keys_from_files and file_map are present (no models_from_config)
     assert provider_name in desired_state
-    assert desired_state[provider_name]["models_from_config"] == [
-        "gpt-4",
-        "gpt-3.5",
-    ]
+    assert "keys_from_files" in desired_state[provider_name]
+    assert "file_map" in desired_state[provider_name]
+    assert "models_from_config" not in desired_state[provider_name]

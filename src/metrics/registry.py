@@ -47,7 +47,7 @@ ALL_METRIC_NAMES: frozenset[str] = frozenset(
 
 # ---- Human-readable descriptions ----
 METRIC_DESCRIPTIONS: dict[str, str] = {
-    KEY_STATUS_TOTAL: "Total number of API keys by provider, model, and status",
+    KEY_STATUS_TOTAL: "Total number of API keys by provider and status",
     ADAPTIVE_BATCH_SIZE: "Current adaptive batch size per provider",
     ADAPTIVE_BATCH_DELAY: "Current adaptive batch delay in seconds per provider",
     ADAPTIVE_RATE_LIMIT_EVENTS: (

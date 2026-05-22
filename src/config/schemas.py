@@ -530,8 +530,6 @@ class ProviderConfig(BaseModel):
     # Used exclusively by the Keeper for health-check model resolution.
     # The gateway ignores this field entirely in transparent proxy mode.
     default_model: dict[str, ModelInfo] = Field(default_factory=dict)
-    # If true, all keys for this provider share the same status (e.g., for APIs with account-level rate limits).
-    shared_key_status: bool = False
 
     # If True, the instance gets a dedicated httpx.AsyncClient (separate connection pool).
     # Useful for high-load instances (e.g., litellm with agents) so their

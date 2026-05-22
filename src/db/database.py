@@ -11,7 +11,6 @@ from typing import Any, TypedDict
 import asyncpg
 from asyncpg import Pool
 
-from src.core.accessor import ConfigAccessor
 from src.core.constants import ALL_MODELS_MARKER, Status
 from src.core.interfaces import IKeyPurger
 from src.core.models import CheckResult, DatabaseTableHealth
@@ -33,7 +32,6 @@ class AvailableKey(TypedDict):
 
 class StatusSummaryItem(TypedDict):
     provider: str
-    model: str
     status: str
     count: int
 
@@ -239,25 +237,20 @@ class KeyRepository:
     Contains the core logic for syncing, checking, and updating keys.
     """
 
-    def __init__(self, pool: Pool, accessor: ConfigAccessor):
+    def __init__(self, pool: Pool):
         self._pool = pool
-        self.accessor = accessor
 
     async def sync(
         self,
         provider_name: str,
         provider_id: int,
         keys_from_file: set[str],
-        provider_models: list[str],
     ) -> None:
         """
         Synchronizes keys and their model associations for a single provider.
         This method is a core part of the two-phase synchronization cycle.
         It adds/removes keys and adds/removes key-model status records to match the desired state.
         """
-        # Get provider config to check shared_key_status
-        provider_config = self.accessor.get_provider(provider_name)
-        is_shared_key = provider_config and provider_config.shared_key_status
 
         async with self._pool.acquire() as conn, conn.transaction():
             # Step 1: Sync the `api_keys` table.
@@ -296,27 +289,10 @@ class KeyRepository:
                 return
 
             # Calculate the desired state of (key_id, model_name) pairs.
-            if is_shared_key:
-                # For shared keys, use ALL_MODELS_MARKER instead of individual models
-                desired_model_state = {
-                    (key_id, ALL_MODELS_MARKER) for key_id in current_key_ids_in_db
-                }
-            else:
-                # If provider_models is empty but default_model has entries,
-                # use default_model keys as fallback to ensure key_model_status rows
-                # are created for transparent proxy operation.
-                effective_models = provider_models
-                if (
-                    not effective_models
-                    and provider_config
-                    and provider_config.default_model
-                ):
-                    effective_models = list(provider_config.default_model.keys())
-                desired_model_state = {
-                    (key_id, model)
-                    for key_id in current_key_ids_in_db
-                    for model in effective_models
-                }
+            # All providers use ALL_MODELS_MARKER for key-model associations.
+            desired_model_state = {
+                (key_id, ALL_MODELS_MARKER) for key_id in current_key_ids_in_db
+            }
 
             # Get the current state from the DB.
             rows = await conn.fetch(
@@ -407,47 +383,29 @@ class KeyRepository:
         JOIN providers AS p ON k.provider_id = p.id
         WHERE s.next_check_time <= NOW() AT TIME ZONE 'utc'
         AND p.name = ANY($1)
+        ORDER BY s.model_name = '__ALL_MODELS__' DESC
         """
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(query, enabled_provider_names)
 
         results: list[KeyToCheck] = []
-        checked_keys_for_shared_providers: set[int] = set()
+        seen_key_ids: set[int] = set()
 
-        # This logic handles providers where all keys share a single status (e.g., account-level rate limit).
-        # It ensures we only check one model per key for these providers to save resources.
         for row in rows:
-            provider_name = row["provider_name"]
-            provider_conf = self.accessor.get_provider(provider_name)
+            key_id = row["key_id"]
+            if key_id in seen_key_ids:
+                continue
+            seen_key_ids.add(key_id)
 
-            if provider_conf and provider_conf.shared_key_status:
-                key_id = row["key_id"]
-                if key_id in checked_keys_for_shared_providers:
-                    continue
-
-                # For shared keys, we should only have entries with ALL_MODELS_MARKER
-                # But we need to resolve to a real model for the actual API call
-                if row["model_name"] == ALL_MODELS_MARKER:
-                    key_to_check: KeyToCheck = {
-                        "key_id": row["key_id"],
-                        "key_value": row["key_value"],
-                        "provider_name": row["provider_name"],
-                        "model_name": row["model_name"],
-                        "failing_since": row["failing_since"],
-                        "next_check_time": row["next_check_time"],
-                    }
-                    results.append(key_to_check)
-                    checked_keys_for_shared_providers.add(key_id)
-            else:
-                key_to_check: KeyToCheck = {
-                    "key_id": row["key_id"],
-                    "key_value": row["key_value"],
-                    "provider_name": row["provider_name"],
-                    "model_name": row["model_name"],
-                    "failing_since": row["failing_since"],
-                    "next_check_time": row["next_check_time"],
-                }
-                results.append(key_to_check)
+            key_to_check: KeyToCheck = {
+                "key_id": row["key_id"],
+                "key_value": row["key_value"],
+                "provider_name": row["provider_name"],
+                "model_name": row["model_name"],
+                "failing_since": row["failing_since"],
+                "next_check_time": row["next_check_time"],
+            }
+            results.append(key_to_check)
         return results
 
     async def update_status(
@@ -467,9 +425,6 @@ class KeyRepository:
         assert (
             status_str in Status
         ), f"Attempted to write invalid status '{status_str}' to the database!"
-
-        provider_config = self.accessor.get_provider(provider_name)
-        actual_model_name = model_name
 
         async with self._pool.acquire() as conn, conn.transaction():
             base_query = """
@@ -497,18 +452,9 @@ class KeyRepository:
                 result.ok,
             ]
 
-            if provider_config and provider_config.shared_key_status:
-                where_clause = "key_id = $7 AND model_name = $8"
-                params.extend([key_id, ALL_MODELS_MARKER])
-                await conn.execute(
-                    base_query.format(where_clause=where_clause), *params
-                )
-            else:
-                where_clause = "key_id = $7 AND model_name = $8"
-                params.extend([key_id, actual_model_name])
-                await conn.execute(
-                    base_query.format(where_clause=where_clause), *params
-                )
+            where_clause = "key_id = $7 AND model_name = $8"
+            params.extend([key_id, ALL_MODELS_MARKER])
+            await conn.execute(base_query.format(where_clause=where_clause), *params)
 
     async def get_available_key(
         self, provider_name: str, model_name: str
@@ -517,11 +463,7 @@ class KeyRepository:
         Retrieves a random available key for a given provider and model using
         the efficient COUNT + OFFSET method.
         """
-        # Check if provider has shared_key_status enabled
-        provider_config = self.accessor.get_provider(provider_name)
-        actual_model_name = model_name
-        if provider_config and provider_config.shared_key_status:
-            actual_model_name = ALL_MODELS_MARKER
+        actual_model_name = ALL_MODELS_MARKER
 
         async with self._pool.acquire() as conn:
             # Step 1: Get the total count of valid keys.
@@ -568,21 +510,19 @@ class KeyRepository:
         query = """
             SELECT
                 p.name AS provider,
-                s.model_name AS model,
                 s.status,
                 COUNT(s.key_id) AS count
             FROM key_model_status AS s
             JOIN api_keys AS k ON s.key_id = k.id
             JOIN providers AS p ON k.provider_id = p.id
-            GROUP BY p.name, s.model_name, s.status
-            ORDER BY p.name, s.model_name, s.status
+            GROUP BY p.name, s.status
+            ORDER BY p.name, s.status
             """
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(query)
         return [
             {
                 "provider": row["provider"],
-                "model": row["model"],
                 "status": row["status"],
                 "count": row["count"],
             }
@@ -612,8 +552,6 @@ class KeyRepository:
             rows = await conn.fetch(query)
 
         # Return the raw rows from the database.
-        # The GatewayCache is now smart enough to handle the __ALL_MODELS__ marker
-        # for providers with shared_key_status=True.
         return [
             {
                 "key_id": row["key_id"],
@@ -647,13 +585,13 @@ class DatabaseManager:
     This simplifies dependency injection in the service layer.
     """
 
-    def __init__(self, accessor: ConfigAccessor):
+    def __init__(self) -> None:
         from src.services.key_purger import KeyPurger
 
         pool = get_pool()
         self._key_purger = KeyPurger()
         self.providers = ProviderRepository(pool, self._key_purger)
-        self.keys = KeyRepository(pool, accessor)
+        self.keys = KeyRepository(pool)
         self.proxies = ProxyRepository(pool)
 
     async def initialize_schema(self) -> None:

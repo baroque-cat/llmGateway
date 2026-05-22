@@ -4,21 +4,21 @@
 Unit tests for KeyRepository.get_status_summary() method.
 
 Tests the aggregation query that provides data for Prometheus metrics.
+The query no longer includes model_name in SELECT or GROUP BY.
 """
 
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.db.database import KeyRepository
+from src.db.database import KeyRepository, StatusSummaryItem
 
 
 @pytest.mark.asyncio
 async def test_get_status_summary_empty_database():
     """Test get_status_summary returns empty list when database has no key statuses."""
     mock_pool = MagicMock()
-    mock_accessor = MagicMock()
-    repo = KeyRepository(mock_pool, mock_accessor)
+    repo = KeyRepository(mock_pool)
 
     # Mock empty result
     mock_conn = MagicMock()
@@ -28,48 +28,29 @@ async def test_get_status_summary_empty_database():
     result = await repo.get_status_summary()
 
     assert result == []
-    # Verify key fragments of the SQL query (not exact string — avoids brittle tests)
+    # Verify key fragments of the SQL query
     query = mock_conn.fetch.call_args[0][0]
     assert "key_model_status" in query
     assert "GROUP BY" in query
     assert "p.name" in query
-    assert "s.model_name" in query
+    # s.model_name should NOT appear (removed from query)
+    assert "s.model_name" not in query
     assert "s.status" in query
 
 
 @pytest.mark.asyncio
 async def test_get_status_summary_with_data():
-    """Test get_status_summary returns correctly formatted StatusSummaryItems."""
+    """Test get_status_summary returns correctly formatted StatusSummaryItems
+    without the model field."""
     mock_pool = MagicMock()
-    mock_accessor = MagicMock()
-    repo = KeyRepository(mock_pool, mock_accessor)
+    repo = KeyRepository(mock_pool)
 
-    # Mock database rows
+    # Mock database rows — no model column
     mock_rows = [
-        {
-            "provider": "openai",
-            "model": "gpt-4",
-            "status": "valid",
-            "count": 5,
-        },
-        {
-            "provider": "openai",
-            "model": "gpt-3.5-turbo",
-            "status": "invalid",
-            "count": 2,
-        },
-        {
-            "provider": "anthropic",
-            "model": "claude-3",
-            "status": "valid",
-            "count": 3,
-        },
-        {
-            "provider": "anthropic",
-            "model": "claude-2",
-            "status": "untested",
-            "count": 1,
-        },
+        {"provider": "openai", "status": "valid", "count": 5},
+        {"provider": "openai", "status": "invalid", "count": 2},
+        {"provider": "anthropic", "status": "valid", "count": 3},
+        {"provider": "anthropic", "status": "untested", "count": 1},
     ]
     mock_conn = MagicMock()
     mock_conn.fetch = AsyncMock(return_value=mock_rows)
@@ -78,65 +59,30 @@ async def test_get_status_summary_with_data():
     result = await repo.get_status_summary()
 
     assert len(result) == 4
-    # Verify structure matches StatusSummaryItem TypedDict
+    # Verify structure matches StatusSummaryItem TypedDict (provider, status, count only)
     for i, item in enumerate(result):
         assert "provider" in item
-        assert "model" in item
         assert "status" in item
         assert "count" in item
+        assert "model" not in item
         assert item["provider"] == mock_rows[i]["provider"]
-        assert item["model"] == mock_rows[i]["model"]
         assert item["status"] == mock_rows[i]["status"]
         assert item["count"] == mock_rows[i]["count"]
-
-
-@pytest.mark.asyncio
-async def test_get_status_summary_with_shared_key_status_marker():
-    """Test get_status_summary includes __ALL_MODELS__ marker for shared key providers."""
-    mock_pool = MagicMock()
-    mock_accessor = MagicMock()
-    repo = KeyRepository(mock_pool, mock_accessor)
-
-    # Mock database rows including ALL_MODELS_MARKER
-    mock_rows = [
-        {
-            "provider": "shared_provider",
-            "model": "__ALL_MODELS__",
-            "status": "valid",
-            "count": 10,
-        },
-        {
-            "provider": "shared_provider",
-            "model": "__ALL_MODELS__",
-            "status": "invalid",
-            "count": 1,
-        },
-    ]
-    mock_conn = MagicMock()
-    mock_conn.fetch = AsyncMock(return_value=mock_rows)
-    mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
-
-    result = await repo.get_status_summary()
-
-    assert len(result) == 2
-    # Verify ALL_MODELS_MARKER is preserved
-    assert any(item["model"] == "__ALL_MODELS__" for item in result)
 
 
 @pytest.mark.asyncio
 async def test_get_status_summary_query_includes_all_statuses():
     """Test get_status_summary includes all status values (valid, invalid, untested, etc.)."""
     mock_pool = MagicMock()
-    mock_accessor = MagicMock()
-    repo = KeyRepository(mock_pool, mock_accessor)
+    repo = KeyRepository(mock_pool)
 
-    # Mock database rows with various statuses
+    # Mock database rows with various statuses (no model field)
     mock_rows = [
-        {"provider": "test", "model": "model1", "status": "valid", "count": 5},
-        {"provider": "test", "model": "model1", "status": "invalid", "count": 2},
-        {"provider": "test", "model": "model1", "status": "untested", "count": 3},
-        {"provider": "test", "model": "model1", "status": "rate_limited", "count": 1},
-        {"provider": "test", "model": "model1", "status": "quota_exceeded", "count": 1},
+        {"provider": "test", "status": "valid", "count": 5},
+        {"provider": "test", "status": "invalid", "count": 2},
+        {"provider": "test", "status": "untested", "count": 3},
+        {"provider": "test", "status": "rate_limited", "count": 1},
+        {"provider": "test", "status": "quota_exceeded", "count": 1},
     ]
     mock_conn = MagicMock()
     mock_conn.fetch = AsyncMock(return_value=mock_rows)
@@ -154,61 +100,10 @@ async def test_get_status_summary_query_includes_all_statuses():
 
 
 @pytest.mark.asyncio
-async def test_get_status_summary_grouping_correctness():
-    """Test get_status_summary correctly groups by provider, model, and status."""
-    mock_pool = MagicMock()
-    mock_accessor = MagicMock()
-    repo = KeyRepository(mock_pool, mock_accessor)
-
-    # Mock database rows that would come from GROUP BY
-    mock_rows = [
-        {"provider": "p1", "model": "m1", "status": "valid", "count": 2},
-        {"provider": "p1", "model": "m1", "status": "invalid", "count": 1},
-        {"provider": "p1", "model": "m2", "status": "valid", "count": 3},
-        {"provider": "p2", "model": "m1", "status": "valid", "count": 4},
-    ]
-    mock_conn = MagicMock()
-    mock_conn.fetch = AsyncMock(return_value=mock_rows)
-    mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
-
-    result = await repo.get_status_summary()
-
-    # Should have exactly 4 groups
-    assert len(result) == 4
-    # Verify counts are correct
-    for item in result:
-        if (
-            item["provider"] == "p1"
-            and item["model"] == "m1"
-            and item["status"] == "valid"
-        ):
-            assert item["count"] == 2
-        elif (
-            item["provider"] == "p1"
-            and item["model"] == "m1"
-            and item["status"] == "invalid"
-        ):
-            assert item["count"] == 1
-        elif (
-            item["provider"] == "p1"
-            and item["model"] == "m2"
-            and item["status"] == "valid"
-        ):
-            assert item["count"] == 3
-        elif (
-            item["provider"] == "p2"
-            and item["model"] == "m1"
-            and item["status"] == "valid"
-        ):
-            assert item["count"] == 4
-
-
-@pytest.mark.asyncio
 async def test_get_status_summary_database_error():
     """Test get_status_summary propagates database errors."""
     mock_pool = MagicMock()
-    mock_accessor = MagicMock()
-    repo = KeyRepository(mock_pool, mock_accessor)
+    repo = KeyRepository(mock_pool)
 
     # Mock database error
     mock_conn = MagicMock()
@@ -217,3 +112,35 @@ async def test_get_status_summary_database_error():
 
     with pytest.raises(Exception, match="Database connection failed"):
         await repo.get_status_summary()
+
+
+def test_status_summary_item_no_model_field():
+    """StatusSummaryItem TypedDict definition excludes model."""
+    # The TypedDict's required keys and optional keys together define all valid keys
+    all_keys = set(StatusSummaryItem.__required_keys__) | set(
+        StatusSummaryItem.__optional_keys__
+    )
+
+    assert "provider" in all_keys
+    assert "status" in all_keys
+    assert "count" in all_keys
+    assert "model" not in all_keys
+
+
+@pytest.mark.asyncio
+async def test_get_status_summary_no_model_group_by():
+    """SQL query excludes model dimension from GROUP BY."""
+    mock_pool = MagicMock()
+    repo = KeyRepository(mock_pool)
+
+    mock_conn = MagicMock()
+    mock_conn.fetch = AsyncMock(return_value=[])
+    mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
+
+    await repo.get_status_summary()
+
+    query = mock_conn.fetch.call_args[0][0]
+    assert "key_model_status" in query
+    assert "GROUP BY p.name, s.status" in query
+    # model should NOT appear in GROUP BY
+    assert "model_name" not in query

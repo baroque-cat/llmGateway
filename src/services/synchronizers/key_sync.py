@@ -202,21 +202,16 @@ class KeySyncer(IResourceSyncer):
                     continue
 
                 keys_from_file = state["keys_from_files"]
-                models_from_config = state["models_from_config"]
 
                 logger.info(
                     f"Applying state for provider '{provider_name}' (ID: {provider_id}): "
-                    f"{len(keys_from_file)} keys and {len(models_from_config)} models."
+                    f"{len(keys_from_file)} keys."
                 )
 
-                # IMPORTANT: This call assumes that `db_manager.keys.sync` has been updated
-                # to accept the 'models_from_config' argument and to handle the logic
-                # for removing obsolete key-model relationships.
                 await self.db_manager.keys.sync(
                     provider_name=provider_name,
                     provider_id=provider_id,
                     keys_from_file=keys_from_file,
-                    provider_models=models_from_config,
                 )
 
                 # --- Raw file cleanup after successful sync ---

@@ -3,8 +3,8 @@
 """
 Unit tests for KeyRepository.get_available_key() method.
 
-Tests the retrieval of available VALID keys for a given provider and model,
-including shared_key_status handling and the no-keys-available edge case.
+Tests the retrieval of available VALID keys for a given provider and model.
+All providers now uniformly substitute ALL_MODELS_MARKER.
 """
 
 from unittest.mock import AsyncMock, MagicMock
@@ -15,15 +15,12 @@ from src.core.constants import ALL_MODELS_MARKER
 from src.db.database import KeyRepository
 
 
-def _make_repo_and_conn(
-    provider_config_shared: bool = False,
-) -> tuple[KeyRepository, MagicMock, MagicMock]:
-    """Build a KeyRepository with mocked pool, accessor, and connection.
+def _make_repo_and_conn() -> tuple[KeyRepository, MagicMock]:
+    """Build a KeyRepository with mocked pool and connection.
 
-    Returns (repo, mock_conn, mock_accessor).
+    Returns (repo, mock_conn).
     """
     mock_pool = MagicMock()
-    mock_accessor = MagicMock()
     mock_conn = MagicMock()
 
     # pool.acquire() returns async context manager → conn
@@ -33,19 +30,14 @@ def _make_repo_and_conn(
     mock_conn.fetchval = AsyncMock(return_value=None)
     mock_conn.fetchrow = AsyncMock(return_value=None)
 
-    # Provider config
-    mock_provider_config = MagicMock()
-    mock_provider_config.shared_key_status = provider_config_shared
-    mock_accessor.get_provider.return_value = mock_provider_config
-
-    repo = KeyRepository(mock_pool, mock_accessor)
-    return repo, mock_conn, mock_accessor
+    repo = KeyRepository(mock_pool)
+    return repo, mock_conn
 
 
 @pytest.mark.asyncio
 async def test_get_available_key_returns_key():
     """When VALID keys exist in DB, a key dict is returned."""
-    repo, mock_conn, _ = _make_repo_and_conn()
+    repo, mock_conn = _make_repo_and_conn()
 
     # Mock: count query returns 1 valid key
     mock_conn.fetchval = AsyncMock(return_value=1)
@@ -64,7 +56,7 @@ async def test_get_available_key_returns_key():
 @pytest.mark.asyncio
 async def test_get_available_key_no_valid_keys():
     """When no VALID keys exist (count=0), returns None."""
-    repo, mock_conn, _ = _make_repo_and_conn()
+    repo, mock_conn = _make_repo_and_conn()
 
     # Mock: count query returns 0
     mock_conn.fetchval = AsyncMock(return_value=0)
@@ -79,7 +71,7 @@ async def test_get_available_key_no_valid_keys():
 @pytest.mark.asyncio
 async def test_get_available_key_returns_none_when_count_is_none():
     """When fetchval returns None (no matching rows), returns None."""
-    repo, mock_conn, _ = _make_repo_and_conn()
+    repo, mock_conn = _make_repo_and_conn()
 
     # Mock: count query returns None
     mock_conn.fetchval = AsyncMock(return_value=None)
@@ -91,18 +83,18 @@ async def test_get_available_key_returns_none_when_count_is_none():
 
 
 @pytest.mark.asyncio
-async def test_get_available_key_with_shared_key_status():
-    """When shared_key_status=True, queries use ALL_MODELS_MARKER
-    as the model_name parameter."""
-    repo, mock_conn, _ = _make_repo_and_conn(provider_config_shared=True)
+async def test_get_available_key_always_substitutes_all_models():
+    """get_available_key always substitutes ALL_MODELS_MARKER for the model_name,
+    regardless of what model name is passed in."""
+    repo, mock_conn = _make_repo_and_conn()
 
     # Mock: count query returns 1 valid key
     mock_conn.fetchval = AsyncMock(return_value=1)
     mock_conn.fetchrow = AsyncMock(
-        return_value={"key_id": 10, "key_value": "sk-shared-key"}
+        return_value={"key_id": 10, "key_value": "sk-test-key"}
     )
 
-    result = await repo.get_available_key("shared_provider", "gpt-4")
+    result = await repo.get_available_key("any_provider", "gpt-4")
 
     assert result is not None
     assert result["key_id"] == 10
@@ -116,40 +108,6 @@ async def test_get_available_key_with_shared_key_status():
     assert fetchrow_call[0][2] == ALL_MODELS_MARKER
 
 
-@pytest.mark.asyncio
-async def test_get_available_key_prefers_specific_model():
-    """For non-shared providers, queries use the specific model_name.
-    For shared providers, queries use ALL_MODELS_MARKER.
-
-    Both paths produce correct results with their respective model names.
-    """
-    # --- Non-shared provider: uses actual model_name ---
-    repo_ns, mock_conn_ns, _ = _make_repo_and_conn(provider_config_shared=False)
-    mock_conn_ns.fetchval = AsyncMock(return_value=1)
-    mock_conn_ns.fetchrow = AsyncMock(
-        return_value={"key_id": 1, "key_value": "sk-specific"}
-    )
-
-    result_ns = await repo_ns.get_available_key("provider", "gpt-4")
-    assert result_ns is not None
-    # fetchval should use the actual model_name ($2)
-    fetchval_call_ns = mock_conn_ns.fetchval.call_args
-    assert fetchval_call_ns[0][2] == "gpt-4"
-
-    # --- Shared provider: uses ALL_MODELS_MARKER ---
-    repo_s, mock_conn_s, _ = _make_repo_and_conn(provider_config_shared=True)
-    mock_conn_s.fetchval = AsyncMock(return_value=1)
-    mock_conn_s.fetchrow = AsyncMock(
-        return_value={"key_id": 2, "key_value": "sk-shared"}
-    )
-
-    result_s = await repo_s.get_available_key("shared_provider", "gpt-4")
-    assert result_s is not None
-    # fetchval should use ALL_MODELS_MARKER ($2)
-    fetchval_call_s = mock_conn_s.fetchval.call_args
-    assert fetchval_call_s[0][2] == ALL_MODELS_MARKER
-
-
 # ── get_all_valid_keys_for_caching ─────────────────────────────────────
 
 
@@ -157,7 +115,7 @@ async def test_get_available_key_prefers_specific_model():
 async def test_key_without_status_row_is_cached():
     """A key with no key_model_status row (COALESCE → '__ALL_MODELS__')
     is returned by get_all_valid_keys_for_caching()."""
-    repo, mock_conn, _ = _make_repo_and_conn()
+    repo, mock_conn = _make_repo_and_conn()
 
     mock_rows = [
         {
@@ -190,7 +148,7 @@ async def test_key_without_status_row_is_cached():
 async def test_key_with_fatal_status_is_excluded():
     """Keys with fatal status (invalid_key, no_access, no_quota, no_model)
     are excluded by the SQL WHERE clause in get_all_valid_keys_for_caching()."""
-    repo, mock_conn, _ = _make_repo_and_conn()
+    repo, mock_conn = _make_repo_and_conn()
 
     # Mock: DB only returns valid keys after SQL filtering
     mock_rows = [
@@ -221,7 +179,7 @@ async def test_key_with_fatal_status_is_excluded():
 @pytest.mark.asyncio
 async def test_get_all_valid_keys_for_caching_returns_empty():
     """When no valid keys exist, get_all_valid_keys_for_caching returns an empty list."""
-    repo, mock_conn, _ = _make_repo_and_conn()
+    repo, mock_conn = _make_repo_and_conn()
 
     mock_conn.fetch = AsyncMock(return_value=[])
 

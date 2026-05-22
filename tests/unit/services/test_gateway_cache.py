@@ -13,11 +13,8 @@ class TestGatewayCacheExcludeKeyIds:
 
     @pytest.fixture
     def mock_accessor(self):
-        """Provide a mock ConfigAccessor with default provider config (shared_key_status=False)."""
+        """Provide a mock ConfigAccessor."""
         accessor = MagicMock()
-        provider_config = MagicMock()
-        provider_config.shared_key_status = False
-        accessor.get_provider.return_value = provider_config
         return accessor
 
     @pytest.fixture
@@ -71,26 +68,6 @@ class TestGatewayCacheExcludeKeyIds:
         # deque becomes [1,2]. So final deque order swapped.
         # We'll accept any order as long as same elements.
         assert set(cache._key_pool["test"]) == {(1, "key1"), (2, "key2")}
-
-    def test_get_key_from_pool_exclude_with_shared_key_status(
-        self, cache, mock_accessor
-    ):
-        """Test exclude_key_ids with shared_key_status enabled."""
-        mock_provider_config = MagicMock()
-        mock_provider_config.shared_key_status = True
-        mock_accessor.get_provider.return_value = mock_provider_config
-        # Setup pool (shared_key_status no longer creates a separate pool — all keys share one pool)
-        cache._key_pool["test"] = collections.deque(
-            [(1, "key1"), (2, "key2")]
-        )
-        # Exclude key_id 1
-        result = cache.get_key_from_pool("test", exclude_key_ids={1})
-        assert result == (2, "key2")
-        # Rotation should happen in the pool: after returning key2, deque becomes [1,2]
-        assert list(cache._key_pool["test"]) == [
-            (1, "key1"),
-            (2, "key2"),
-        ]
 
     def test_get_key_from_pool_empty_pool(self, cache):
         """Test that get_key_from_pool returns None when pool is empty."""
@@ -171,19 +148,13 @@ class TestGatewayCacheLogging:
             mock_logger.info.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_shared_key_removal_log(self, cache_logging, mock_accessor_logging):
-        """Verify that removing a shared key logs appropriately."""
-        # Mock provider config with shared_key_status = True
-        mock_provider_config = Mock()
-        mock_provider_config.shared_key_status = True
-        mock_accessor_logging.get_provider.return_value = mock_provider_config
-        # Pre-populate a key in the pool (no virtual pool distinction)
+    async def test_key_removal_log(self, cache_logging):
+        """Verify that removing a key logs appropriately."""
         cache_logging._key_pool["openai"] = collections.deque([(1, "sk-xxx")])
         with patch("src.services.gateway.gateway_cache.logger") as mock_logger:
             await cache_logging.remove_key_from_pool("openai", 1)
             # Should log DEBUG about removing key (no INFO logs)
             mock_logger.info.assert_not_called()
-            # Find the call about key removal in debug logs
             removal_call = None
             for call in mock_logger.debug.call_args_list:
                 if "Removed failed key_id" in call[0][0]:
@@ -191,25 +162,6 @@ class TestGatewayCacheLogging:
                     break
             assert removal_call is not None
             assert "Removed failed key_id 1 from live cache pool 'openai'" in removal_call[0][0]
-
-    @pytest.mark.asyncio
-    async def test_granular_key_removal_log(self, cache_logging, mock_accessor_logging):
-        """Verify that removing a non-shared key logs granular removal."""
-        mock_provider_config = Mock()
-        mock_provider_config.shared_key_status = False
-        mock_accessor_logging.get_provider.return_value = mock_provider_config
-        cache_logging._key_pool["openai"] = collections.deque([(1, "sk-xxx")])
-        with patch("src.services.gateway.gateway_cache.logger") as mock_logger:
-            await cache_logging.remove_key_from_pool("openai", 1)
-            # Should log DEBUG about removing from pool (no INFO logs)
-            mock_logger.info.assert_not_called()
-            granular_call = None
-            for call in mock_logger.debug.call_args_list:
-                if "Removed failed key_id" in call[0][0]:
-                    granular_call = call
-                    break
-            assert granular_call is not None
-            assert "Removed failed key_id 1 from live cache pool 'openai'" in granular_call[0][0]
 
 
 # ---------------------------------------------------------------------------
@@ -220,7 +172,6 @@ class TestGatewayCacheLogging:
 def test_pool_key_is_provider_name_only():
     """Verify pool key is just provider_name, no model_name suffix."""
     mock_accessor = MagicMock()
-    mock_accessor.get_provider.return_value = MagicMock(shared_key_status=False)
     mock_db_manager = MagicMock()
     cache = GatewayCache(mock_accessor, mock_db_manager)
 
@@ -272,7 +223,6 @@ async def test_multiple_models_share_one_pool():
 async def test_remove_key_from_pool_by_provider_and_key_id():
     """Verify remove_key_from_pool() removes the key and pool size decreases."""
     mock_accessor = MagicMock()
-    mock_accessor.get_provider.return_value = MagicMock(shared_key_status=False)
     mock_db_manager = MagicMock()
     cache = GatewayCache(mock_accessor, mock_db_manager)
 
@@ -290,42 +240,6 @@ async def test_remove_key_from_pool_by_provider_and_key_id():
     remaining_ids = {info[0] for info in cache._key_pool["my-provider"]}
     assert remaining_ids == {10, 99}
     assert 42 not in remaining_ids
-
-
-@pytest.mark.asyncio
-async def test_shared_key_status_has_no_effect_on_pool():
-    """Verify get_key_from_pool and remove_key_from_pool behave identically
-    regardless of shared_key_status (no special logic in gateway_cache)."""
-    # --- Setup provider with shared_key_status=True ---
-    mock_accessor_shared = MagicMock()
-    mock_accessor_shared.get_provider.return_value = MagicMock(shared_key_status=True)
-    cache_shared = GatewayCache(mock_accessor_shared, MagicMock())
-    cache_shared._key_pool["test-prov"] = collections.deque(
-        [(1, "key-a"), (2, "key-b")]
-    )
-
-    # --- Setup provider with shared_key_status=False ---
-    mock_accessor_unshared = MagicMock()
-    mock_accessor_unshared.get_provider.return_value = MagicMock(shared_key_status=False)
-    cache_unshared = GatewayCache(mock_accessor_unshared, MagicMock())
-    cache_unshared._key_pool["test-prov"] = collections.deque(
-        [(1, "key-a"), (2, "key-b")]
-    )
-
-    # get_key_from_pool: both return the same key
-    result_shared = cache_shared.get_key_from_pool("test-prov")
-    result_unshared = cache_unshared.get_key_from_pool("test-prov")
-    assert result_shared == result_unshared
-    assert result_shared[0] == 1
-
-    # remove_key_from_pool: both remove the key identically
-    await cache_shared.remove_key_from_pool("test-prov", key_id=2)
-    await cache_unshared.remove_key_from_pool("test-prov", key_id=2)
-
-    assert len(cache_shared._key_pool["test-prov"]) == 1
-    assert len(cache_unshared._key_pool["test-prov"]) == 1
-    assert cache_shared._key_pool["test-prov"][0][0] == 1
-    assert cache_unshared._key_pool["test-prov"][0][0] == 1
 
 
 def test_get_key_from_pool_without_model_name():

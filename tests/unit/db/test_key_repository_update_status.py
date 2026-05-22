@@ -4,7 +4,7 @@
 Unit tests for KeyRepository.update_status() method.
 
 Tests the update of key-model status records, including
-failing_since management and shared_key_status handling.
+failing_since management. All providers now uniformly use ALL_MODELS_MARKER.
 """
 
 from datetime import UTC, datetime
@@ -17,15 +17,12 @@ from src.core.models import CheckResult
 from src.db.database import KeyRepository
 
 
-def _make_repo_and_conn(
-    provider_config_shared: bool = False,
-) -> tuple[KeyRepository, MagicMock, MagicMock]:
-    """Build a KeyRepository with mocked pool, accessor, and connection.
+def _make_repo_and_conn() -> tuple[KeyRepository, MagicMock]:
+    """Build a KeyRepository with mocked pool and connection.
 
-    Returns (repo, mock_conn, mock_accessor).
+    Returns (repo, mock_conn).
     """
     mock_pool = MagicMock()
-    mock_accessor = MagicMock()
     mock_conn = MagicMock()
 
     # pool.acquire() returns async context manager → conn
@@ -38,20 +35,15 @@ def _make_repo_and_conn(
     # Default async methods on conn
     mock_conn.execute = AsyncMock(return_value=None)
 
-    # Provider config
-    mock_provider_config = MagicMock()
-    mock_provider_config.shared_key_status = provider_config_shared
-    mock_accessor.get_provider.return_value = mock_provider_config
-
-    repo = KeyRepository(mock_pool, mock_accessor)
-    return repo, mock_conn, mock_accessor
+    repo = KeyRepository(mock_pool)
+    return repo, mock_conn
 
 
 @pytest.mark.asyncio
 async def test_update_status_sets_fields():
     """Verify that update_status correctly sets status, next_check_time,
     response_time, and other fields from a successful CheckResult."""
-    repo, mock_conn, _ = _make_repo_and_conn()
+    repo, mock_conn = _make_repo_and_conn()
 
     result = CheckResult.success(
         message="Key is valid",
@@ -85,15 +77,16 @@ async def test_update_status_sets_fields():
 
 
 @pytest.mark.asyncio
-async def test_update_status_shared_key_affects_all_models():
-    """When shared_key_status=True, the WHERE clause uses ALL_MODELS_MARKER
-    instead of the specific model_name, so the update affects all models."""
-    repo, mock_conn, _ = _make_repo_and_conn(provider_config_shared=True)
+async def test_update_status_always_uses_all_models_marker():
+    """update_status always uses ALL_MODELS_MARKER in the WHERE clause
+    regardless of the model_name parameter passed in."""
+    repo, mock_conn = _make_repo_and_conn()
 
     result = CheckResult.success(message="OK", response_time=100.0, status_code=200)
     next_check_time = datetime(2025, 6, 1, 12, 0, 0, tzinfo=UTC)
 
-    await repo.update_status(5, "gpt-4", "shared_provider", result, next_check_time)
+    # Pass a specific model_name, but the WHERE clause should use ALL_MODELS_MARKER
+    await repo.update_status(5, "gpt-4", "any_provider", result, next_check_time)
 
     call_args = mock_conn.execute.call_args
     params = call_args[0][1:]
@@ -104,30 +97,11 @@ async def test_update_status_shared_key_affects_all_models():
 
 
 @pytest.mark.asyncio
-async def test_update_status_non_shared_updates_single_row():
-    """When shared_key_status=False, the WHERE clause uses the specific
-    model_name, so only one key-model row is updated."""
-    repo, mock_conn, _ = _make_repo_and_conn(provider_config_shared=False)
-
-    result = CheckResult.success(message="OK", response_time=100.0, status_code=200)
-    next_check_time = datetime(2025, 6, 1, 12, 0, 0, tzinfo=UTC)
-
-    await repo.update_status(5, "gpt-4", "normal_provider", result, next_check_time)
-
-    call_args = mock_conn.execute.call_args
-    params = call_args[0][1:]
-
-    # The last two params ($7, $8) should be key_id and the actual model_name
-    assert params[6] == 5  # key_id ($7)
-    assert params[7] == "gpt-4"  # model_name ($8)
-
-
-@pytest.mark.asyncio
 async def test_update_status_sets_failing_since_when_error():
     """When the check result is an error (not OK), failing_since is set
     via COALESCE(failing_since, NOW()) — preserving an existing timestamp
     or setting a new one."""
-    repo, mock_conn, _ = _make_repo_and_conn()
+    repo, mock_conn = _make_repo_and_conn()
 
     result = CheckResult.fail(
         reason=ErrorReason.RATE_LIMITED,
@@ -159,7 +133,7 @@ async def test_update_status_sets_failing_since_when_error():
 async def test_update_status_resets_failing_since_when_valid():
     """When the check result is OK (valid), failing_since is set to NULL,
     resetting any previous failure tracking."""
-    repo, mock_conn, _ = _make_repo_and_conn()
+    repo, mock_conn = _make_repo_and_conn()
 
     result = CheckResult.success(message="Key is valid", response_time=100.0)
     next_check_time = datetime(2025, 6, 1, 12, 0, 0, tzinfo=UTC)
@@ -186,7 +160,7 @@ async def test_update_status_with_untested_status():
     a CheckResult, this test verifies correct handling of a fatal error
     status (INVALID_KEY) and that the assertion status_str in Status passes.
     """
-    repo, mock_conn, _ = _make_repo_and_conn()
+    repo, mock_conn = _make_repo_and_conn()
 
     result = CheckResult.fail(
         reason=ErrorReason.INVALID_KEY,

@@ -52,10 +52,9 @@ def _make_mock_pool_and_conn(
 async def test_get_table_health_returns_list_of_database_table_health():
     """N49: get_table_health() returns list[DatabaseTableHealth] with correct fields."""
     mock_pool, mock_conn = _make_mock_pool_and_conn()
-    mock_accessor = MagicMock()
 
     with patch("src.db.database.get_pool", return_value=mock_pool):
-        db_manager = DatabaseManager(mock_accessor)
+        db_manager = DatabaseManager()
         result = await db_manager.get_table_health()
 
     assert isinstance(result, list)
@@ -74,10 +73,9 @@ async def test_get_table_health_returns_list_of_database_table_health():
 async def test_get_table_health_empty_database_returns_empty_list():
     """N50: Empty database returns empty list (not error)."""
     mock_pool, mock_conn = _make_mock_pool_and_conn(fetch_return=[])
-    mock_accessor = MagicMock()
 
     with patch("src.db.database.get_pool", return_value=mock_pool):
-        db_manager = DatabaseManager(mock_accessor)
+        db_manager = DatabaseManager()
         result = await db_manager.get_table_health()
 
     assert result == []
@@ -87,10 +85,9 @@ async def test_get_table_health_empty_database_returns_empty_list():
 async def test_get_table_health_queries_pg_stat_user_tables():
     """N51: The SQL query contains 'pg_stat_user_tables' and 'public'."""
     mock_pool, mock_conn = _make_mock_pool_and_conn()
-    mock_accessor = MagicMock()
 
     with patch("src.db.database.get_pool", return_value=mock_pool):
-        db_manager = DatabaseManager(mock_accessor)
+        db_manager = DatabaseManager()
         await db_manager.get_table_health()
 
     # Verify the query passed to conn.fetch contains expected fragments

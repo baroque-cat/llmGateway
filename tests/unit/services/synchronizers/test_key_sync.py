@@ -49,7 +49,7 @@ async def test_keys_not_deleted_when_removed_from_file():
     provider_id_map = {"provider_a": 1}
     provider_state: ProviderKeyState = {
         "keys_from_files": {"key_new"},
-        "models_from_config": ["model1"],
+        "file_map": {},
     }
     desired_state: dict[str, ProviderKeyState] = {"provider_a": provider_state}
     await syncer.apply_state(provider_id_map, desired_state)
@@ -78,7 +78,7 @@ async def test_keys_added_when_appear_in_file():
     provider_id_map = {"provider_a": 1}
     provider_state: ProviderKeyState = {
         "keys_from_files": {"key1", "key2"},
-        "models_from_config": ["model1", "model2"],
+        "file_map": {},
     }
     desired_state: dict[str, ProviderKeyState] = {"provider_a": provider_state}
     await syncer.apply_state(provider_id_map, desired_state)
@@ -86,8 +86,33 @@ async def test_keys_added_when_appear_in_file():
     mock_db_manager.keys.sync.assert_called_once()
     call_args = mock_db_manager.keys.sync.call_args
     assert call_args.kwargs["keys_from_file"] == {"key1", "key2"}
-    # Ensure provider models are passed
-    assert call_args.kwargs["provider_models"] == ["model1", "model2"]
+    # provider_models is no longer passed to sync()
+
+
+@pytest.mark.asyncio
+async def test_sync_calls_do_not_pass_provider_models():
+    """
+    Test that sync() is called without the provider_models parameter.
+    """
+    mock_accessor = MagicMock(spec=ConfigAccessor)
+    mock_db_manager = MagicMock(spec=DatabaseManager)
+    mock_db_manager.keys = MagicMock()
+    mock_db_manager.keys.sync = AsyncMock()
+    syncer = KeySyncer(mock_accessor, mock_db_manager)
+
+    provider_id_map = {"provider_a": 1}
+    provider_state: ProviderKeyState = {
+        "keys_from_files": {"key1", "key2"},
+        "file_map": {},
+    }
+    desired_state: dict[str, ProviderKeyState] = {"provider_a": provider_state}
+    await syncer.apply_state(provider_id_map, desired_state)
+
+    mock_db_manager.keys.sync.assert_called_once()
+    call_args = mock_db_manager.keys.sync.call_args
+    assert "provider_models" not in call_args.kwargs, (
+        "sync() should not receive provider_models parameter"
+    )
 
 
 # --- Integration-style test for KeyRepository.sync (requires database) ---
@@ -109,12 +134,8 @@ async def test_key_repository_sync_add_only():
     from src.db.database import KeyRepository
 
     mock_pool = MagicMock()
-    mock_accessor = MagicMock()
-    mock_provider_config = MagicMock()
-    mock_provider_config.shared_key_status = False
-    mock_accessor.get_provider.return_value = mock_provider_config
 
-    repo = KeyRepository(mock_pool, mock_accessor)
+    repo = KeyRepository(mock_pool)
 
     # Simulate existing keys in DB: key1, key2
     existing_rows = [
@@ -123,7 +144,6 @@ async def test_key_repository_sync_add_only():
     ]
     # Simulate keys from file: key2, key3 (key1 missing, key3 new)
     keys_from_file = {"key2", "key3"}
-    provider_models = ["model1", "model2"]
 
     # Mock connection and transaction
     mock_conn = MagicMock()
@@ -142,7 +162,6 @@ async def test_key_repository_sync_add_only():
         provider_name="test_provider",
         provider_id=1,
         keys_from_file=keys_from_file,
-        provider_models=provider_models,
     )
 
     # Verify that copy_records_to_table was called for new keys (key3 only)
@@ -525,7 +544,6 @@ async def test_cleanup_removes_unchanged_file_after_sync(tmp_path):
 
     provider_state: ProviderKeyState = {
         "keys_from_files": {"sk-test"},
-        "models_from_config": ["model1"],
         "file_map": {filepath: recorded_mtime},
     }
     desired_state = {"provider_a": provider_state}
@@ -558,7 +576,6 @@ async def test_cleanup_keeps_modified_file(tmp_path, caplog):
 
     provider_state: ProviderKeyState = {
         "keys_from_files": {"sk-test"},
-        "models_from_config": ["model1"],
         "file_map": {filepath: recorded_mtime},
     }
     desired_state = {"provider_a": provider_state}
@@ -587,7 +604,6 @@ async def test_cleanup_skips_already_deleted_file_gracefully(caplog):
 
     provider_state: ProviderKeyState = {
         "keys_from_files": {"sk-test"},
-        "models_from_config": ["model1"],
         "file_map": {nonexistent_path: 12345.0},
     }
     desired_state = {"provider_a": provider_state}
@@ -620,7 +636,6 @@ async def test_cleanup_gated_by_clean_raw_after_sync_true(tmp_path):
 
     provider_state: ProviderKeyState = {
         "keys_from_files": {"sk-test"},
-        "models_from_config": ["model1"],
         "file_map": {filepath: recorded_mtime},
     }
     desired_state = {"provider_a": provider_state}
@@ -652,7 +667,6 @@ async def test_cleanup_gated_by_clean_raw_after_sync_false(tmp_path):
 
     provider_state: ProviderKeyState = {
         "keys_from_files": {"sk-test"},
-        "models_from_config": ["model1"],
         "file_map": {filepath: recorded_mtime},
     }
     desired_state = {"provider_a": provider_state}
@@ -683,7 +697,6 @@ async def test_cleanup_rename_to_trash_then_unlink(tmp_path):
 
     provider_state: ProviderKeyState = {
         "keys_from_files": {"sk-test"},
-        "models_from_config": ["model1"],
         "file_map": {filepath: recorded_mtime},
     }
     desired_state = {"provider_a": provider_state}
@@ -722,7 +735,6 @@ async def test_cleanup_trash_path_format(tmp_path):
 
     provider_state: ProviderKeyState = {
         "keys_from_files": {"sk-test"},
-        "models_from_config": ["model1"],
         "file_map": {filepath: recorded_mtime},
     }
     desired_state = {"provider_a": provider_state}
@@ -771,7 +783,6 @@ async def test_cleanup_after_sync_only_on_successful_sync(tmp_path):
 
     provider_state: ProviderKeyState = {
         "keys_from_files": {"sk-test"},
-        "models_from_config": ["model1"],
         "file_map": {filepath: recorded_mtime},
     }
     desired_state = {"provider_a": provider_state}

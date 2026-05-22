@@ -4,8 +4,7 @@
 
 Defines the behavior of the gateway's in-memory API key pool. Key pools are indexed
 solely by provider instance name, enabling transparent proxy operation where any valid
-key for a provider can service any model request. This replaces the previous per-model
-pool indexing and removes `shared_key_status` logic from the gateway cache.
+key for a provider can service any model request.
 
 ## Requirements
 
@@ -40,14 +39,6 @@ The gateway cache SHALL index API key pools using the provider instance name as 
 - **WHEN** `remove_key_from_pool("my-provider", key_id=42)` is called
 - **THEN** the key with `key_id=42` SHALL be removed from the pool keyed by `"my-provider"`
 - **AND** the pool size SHALL decrease by 1
-
-### Requirement: Gateway cache ignores shared_key_status config
-The gateway cache SHALL NOT read `provider_config.shared_key_status` for any purpose. All providers SHALL be treated uniformly with per-provider key pools.
-
-#### Scenario: shared_key_status has no effect on pool selection
-- **WHEN** a provider has `shared_key_status: true` or `shared_key_status: false`
-- **THEN** `get_key_from_pool()` and `remove_key_from_pool()` SHALL behave identically for both cases
-- **AND** no code path in `gateway_cache.py` SHALL access `provider_config.shared_key_status`
 
 ### Requirement: Keys without key_model_status rows are included in cache
 The database query in `get_all_valid_keys_for_caching()` SHALL include API keys that have no corresponding row in the `key_model_status` table, treating them as valid by default.

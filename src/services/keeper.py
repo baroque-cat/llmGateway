@@ -148,14 +148,12 @@ async def run_sync_cycle(
         }
 
         enabled_providers = accessor.get_enabled_providers()
-        for provider_name, provider_config in enabled_providers.items():
+        for provider_name in enabled_providers:
             # For KeySyncer (always runs for enabled providers)
             key_path = os.path.join("data", provider_name, "raw")
             keys_from_file, file_map = read_keys_from_directory(key_path)
-            models_from_config = list(provider_config.default_model.keys())
             key_state: ProviderKeyState = {
                 "keys_from_files": keys_from_file,
-                "models_from_config": models_from_config,
                 "file_map": file_map,
             }
             desired_state["keys"][provider_name] = key_state
@@ -324,7 +322,7 @@ async def run_keeper() -> None:
         await database.init_db_pool(
             dsn, min_size=pool_cfg.min_size, max_size=pool_cfg.max_size
         )
-        db_manager = DatabaseManager(accessor)
+        db_manager = DatabaseManager()
         await db_manager.initialize_schema()
 
         # Step 5: Create Long-Lived Client Factory.

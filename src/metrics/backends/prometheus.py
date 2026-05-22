@@ -171,7 +171,7 @@ class PrometheusMetricsCollector(IMetricsCollector):
             self.gauge(
                 KEY_STATUS_TOTAL,
                 METRIC_DESCRIPTIONS.get(KEY_STATUS_TOTAL, ""),
-                ["provider", "model", "status"],
+                ["provider", "status"],
             )
 
         # Prometheus GaugeMetricFamily cannot be fully replaced
@@ -190,11 +190,7 @@ class PrometheusMetricsCollector(IMetricsCollector):
         # For correctness, we do a manual approach via
         # GaugeMetricFamily-like logic.
         for record in summary_data:
-            model_name = record["model"]
-            if model_name == "__ALL_MODELS__":
-                model_name = "shared"
             _key_status_gauge.labels(
                 provider=record["provider"],
-                model=model_name,
                 status=record["status"],
             ).set(record["count"])

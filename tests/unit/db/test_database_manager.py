@@ -26,7 +26,7 @@ async def test_wait_for_schema_ready_success():
     mock_conn.fetchval = AsyncMock(return_value=1)
 
     with patch("src.db.database.get_pool", return_value=mock_pool):
-        manager = DatabaseManager(mock_accessor)
+        manager = DatabaseManager()
         # Should not raise
         await manager.wait_for_schema_ready(timeout=1)
 
@@ -54,7 +54,7 @@ async def test_wait_for_schema_ready_retries_on_undefined_table_error():
     )
 
     with patch("src.db.database.get_pool", return_value=mock_pool):
-        manager = DatabaseManager(mock_accessor)
+        manager = DatabaseManager()
         # Should not raise, should retry
         with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
             await manager.wait_for_schema_ready(timeout=10)
@@ -81,7 +81,7 @@ async def test_wait_for_schema_ready_timeout():
     )
 
     with patch("src.db.database.get_pool", return_value=mock_pool):
-        manager = DatabaseManager(mock_accessor)
+        manager = DatabaseManager()
         # Should raise TimeoutError
         with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
             # Use a short timeout to speed up test
@@ -111,7 +111,7 @@ async def test_wait_for_schema_ready_other_exception_retries():
     mock_conn.fetchval = AsyncMock(side_effect=[Exception("Some temporary error"), 1])
 
     with patch("src.db.database.get_pool", return_value=mock_pool):
-        manager = DatabaseManager(mock_accessor)
+        manager = DatabaseManager()
         with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
             await manager.wait_for_schema_ready(timeout=10)
             mock_sleep.assert_called_once_with(2)
@@ -131,7 +131,7 @@ async def test_wait_for_schema_ready_logging():
     mock_conn.fetchval = AsyncMock(return_value=1)
 
     with patch("src.db.database.get_pool", return_value=mock_pool):
-        manager = DatabaseManager(mock_accessor)
+        manager = DatabaseManager()
         with patch("src.db.database.logger") as mock_logger:
             await manager.wait_for_schema_ready(timeout=1)
             # Should log info when schema is ready
