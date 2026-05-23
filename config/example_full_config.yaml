@@ -60,7 +60,7 @@ database:
     min_size: 1 # Minimum connections in the pool
     max_size: 15 # Maximum connections in the pool
     command_timeout: 30.0 # Max time for a single query before cancellation
-    connect_timeout: 60.0 # Max time for TCP connection handshake
+    timeout: 60.0 # Max time for TCP connection handshake
   # Retry policy for transient database errors (connection lost, deadlock, etc.).
   # The background worker will automatically retry DB operations on these errors.
   retry:

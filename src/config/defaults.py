@@ -55,7 +55,7 @@ def get_default_config() -> dict[str, Any]:
                 "min_size": 1,
                 "max_size": 15,
                 "command_timeout": 30.0,
-                "connect_timeout": 60.0,
+                "timeout": 60.0,
             },
             # Retry policy for transient database errors
             "retry": {

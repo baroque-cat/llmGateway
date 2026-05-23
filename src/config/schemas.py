@@ -647,7 +647,7 @@ class DatabasePoolConfig(BaseModel):
     command_timeout: float = Field(default=30.0, gt=0)
     # Maximum time (seconds) to wait for a TCP connection to the database.
     # Default is 60s (matching asyncpg's built-in default).
-    connect_timeout: float = Field(default=60.0, gt=0)
+    timeout: float = Field(default=60.0, gt=0)
 
     @model_validator(mode="after")
     def check_bounds(self) -> "DatabasePoolConfig":

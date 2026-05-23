@@ -49,7 +49,7 @@ async def test_init_db_pool_default_params():
         min_size=1,
         max_size=15,
         command_timeout=30.0,
-        connect_timeout=60.0,
+        timeout=60.0,
     )
 
 
@@ -78,18 +78,18 @@ async def test_init_db_pool_custom_params():
         min_size=2,
         max_size=10,
         command_timeout=30.0,
-        connect_timeout=60.0,
+        timeout=60.0,
     )
 
 
 # ---------------------------------------------------------------------------
-# UT-DB03.1: Custom command_timeout/connect_timeout passed to create_pool
+# UT-DB03.1: Custom command_timeout/timeout passed to create_pool
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_init_db_pool_custom_timeouts():
-    """UT-DB03.1: init_db_pool(dsn, command_timeout=60.0, connect_timeout=10.0)
+async def test_init_db_pool_forwards_timeout_param():
+    """UT-DB03.1: init_db_pool(dsn, command_timeout=60.0, timeout=10.0)
     → asyncpg.create_pool called with those exact timeout values."""
     mock_pool = MagicMock()
 
@@ -101,7 +101,7 @@ async def test_init_db_pool_custom_timeouts():
             min_size=1,
             max_size=15,
             command_timeout=60.0,
-            connect_timeout=10.0,
+            timeout=10.0,
         )
 
     mock_create_pool.assert_called_once_with(
@@ -109,7 +109,7 @@ async def test_init_db_pool_custom_timeouts():
         min_size=1,
         max_size=15,
         command_timeout=60.0,
-        connect_timeout=10.0,
+        timeout=10.0,
     )
 
 
@@ -151,5 +151,5 @@ async def test_init_db_pool_second_call_logs_warning():
             min_size=1,
             max_size=15,
             command_timeout=30.0,
-            connect_timeout=60.0,
+            timeout=60.0,
         )

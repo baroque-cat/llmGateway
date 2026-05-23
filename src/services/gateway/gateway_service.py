@@ -839,7 +839,7 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
                 min_size=pool_cfg.min_size,
                 max_size=pool_cfg.max_size,
                 command_timeout=pool_cfg.command_timeout,
-                connect_timeout=pool_cfg.connect_timeout,
+                timeout=pool_cfg.timeout,
             )
 
             # Wait for the Worker to finish initializing the database schema.

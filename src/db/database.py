@@ -121,7 +121,7 @@ async def init_db_pool(
     min_size: int = 1,
     max_size: int = 15,
     command_timeout: float = 30.0,
-    connect_timeout: float = 60.0,
+    timeout: float = 60.0,
 ) -> None:
     """
     Initializes an async connection pool to PostgreSQL.
@@ -131,7 +131,7 @@ async def init_db_pool(
         min_size: Minimum pool size (default 1).
         max_size: Maximum pool size (default 15).
         command_timeout: Maximum time in seconds for a single query (default 30).
-        connect_timeout: Maximum time in seconds for TCP connection (default 60).
+        timeout: Maximum time in seconds for TCP connection (default 60).
 
     Raises:
         Exception: If pool initialization fails.
@@ -141,12 +141,12 @@ async def init_db_pool(
         logger.warning("Database pool already initialized.")
         return
     try:
-        _db_pool = await asyncpg.create_pool(  # pyright: ignore[reportUnknownVariableType, reportCallIssue]
+        _db_pool = await asyncpg.create_pool(
             dsn=dsn,
             min_size=min_size,
             max_size=max_size,
             command_timeout=command_timeout,
-            connect_timeout=connect_timeout,
+            timeout=timeout,
         )
         logger.info("Database connection pool initialized successfully.")
     except Exception as e:

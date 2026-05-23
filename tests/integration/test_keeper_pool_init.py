@@ -117,5 +117,5 @@ async def test_keeper_pool_init_default_params():
             min_size=1,
             max_size=15,
             command_timeout=30.0,
-            connect_timeout=60.0,
+            timeout=60.0,
         )

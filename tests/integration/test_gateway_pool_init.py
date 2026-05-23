@@ -94,5 +94,5 @@ async def test_gateway_pool_init_custom_params():
             min_size=2,
             max_size=10,
             command_timeout=30.0,
-            connect_timeout=60.0,
+            timeout=60.0,
         )
