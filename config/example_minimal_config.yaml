@@ -32,7 +32,7 @@ database:
   dbname: "${DB_NAME}"
   pool:
     command_timeout: 30.0
-    connect_timeout: 60.0
+    timeout: 60.0
 
 # --- PROVIDER SETTINGS ---
 providers:

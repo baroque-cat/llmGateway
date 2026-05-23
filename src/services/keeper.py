@@ -324,7 +324,7 @@ async def run_keeper() -> None:
             min_size=pool_cfg.min_size,
             max_size=pool_cfg.max_size,
             command_timeout=pool_cfg.command_timeout,
-            connect_timeout=pool_cfg.connect_timeout,
+            timeout=pool_cfg.timeout,
         )
         db_manager = DatabaseManager()
         await db_manager.initialize_schema()
