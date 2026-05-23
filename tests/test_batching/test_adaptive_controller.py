@@ -47,8 +47,8 @@ def _fatal_results(n: int) -> list[CheckResult]:
 
 
 def _make_controller(
-    start_batch_size: int = 30,
-    start_batch_delay_sec: float = 15.0,
+    start_batch_size: int = 10,
+    start_batch_delay_sec: float = 30.0,
     **config_kwargs: object,
 ) -> AdaptiveBatchController:
     """Create a controller with the given start values and config overrides."""
@@ -67,14 +67,14 @@ def _make_controller(
 
 def test_uc01_initialization_with_default_values() -> None:
     """
-    Create AdaptiveBatchController with default config, start_batch_size=30,
-    start_batch_delay_sec=15.0. Verify batch_size == 30, batch_delay == 15.0,
+    Create AdaptiveBatchController with default config, start_batch_size=10,
+    start_batch_delay_sec=30.0. Verify batch_size == 10, batch_delay == 30.0,
     consecutive_successes == 0.
     """
-    controller = _make_controller(start_batch_size=30, start_batch_delay_sec=15.0)
+    controller = _make_controller(start_batch_size=10, start_batch_delay_sec=30.0)
 
-    assert controller.batch_size == 30
-    assert controller.batch_delay == 15.0
+    assert controller.batch_size == 10
+    assert controller.batch_delay == 30.0
     assert controller.consecutive_successes == 0
 
 
@@ -775,16 +775,16 @@ def test_ut_d04_constructor_rejects_initial_batch_delay() -> None:
         AdaptiveBatchController(params=config.to_params(), initial_batch_delay=15.0)
 
 
-def test_ut_d05_default_config_gives_batch_size_30_delay_15() -> None:
+def test_ut_d05_default_config_gives_batch_size_10_delay_30() -> None:
     """
-    UT-D05: AdaptiveBatchingConfig() defaults: start_batch_size=30,
-    start_batch_delay_sec=15.0. Controller initialized with default config
-    has batch_size=30, batch_delay=15.0.
+    UT-D05: AdaptiveBatchingConfig() defaults: start_batch_size=10,
+    start_batch_delay_sec=30.0. Controller initialized with default config
+    has batch_size=10, batch_delay=30.0.
     """
     config = AdaptiveBatchingConfig()
     controller = AdaptiveBatchController(params=config.to_params())
-    assert controller.batch_size == 30
-    assert controller.batch_delay == 15.0
+    assert controller.batch_size == 10
+    assert controller.batch_delay == 30.0
 
 
 def test_ut_d06_ramp_up_logic_backward_compatible() -> None:
@@ -794,8 +794,8 @@ def test_ut_d06_ramp_up_logic_backward_compatible() -> None:
     """
     controller = _make_controller()
     controller.report_batch_result(_success_results(10))
-    assert controller.batch_size == 35  # 30 + 5
-    assert controller.batch_delay == 13.0  # 15 - 2.0
+    assert controller.batch_size == 15  # 10 + 5
+    assert controller.batch_delay == 28.0  # 30.0 - 2.0
     assert controller.consecutive_successes == 1
 
 

@@ -783,9 +783,7 @@ class TestDedicatedClientIsolation:
         """Two providers with dedicated_http_client=True (default) get separate clients."""
         p1 = _make_provider_config(proxy_mode="none")
         p2 = _make_provider_config(proxy_mode="none")
-        accessor = _make_accessor_mock(
-            providers={"instance_a": p1, "instance_b": p2}
-        )
+        accessor = _make_accessor_mock(providers={"instance_a": p1, "instance_b": p2})
         factory = HttpClientFactory(accessor)
 
         mock_a = MagicMock(spec=httpx.AsyncClient)
@@ -828,9 +826,7 @@ class TestSharedClientPooling:
         """Two providers with dedicated_http_client=False share the same client."""
         p1 = _make_provider_config(dedicated=False, proxy_mode="none")
         p2 = _make_provider_config(dedicated=False, proxy_mode="none")
-        accessor = _make_accessor_mock(
-            providers={"shared_a": p1, "shared_b": p2}
-        )
+        accessor = _make_accessor_mock(providers={"shared_a": p1, "shared_b": p2})
         factory = HttpClientFactory(accessor)
 
         mock_client = MagicMock(spec=httpx.AsyncClient)

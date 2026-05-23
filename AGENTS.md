@@ -18,7 +18,7 @@ cp config/example_full_config.yaml config/providers.yaml
 cp .env.example .env
 # edit config/providers.yaml and .env
 ```
-Config schema: Pydantic v2 models in `src/config/schemas.py`. Environment variables resolved from `.env` via `${ENV_VAR}` placeholders in YAML.
+Config schema: Pydantic v2 models in `src/config/schemas.py`. Environment variables resolved from `.env` via `${ENV_VAR}` placeholders in YAML. See `docs/CONFIG_SYSTEM.md` for the full configuration subsystem architecture.
 
 ### Docker (recommended)
 ```bash
@@ -150,3 +150,16 @@ poetry run black src/ tests/
 
 ### CI Pipeline
 `.github/workflows/quality.yml` runs on every push: pyright → ruff check → black --check → pytest --cov=src → codecov. All steps must pass.
+
+## Documentation
+
+The `docs/` directory contains detailed subsystem documentation. Consult these files alongside the source code for architectural context and design rationale:
+
+| Document | Topic |
+| --- | --- |
+| `docs/CONFIG_SYSTEM.md` | Configuration subsystem: three-tier defaults, two-pass env var resolution, Pydantic model hierarchy, loader flow, public API |
+| `docs/ERRORS.md` | ErrorReason enum classification: fatal vs retryable vs client errors, key penalty logic |
+| `docs/ERROR_PARSING.md` | Pattern-based error reclassification: rules, priority system, dual-format providers |
+| `docs/DEBUG_MODE.md` | Gateway debug modes: `disabled`, `no_content`, `full_body` |
+
+**Primary config reference:** `config/example_full_config.yaml` — annotated example covering every available setting with inline documentation.

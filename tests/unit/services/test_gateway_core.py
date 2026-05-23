@@ -130,9 +130,7 @@ class TestFullStreamRequest:
             "src.services.gateway.gateway_service.forward_success_stream",
             new=AsyncMock(return_value=mock_streaming_response),
         ) as mock_forward:
-            result = await _handle_full_stream_request(
-                request, provider, "openai"
-            )
+            result = await _handle_full_stream_request(request, provider, "openai")
 
             assert result is mock_streaming_response
             mock_forward.assert_awaited_once()
@@ -184,9 +182,7 @@ class TestFullStreamRequest:
                 "src.services.gateway.gateway_service.forward_success_stream",
                 new=AsyncMock(return_value=streaming_result),
             ):
-                result = await _handle_full_stream_request(
-                    request, provider, "openai"
-                )
+                result = await _handle_full_stream_request(request, provider, "openai")
                 # The StreamingResponse is returned; the error happens when
                 # the client reads the stream, not during the handler call.
                 assert isinstance(result, StreamingResponse)
@@ -378,9 +374,7 @@ class TestCreateApp:
             patch(
                 "src.services.gateway.gateway_service.DatabaseManager"
             ) as mock_dm_cls,
-            patch(
-                "src.services.gateway.gateway_service.HttpClientFactory"
-            ),
+            patch("src.services.gateway.gateway_service.HttpClientFactory"),
             patch("src.services.gateway.gateway_service.GatewayCache") as mock_gc_cls,
             patch(
                 "src.services.gateway.gateway_service._cache_refresh_loop",
@@ -404,9 +398,7 @@ class TestCreateApp:
             patch(
                 "src.services.gateway.gateway_service.DatabaseManager"
             ) as mock_dm_cls,
-            patch(
-                "src.services.gateway.gateway_service.HttpClientFactory"
-            ),
+            patch("src.services.gateway.gateway_service.HttpClientFactory"),
             patch("src.services.gateway.gateway_service.GatewayCache") as mock_gc_cls,
             patch(
                 "src.services.gateway.gateway_service._cache_refresh_loop",
@@ -433,9 +425,7 @@ class TestCreateApp:
             patch(
                 "src.services.gateway.gateway_service.DatabaseManager"
             ) as mock_dm_cls,
-            patch(
-                "src.services.gateway.gateway_service.HttpClientFactory"
-            ),
+            patch("src.services.gateway.gateway_service.HttpClientFactory"),
             patch("src.services.gateway.gateway_service.GatewayCache") as mock_gc_cls,
             patch(
                 "src.services.gateway.gateway_service._cache_refresh_loop",

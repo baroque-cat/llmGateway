@@ -344,8 +344,8 @@ def test_ut_h11_health_policy_config_without_batch_fields():
     assert isinstance(policy.adaptive_batching, AdaptiveBatchingConfig)
 
     # Default start values
-    assert policy.adaptive_batching.start_batch_size == 30
-    assert policy.adaptive_batching.start_batch_delay_sec == 15.0
+    assert policy.adaptive_batching.start_batch_size == 10
+    assert policy.adaptive_batching.start_batch_delay_sec == 30.0
 
     # Default bounds
     assert policy.adaptive_batching.min_batch_size == 5
@@ -408,9 +408,7 @@ async def test_shared_key_check_resolved_from_default_model() -> None:
 
     # Mock the provider instance returned by get_provider()
     mock_provider_instance = MagicMock()
-    mock_provider_instance.check = AsyncMock(
-        return_value=CheckResult.success("OK")
-    )
+    mock_provider_instance.check = AsyncMock(return_value=CheckResult.success("OK"))
 
     resource = {
         "key_id": 99,

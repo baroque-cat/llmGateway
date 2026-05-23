@@ -110,9 +110,9 @@ async def test_sync_calls_do_not_pass_provider_models():
 
     mock_db_manager.keys.sync.assert_called_once()
     call_args = mock_db_manager.keys.sync.call_args
-    assert "provider_models" not in call_args.kwargs, (
-        "sync() should not receive provider_models parameter"
-    )
+    assert (
+        "provider_models" not in call_args.kwargs
+    ), "sync() should not receive provider_models parameter"
 
 
 # --- Integration-style test for KeyRepository.sync (requires database) ---

@@ -82,8 +82,8 @@ def _make_probe(
 # Helper: default policy with adaptive batching
 # ----------------------------------------------------------------------
 def _default_policy(
-    start_batch_size: int = 30,
-    start_batch_delay_sec: float = 15.0,
+    start_batch_size: int = 10,
+    start_batch_delay_sec: float = 30.0,
     adaptive: AdaptiveBatchingConfig | None = None,
 ) -> HealthPolicyConfig:
     """Return a HealthPolicyConfig with sensible defaults for testing.
@@ -108,10 +108,12 @@ def _default_policy(
 @pytest.mark.asyncio
 async def test_ic01_while_loop_replaces_for_loop():
     """
-    100 resources, initial_batch_size=30.
-    _process_provider_batch should iterate in 4 sub-batches:
-    30, 30, 30, 10.  The while i < len(resources) loop advances
-    correctly and the controller receives each batch's results.
+    100 resources, start_batch_size=10 (new default).
+    _process_provider_batch should iterate in 5 sub-batches:
+    10, 15, 20, 25, 30. The 5th batch triggers recovery_threshold
+    (recovery_step_multiplier=2.0) for accelerated ramp-up.
+    The while i < len(resources) loop advances correctly and
+    the controller receives each batch's results.
     """
     policy = _default_policy()
     probe = _make_probe(policy=policy)
@@ -133,19 +135,21 @@ async def test_ic01_while_loop_replaces_for_loop():
     # All 100 resources were checked
     assert len(checked_resources) == 100
 
-    # Verify batch boundaries: the controller was created with batch_size=30
+    # Verify batch boundaries: the controller was created with batch_size=10
     controller = probe._batch_controllers["test_provider"]
     assert controller is not None
 
     # The while-loop uses dynamically updated batch_size after each batch.
-    # Batch 1: 30 resources (i=0→30), success → batch_size=35, delay=13
-    # Batch 2: 35 resources (i=30→65), success → batch_size=40, delay=11
-    # Batch 3: 35 resources (i=65→100), success → batch_size=45, delay=9
-    # Only 3 batches because the adaptive ramp-up consumed remaining resources
-    # faster than a fixed for-loop would have.
-    assert controller.consecutive_successes == 3
-    assert controller.batch_size == 45  # 30 + 5, then 35+5, then 40+5 = 45
-    assert controller.batch_delay == 9.0  # 15-2, then 13-2, then 11-2 = 9.0
+    # Batch 1: 10 resources (i=0→10), success → batch_size=15, delay=28
+    # Batch 2: 15 resources (i=10→25), success → batch_size=20, delay=26
+    # Batch 3: 20 resources (i=25→45), success → batch_size=25, delay=24
+    # Batch 4: 25 resources (i=45→70), success → batch_size=30, delay=22
+    # Batch 5: 30 resources (i=70→100), success → consecutive=5
+    #   → recovery_threshold reached → step_mult=2.0
+    #   → batch_size=30+10=40, delay=22-4.0=18.0
+    assert controller.consecutive_successes == 5
+    assert controller.batch_size == 40  # 10 + 5 + 5 + 5 + 5 + 10 = 40
+    assert controller.batch_delay == 18.0  # 30.0 - 4*2.0 - 4.0 = 18.0
 
 
 # ======================================================================
@@ -210,13 +214,13 @@ async def test_ic02_batch_size_changes_between_batches():
 @pytest.mark.asyncio
 async def test_ic03_batch_delay_changes_between_batches():
     """
-    After the first successful batch, batch_delay decreases (15→13).
+    After the first successful batch, batch_delay decreases (30.0→28.0).
     asyncio.sleep between batches should use the new delay.
     """
     policy = _default_policy()
     probe = _make_probe(policy=policy)
 
-    # 60 resources: first batch 30, second batch 30
+    # 60 resources: first batch 10, then 15, 20, 15
     resources = _make_resources(60)
 
     probe._check_resource = AsyncMock(return_value=CheckResult.success())
@@ -229,10 +233,15 @@ async def test_ic03_batch_delay_changes_between_batches():
     ):
         await probe._process_provider_batch("test_provider", resources)
 
-    # First batch success → delay goes from 15 → 13.0 (15 - 2.0)
-    # Sleep between batch 1 and batch 2 should use the NEW delay (13.0)
-    assert len(sleep_calls) == 1  # Only one sleep between two batches
-    assert sleep_calls[0] == 13.0  # Updated delay after first batch success
+    # Batch 1 (10): success → delay goes 30.0 → 28.0
+    # Sleep between batch 1 and 2 uses 28.0
+    # Batch 2 (15): success → delay goes 28.0 → 26.0
+    # Sleep between batch 2 and 3 uses 26.0
+    # Batch 3 (20): success → delay goes 26.0 → 24.0
+    # Sleep between batch 3 and 4 uses 24.0
+    # Batch 4 (15): done
+    assert len(sleep_calls) == 3
+    assert sleep_calls[0] == 28.0  # Updated delay after first batch success
 
 
 # ======================================================================
@@ -591,7 +600,7 @@ async def test_ic11_adaptive_batching_absent_uses_default_factory():
     """
     HealthPolicyConfig without explicit adaptive_batching uses default_factory.
     Controller should be created with default initial values from AdaptiveBatchingConfig
-    (start_batch_size=30, start_batch_delay_sec=15.0).
+    (start_batch_size=10, start_batch_delay_sec=30.0).
     """
     # Create policy without specifying adaptive_batching — default_factory kicks in
     policy = HealthPolicyConfig()
@@ -606,18 +615,20 @@ async def test_ic11_adaptive_batching_absent_uses_default_factory():
     assert controller is not None
 
     # Controller initial values come from AdaptiveBatchingConfig defaults:
-    # start_batch_size=30, start_batch_delay_sec=15.0
+    # start_batch_size=10, start_batch_delay_sec=30.0
     # min_batch_size=5, max_batch_size=50
     # min_batch_delay_sec=3.0, max_batch_delay_sec=120.0
-    assert policy.adaptive_batching.start_batch_size == 30
-    assert policy.adaptive_batching.start_batch_delay_sec == 15.0
+    assert policy.adaptive_batching.start_batch_size == 10
+    assert policy.adaptive_batching.start_batch_delay_sec == 30.0
     assert policy.adaptive_batching.min_batch_size == 5
     assert policy.adaptive_batching.max_batch_size == 50
 
-    # After one successful batch of 30, controller ramps up:
-    # batch_size: 30 + 5 = 35, batch_delay: 15.0 - 2.0 = 13.0
-    assert controller.batch_size == 35
-    assert controller.batch_delay == 13.0
+    # After three successful batches of 30 total resources (10+15+5):
+    # Batch 1: 10 success → batch_size=15, delay=28.0
+    # Batch 2: 15 success → batch_size=20, delay=26.0
+    # Batch 3: 5 success  → batch_size=25, delay=24.0
+    assert controller.batch_size == 25
+    assert controller.batch_delay == 24.0
 
 
 # ======================================================================
@@ -644,8 +655,8 @@ async def test_ic12_empty_resource_list():
     probe._check_and_update_resource.assert_not_called()
 
     # Controller state should remain at initial values (no report_batch_result called)
-    assert controller.batch_size == 30
-    assert controller.batch_delay == 15.0
+    assert controller.batch_size == 10
+    assert controller.batch_delay == 30.0
     assert controller.consecutive_successes == 0
 
 
@@ -685,8 +696,8 @@ async def test_ic13_one_resource():
     assert len(reported_results) == 1
     assert reported_results[0].available is True
 
-    # Controller ramp-up: 30 + 5 = 35
-    assert controller.batch_size == 35
+    # Controller ramp-up: 10 + 5 = 15
+    assert controller.batch_size == 15
     assert controller.consecutive_successes == 1
 
 
@@ -715,9 +726,9 @@ async def test_ic14_semaphore_integration():
     # All 60 resources should have been checked
     assert probe._check_and_update_resource.call_count == 60
 
-    # Controller should show 2 successful batches (30 + 30)
+    # Controller should show 4 successful batches (10 + 15 + 20 + 15 = 60)
     controller = probe._batch_controllers["test_provider"]
-    assert controller.consecutive_successes == 2
+    assert controller.consecutive_successes == 4
 
 
 # ======================================================================

@@ -725,9 +725,9 @@ class TestOpenAILikeHealthCheck:
         # First positional arg is the URL, forwarded from check()'s api_url
         actual_url = mock_client.post.call_args[0][0]
         expected_url = "https://api.openai.com/v1/chat/completions"
-        assert actual_url == expected_url, (
-            f"Expected URL '{expected_url}', got '{actual_url}'"
-        )
+        assert (
+            actual_url == expected_url
+        ), f"Expected URL '{expected_url}', got '{actual_url}'"
 
         # Verify the payload includes the model and the test_payload contents
         payload = mock_client.post.call_args[1]["json"]

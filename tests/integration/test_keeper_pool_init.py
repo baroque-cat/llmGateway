@@ -113,5 +113,9 @@ async def test_keeper_pool_init_default_params():
 
         # Verify init_db_pool was called with the correct pool parameters
         mock_init_pool.assert_called_once_with(
-            expected_dsn, min_size=1, max_size=15, command_timeout=30.0, connect_timeout=60.0,
+            expected_dsn,
+            min_size=1,
+            max_size=15,
+            command_timeout=30.0,
+            connect_timeout=60.0,
         )

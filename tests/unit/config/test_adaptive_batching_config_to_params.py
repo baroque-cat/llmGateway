@@ -104,8 +104,8 @@ def test_to_params_with_default_values() -> None:
     params = config.to_params()
 
     # Check a representative subset of defaults
-    assert params.start_batch_size == 30
-    assert params.start_batch_delay_sec == 15.0
+    assert params.start_batch_size == 10
+    assert params.start_batch_delay_sec == 30.0
     assert params.min_batch_size == 5
     assert params.max_batch_size == 50
     assert params.failure_rate_threshold == 0.3

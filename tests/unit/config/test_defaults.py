@@ -86,7 +86,14 @@ def test_default_config_keys_and_values():
     defaults = get_default_config()
 
     # Verify top-level key order
-    expected_keys = ["logging", "http_client", "gateway", "keeper", "database", "providers"]
+    expected_keys = [
+        "logging",
+        "http_client",
+        "gateway",
+        "keeper",
+        "database",
+        "providers",
+    ]
     actual_keys = list(defaults.keys())
     assert (
         actual_keys == expected_keys

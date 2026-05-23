@@ -129,8 +129,8 @@ class AdaptiveBatchingConfig(BaseModel):
 
     # Start values for the adaptive controller (moved from HealthPolicyConfig).
     # The controller begins with these values and adjusts them within [min, max] bounds.
-    start_batch_size: int = Field(default=30, gt=0)
-    start_batch_delay_sec: float = Field(default=15.0, ge=0)
+    start_batch_size: int = Field(default=10, gt=0)
+    start_batch_delay_sec: float = Field(default=30.0, ge=0)
 
     # Boundaries — batch size
     min_batch_size: int = Field(default=5, gt=0)

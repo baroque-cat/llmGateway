@@ -1408,9 +1408,10 @@ class TestInspectDefaultModel:
         # inspect() returns list(self.config.default_model.keys())
         mock_client = MagicMock(spec=httpx.AsyncClient)
         result = await provider.inspect(mock_client, "test_token")
-        assert result == ["model-a", "model-b"], (
-            f"Expected ['model-a', 'model-b'], got {result}"
-        )
+        assert result == [
+            "model-a",
+            "model-b",
+        ], f"Expected ['model-a', 'model-b'], got {result}"
 
 
 class TestEnhancedNetworkErrorLogging:
@@ -1443,9 +1444,7 @@ class TestEnhancedNetworkErrorLogging:
         provider = self._create_provider()
 
         mock_client = AsyncMock(spec=httpx.AsyncClient)
-        mock_client.send = AsyncMock(
-            side_effect=httpx.ReadTimeout("read timeout")
-        )
+        mock_client.send = AsyncMock(side_effect=httpx.ReadTimeout("read timeout"))
         mock_request = MagicMock(spec=httpx.Request)
         mock_request.url = "https://api.example.com/v1/chat"
 
@@ -1518,9 +1517,7 @@ class TestEnhancedNetworkErrorLogging:
         provider = self._create_provider()
 
         mock_client = AsyncMock(spec=httpx.AsyncClient)
-        mock_client.send = AsyncMock(
-            side_effect=httpx.PoolTimeout("pool timeout")
-        )
+        mock_client.send = AsyncMock(side_effect=httpx.PoolTimeout("pool timeout"))
         mock_request = MagicMock(spec=httpx.Request)
         mock_request.url = "https://api.example.com/v1/chat"
 

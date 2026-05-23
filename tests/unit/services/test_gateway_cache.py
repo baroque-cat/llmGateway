@@ -161,7 +161,10 @@ class TestGatewayCacheLogging:
                     removal_call = call
                     break
             assert removal_call is not None
-            assert "Removed failed key_id 1 from live cache pool 'openai'" in removal_call[0][0]
+            assert (
+                "Removed failed key_id 1 from live cache pool 'openai'"
+                in removal_call[0][0]
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -197,8 +200,18 @@ async def test_multiple_models_share_one_pool():
     # Mock refresh_key_pool to load records with different model_names
     mock_db_manager.keys.get_all_valid_keys_for_caching = AsyncMock(
         return_value=[
-            {"key_id": 1, "provider_name": "openai", "model_name": "gpt-4", "key_value": "sk-a"},
-            {"key_id": 2, "provider_name": "openai", "model_name": "gpt-4", "key_value": "sk-b"},
+            {
+                "key_id": 1,
+                "provider_name": "openai",
+                "model_name": "gpt-4",
+                "key_value": "sk-a",
+            },
+            {
+                "key_id": 2,
+                "provider_name": "openai",
+                "model_name": "gpt-4",
+                "key_value": "sk-b",
+            },
             {
                 "key_id": 3,
                 "provider_name": "openai",

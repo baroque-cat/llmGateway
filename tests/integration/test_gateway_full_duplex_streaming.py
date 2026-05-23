@@ -374,9 +374,7 @@ async def test_gateway_full_stream_read_error_converted_to_gateway_stream_error(
         return_value=(mock_upstream_response, CheckResult.success(), None)
     )
 
-    response = await _handle_full_stream_request(
-        req, provider, instance_name
-    )
+    response = await _handle_full_stream_request(req, provider, instance_name)
 
     # Handler returns StreamingResponse
     assert isinstance(response, StreamingResponse)

@@ -55,9 +55,13 @@ def test_load_full_config_example(mock_env):
     assert gemini.api_base_url == "https://generativelanguage.googleapis.com"
     # Verify default_model logic (formerly handled by templates, formerly "models" field)
     assert "gemini-2.5-flash" in gemini.default_model
-    assert gemini.default_model["gemini-2.5-flash"].endpoint_suffix == ":generateContent"
+    assert (
+        gemini.default_model["gemini-2.5-flash"].endpoint_suffix == ":generateContent"
+    )
     # Verify that the old "models" attribute no longer exists on ProviderConfig
-    assert not hasattr(gemini, "models"), "ProviderConfig should not have a 'models' attribute"
+    assert not hasattr(
+        gemini, "models"
+    ), "ProviderConfig should not have a 'models' attribute"
 
     assert "deepseek-main" in config.providers
     deepseek = config.providers["deepseek-main"]

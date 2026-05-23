@@ -336,9 +336,7 @@ async def test_models_from_config_not_in_desired_state() -> None:
     mock_syncer.get_resource_type.return_value = "keys"
     mock_syncer.apply_state = AsyncMock()
 
-    with patch(
-        "src.services.keeper.read_keys_from_directory", return_value=([], {})
-    ):
+    with patch("src.services.keeper.read_keys_from_directory", return_value=([], {})):
         await run_sync_cycle(accessor, db_manager, [mock_syncer])
 
     # Verify apply_state was called

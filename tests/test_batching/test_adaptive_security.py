@@ -22,8 +22,8 @@ from src.core.models import CheckResult
 
 
 def _make_config(
-    start_batch_size: int = 30,
-    start_batch_delay_sec: float = 15.0,
+    start_batch_size: int = 10,
+    start_batch_delay_sec: float = 30.0,
     min_batch_size: int = 5,
     max_batch_size: int = 50,
     min_batch_delay_sec: float = 3.0,
@@ -55,8 +55,8 @@ def _make_config(
 
 
 def _make_controller(
-    start_batch_size: int = 30,
-    start_batch_delay_sec: float = 15.0,
+    start_batch_size: int = 10,
+    start_batch_delay_sec: float = 30.0,
     config: AdaptiveBatchingConfig | None = None,
 ) -> AdaptiveBatchController:
     """Create an AdaptiveBatchController with the given config and start values."""
@@ -105,8 +105,8 @@ class TestSC01RateLimitedBackoff:
 
     def test_batch_size_halves_each_rate_limit_cycle(self) -> None:
         """batch_size //= 2 on each rate-limited report until min_batch_size."""
-        config = _make_config(min_batch_size=5, max_batch_size=50)
-        ctrl = _make_controller(start_batch_size=30, config=config)
+        config = _make_config(start_batch_size=30, min_batch_size=5, max_batch_size=50)
+        ctrl = _make_controller(config=config)
 
         # Cycle 1: 30 → 15
         ctrl.report_batch_result(_rate_limited_results(1))
@@ -123,11 +123,12 @@ class TestSC01RateLimitedBackoff:
     def test_delay_doubles_each_rate_limit_cycle(self) -> None:
         """delay *= 2 on each rate-limited report until max_batch_delay."""
         config = _make_config(
+            start_batch_delay_sec=15.0,
             min_batch_delay_sec=3.0,
             max_batch_delay_sec=60.0,
             rate_limit_delay_multiplier=2.0,
         )
-        ctrl = _make_controller(start_batch_delay_sec=15.0, config=config)
+        ctrl = _make_controller(config=config)
 
         # Cycle 1: 15 → 30
         ctrl.report_batch_result(_rate_limited_results(1))
@@ -143,8 +144,8 @@ class TestSC01RateLimitedBackoff:
 
     def test_stays_at_min_batch_size_under_persistent_rate_limits(self) -> None:
         """After reaching min_batch_size, further rate-limits don't reduce it."""
-        config = _make_config(min_batch_size=5, max_batch_size=50)
-        ctrl = _make_controller(start_batch_size=30, config=config)
+        config = _make_config(start_batch_size=30, min_batch_size=5, max_batch_size=50)
+        ctrl = _make_controller(config=config)
 
         # Drive down to min_batch_size
         for _ in range(10):
@@ -189,6 +190,8 @@ class TestSC02GradualRampUpAfterRateLimit:
     def test_ramp_up_is_gradual_after_backoff(self) -> None:
         """Each success adds batch_size_step (5), not a jump back to initial."""
         config = _make_config(
+            start_batch_size=30,
+            start_batch_delay_sec=15.0,
             min_batch_size=5,
             max_batch_size=50,
             min_batch_delay_sec=3.0,
@@ -196,11 +199,7 @@ class TestSC02GradualRampUpAfterRateLimit:
             batch_size_step=5,
             delay_step_sec=2.0,
         )
-        ctrl = _make_controller(
-            start_batch_size=30,
-            start_batch_delay_sec=15.0,
-            config=config,
-        )
+        ctrl = _make_controller(config=config)
 
         # Drive to min via rate-limits
         for _ in range(10):
@@ -229,8 +228,10 @@ class TestSC02GradualRampUpAfterRateLimit:
 
     def test_ramp_up_does_not_jump_to_initial(self) -> None:
         """After 3 successes, batch_size is still well below initial 30."""
-        config = _make_config(min_batch_size=5, max_batch_size=50, batch_size_step=5)
-        ctrl = _make_controller(start_batch_size=30, config=config)
+        config = _make_config(
+            start_batch_size=30, min_batch_size=5, max_batch_size=50, batch_size_step=5
+        )
+        ctrl = _make_controller(config=config)
 
         # Drive to min
         for _ in range(10):
@@ -261,11 +262,12 @@ class TestSC03MinBatchDelayFloor:
     def test_delay_never_drops_below_min_batch_delay(self) -> None:
         """After many successes, batch_delay stays at min_batch_delay_sec."""
         config = _make_config(
+            start_batch_delay_sec=15.0,
             min_batch_delay_sec=3.0,
             max_batch_delay_sec=60.0,
             delay_step_sec=2.0,
         )
-        ctrl = _make_controller(start_batch_delay_sec=15.0, config=config)
+        ctrl = _make_controller(config=config)
 
         # Successes reduce delay by 2.0 each time
         # 15 → 13 → 11 → 9 → 7 → 5 → 3 (capped)
@@ -342,14 +344,14 @@ class TestSC04MaxBatchDelayCeiling:
         """Even at max_batch_delay, the controller still operates
         (batch_size at min, but system continues)."""
         config = _make_config(
+            start_batch_size=30,
+            start_batch_delay_sec=15.0,
             min_batch_size=5,
             max_batch_size=50,
             min_batch_delay_sec=3.0,
             max_batch_delay_sec=60.0,
         )
-        ctrl = _make_controller(
-            start_batch_size=30, start_batch_delay_sec=15.0, config=config
-        )
+        ctrl = _make_controller(config=config)
 
         # Drive to extremes
         for _ in range(20):
@@ -499,10 +501,13 @@ class TestSC07FatalErrorsIgnored:
 
     def test_all_fatal_results_trigger_ramp_up(self) -> None:
         """A batch with only fatal errors is treated as success for ramp-up."""
-        config = _make_config(batch_size_step=5, delay_step_sec=2.0)
-        ctrl = _make_controller(
-            start_batch_size=30, start_batch_delay_sec=15.0, config=config
+        config = _make_config(
+            start_batch_size=30,
+            start_batch_delay_sec=15.0,
+            batch_size_step=5,
+            delay_step_sec=2.0,
         )
+        ctrl = _make_controller(config=config)
 
         # All 10 results are fatal (INVALID_KEY)
         results = _fatal_results(ErrorReason.INVALID_KEY, 10)
@@ -517,7 +522,7 @@ class TestSC07FatalErrorsIgnored:
     def test_each_fatal_error_type_ignored(self) -> None:
         """All four fatal error types (INVALID_KEY, NO_ACCESS, NO_QUOTA, NO_MODEL)
         are individually ignored and trigger ramp-up."""
-        config = _make_config(batch_size_step=5)
+        config = _make_config(start_batch_size=30, batch_size_step=5)
         fatal_reasons = [
             ErrorReason.INVALID_KEY,
             ErrorReason.NO_ACCESS,
@@ -526,7 +531,7 @@ class TestSC07FatalErrorsIgnored:
         ]
 
         for reason in fatal_reasons:
-            ctrl = _make_controller(start_batch_size=30, config=config)
+            ctrl = _make_controller(config=config)
             ctrl.report_batch_result(_fatal_results(reason, 5))
             assert (
                 ctrl.batch_size == 35
@@ -535,8 +540,8 @@ class TestSC07FatalErrorsIgnored:
 
     def test_mixed_fatal_and_success_trigger_ramp_up(self) -> None:
         """Fatal + success results: fatal ignored, success triggers ramp-up."""
-        config = _make_config(batch_size_step=5)
-        ctrl = _make_controller(start_batch_size=30, config=config)
+        config = _make_config(start_batch_size=30, batch_size_step=5)
+        ctrl = _make_controller(config=config)
 
         results = _fatal_results(ErrorReason.INVALID_KEY, 3) + _success_results(7)
         ctrl.report_batch_result(results)
@@ -552,6 +557,8 @@ class TestSC07FatalErrorsIgnored:
         → moderate backoff applied.
         """
         config = _make_config(
+            start_batch_size=30,
+            start_batch_delay_sec=15.0,
             min_batch_size=5,
             max_batch_size=50,
             min_batch_delay_sec=3.0,
@@ -560,9 +567,7 @@ class TestSC07FatalErrorsIgnored:
             delay_step_sec=2.0,
             failure_rate_threshold=0.3,
         )
-        ctrl = _make_controller(
-            start_batch_size=30, start_batch_delay_sec=15.0, config=config
-        )
+        ctrl = _make_controller(config=config)
 
         results = (
             _fatal_results(ErrorReason.INVALID_KEY, 3)
@@ -580,14 +585,14 @@ class TestSC07FatalErrorsIgnored:
         """Mixed fatal + rate_limited: rate_limited triggers aggressive backoff,
         fatal is irrelevant."""
         config = _make_config(
+            start_batch_size=30,
+            start_batch_delay_sec=15.0,
             min_batch_size=5,
             max_batch_size=50,
             rate_limit_divisor=2,
             rate_limit_delay_multiplier=2.0,
         )
-        ctrl = _make_controller(
-            start_batch_size=30, start_batch_delay_sec=15.0, config=config
-        )
+        ctrl = _make_controller(config=config)
 
         results = (
             _fatal_results(ErrorReason.INVALID_KEY, 2)
@@ -615,9 +620,9 @@ class TestSC08StateIsolationBetweenProviders:
 
     def test_independent_batch_size(self) -> None:
         """Rate-limiting one controller doesn't affect the other's batch_size."""
-        config = _make_config(min_batch_size=5, max_batch_size=50)
-        ctrl_openai = _make_controller(start_batch_size=30, config=config)
-        ctrl_gemini = _make_controller(start_batch_size=30, config=config)
+        config = _make_config(start_batch_size=30, min_batch_size=5, max_batch_size=50)
+        ctrl_openai = _make_controller(config=config)
+        ctrl_gemini = _make_controller(config=config)
 
         # Rate-limit openai
         ctrl_openai.report_batch_result(_rate_limited_results(1))
@@ -628,9 +633,13 @@ class TestSC08StateIsolationBetweenProviders:
 
     def test_independent_batch_delay(self) -> None:
         """Rate-limiting one controller doesn't affect the other's batch_delay."""
-        config = _make_config(min_batch_delay_sec=3.0, max_batch_delay_sec=60.0)
-        ctrl_openai = _make_controller(start_batch_delay_sec=15.0, config=config)
-        ctrl_gemini = _make_controller(start_batch_delay_sec=15.0, config=config)
+        config = _make_config(
+            start_batch_delay_sec=15.0,
+            min_batch_delay_sec=3.0,
+            max_batch_delay_sec=60.0,
+        )
+        ctrl_openai = _make_controller(config=config)
+        ctrl_gemini = _make_controller(config=config)
 
         # Rate-limit openai
         ctrl_openai.report_batch_result(_rate_limited_results(1))
@@ -663,6 +672,8 @@ class TestSC08StateIsolationBetweenProviders:
         Neither affects the other.
         """
         config = _make_config(
+            start_batch_size=30,
+            start_batch_delay_sec=15.0,
             min_batch_size=5,
             max_batch_size=50,
             min_batch_delay_sec=3.0,
@@ -670,16 +681,8 @@ class TestSC08StateIsolationBetweenProviders:
             batch_size_step=5,
             delay_step_sec=2.0,
         )
-        ctrl_openai = _make_controller(
-            start_batch_size=30,
-            start_batch_delay_sec=15.0,
-            config=config,
-        )
-        ctrl_gemini = _make_controller(
-            start_batch_size=30,
-            start_batch_delay_sec=15.0,
-            config=config,
-        )
+        ctrl_openai = _make_controller(config=config)
+        ctrl_gemini = _make_controller(config=config)
 
         # OpenAI: 2 rate-limits
         ctrl_openai.report_batch_result(_rate_limited_results(1))
@@ -703,6 +706,8 @@ class TestSC08StateIsolationBetweenProviders:
     def test_different_configs_dont_interact(self) -> None:
         """Controllers with different configs are fully independent."""
         config_openai = _make_config(
+            start_batch_size=30,
+            start_batch_delay_sec=15.0,
             min_batch_size=5,
             max_batch_size=50,
             batch_size_step=5,

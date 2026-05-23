@@ -136,13 +136,9 @@ async def test_server_error_then_key_error_synergy_original_error_forwarded():
     # 2. Exactly 4 get_key_from_pool calls (verify side_effect consumed)
     assert req.app.state.gateway_cache.get_key_from_pool.call_count == 4
     # 3. Key 1 removed from pool after fatal error
-    req.app.state.gateway_cache.remove_key_from_pool.assert_any_call(
-        instance_name, 1
-    )
+    req.app.state.gateway_cache.remove_key_from_pool.assert_any_call(instance_name, 1)
     # 4. Key 2 removed from pool after server error exhaustion
-    req.app.state.gateway_cache.remove_key_from_pool.assert_any_call(
-        instance_name, 2
-    )
+    req.app.state.gateway_cache.remove_key_from_pool.assert_any_call(instance_name, 2)
     # 5. DB updated for both keys (each key failure triggers update_status)
     assert req.app.state.db_manager.keys.update_status.call_count == 2
     # 6. discard_response called for 3 intermediate attempts (not inline aclose)
@@ -281,12 +277,8 @@ async def test_counter_reset_on_key_rotation_unchanged():
     # 2. Exactly 4 get_key_from_pool calls (key1, key1, key2, key2)
     assert req.app.state.gateway_cache.get_key_from_pool.call_count == 4
     # 3. Both keys removed from pool after key errors
-    req.app.state.gateway_cache.remove_key_from_pool.assert_any_call(
-        instance_name, 1
-    )
-    req.app.state.gateway_cache.remove_key_from_pool.assert_any_call(
-        instance_name, 2
-    )
+    req.app.state.gateway_cache.remove_key_from_pool.assert_any_call(instance_name, 1)
+    req.app.state.gateway_cache.remove_key_from_pool.assert_any_call(instance_name, 2)
     # 4. DB updated for both keys
     assert req.app.state.db_manager.keys.update_status.call_count == 2
     # 5. discard_response called for 3 intermediate attempts (attempts 1, 2, 3)

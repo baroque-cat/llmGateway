@@ -101,10 +101,10 @@ def test_ut_a05_start_batch_delay_above_max_raises():
 
 def test_ut_a06_start_batch_size_within_bounds_valid():
     """
-    UT-A06: start_batch_size=30 within [5, 50] is valid.
+    UT-A06: start_batch_size=10 within [5, 50] is valid.
     """
-    cfg = AdaptiveBatchingConfig(start_batch_size=30)
-    assert cfg.start_batch_size == 30
+    cfg = AdaptiveBatchingConfig(start_batch_size=10)
+    assert cfg.start_batch_size == 10
 
 
 # ---------------------------------------------------------------------------
@@ -114,10 +114,10 @@ def test_ut_a06_start_batch_size_within_bounds_valid():
 
 def test_ut_a07_start_batch_delay_within_bounds_valid():
     """
-    UT-A07: start_batch_delay_sec=15.0 within [3.0, 120.0] is valid.
+    UT-A07: start_batch_delay_sec=30.0 within [3.0, 120.0] is valid.
     """
-    cfg = AdaptiveBatchingConfig(start_batch_delay_sec=15.0)
-    assert cfg.start_batch_delay_sec == 15.0
+    cfg = AdaptiveBatchingConfig(start_batch_delay_sec=30.0)
+    assert cfg.start_batch_delay_sec == 30.0
 
 
 # ---------------------------------------------------------------------------
@@ -250,15 +250,15 @@ def test_uc33_valid_config_with_defaults():
     Creating AdaptiveBatchingConfig() without args should populate all 13
     fields with their documented default values.
 
-    Merged UT-A01: start_batch_size defaults to 30 and
-    start_batch_delay_sec defaults to 15.0 are now verified here
+    Merged UT-A01: start_batch_size defaults to 10 and
+    start_batch_delay_sec defaults to 30.0 are now verified here
     alongside all other defaults, eliminating the separate UT-A01 test.
     """
     cfg = AdaptiveBatchingConfig()
 
     # Start values (UT-H03)
-    assert cfg.start_batch_size == 30
-    assert cfg.start_batch_delay_sec == 15.0
+    assert cfg.start_batch_size == 10
+    assert cfg.start_batch_delay_sec == 30.0
 
     # Boundaries — batch size
     assert cfg.min_batch_size == 5
@@ -363,8 +363,8 @@ def test_uc38_default_factory_populated_in_health_policy():
     Creating HealthPolicyConfig() without specifying adaptive_batching should
     populate it via default_factory with all default AdaptiveBatchingConfig values.
 
-    UT-H04: Added checks for start_batch_size == 30 and
-    start_batch_delay_sec == 15.0.
+    UT-H04: Added checks for start_batch_size == 10 and
+    start_batch_delay_sec == 30.0.
     """
     policy = HealthPolicyConfig()
 
@@ -372,8 +372,8 @@ def test_uc38_default_factory_populated_in_health_policy():
     assert isinstance(policy.adaptive_batching, AdaptiveBatchingConfig)
 
     # Start values (UT-H04)
-    assert policy.adaptive_batching.start_batch_size == 30
-    assert policy.adaptive_batching.start_batch_delay_sec == 15.0
+    assert policy.adaptive_batching.start_batch_size == 10
+    assert policy.adaptive_batching.start_batch_delay_sec == 30.0
 
     # Verify all default values are populated
     assert policy.adaptive_batching.min_batch_size == 5

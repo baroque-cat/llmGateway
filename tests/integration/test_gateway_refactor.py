@@ -1301,9 +1301,7 @@ async def test_IT5_500_full_stream_client_gets_original_500():
         None,
     )
 
-    response = await _handle_full_stream_request(
-        req, provider, instance_name
-    )
+    response = await _handle_full_stream_request(req, provider, instance_name)
     await asyncio.sleep(0.01)
 
     # KEY assertion: client gets original 500, NOT synthetic 503
@@ -1364,9 +1362,7 @@ async def test_401_full_stream_client_gets_original_401():
         None,
     )
 
-    response = await _handle_full_stream_request(
-        req, provider, instance_name
-    )
+    response = await _handle_full_stream_request(req, provider, instance_name)
     await asyncio.sleep(0.01)
 
     # Client gets original 401, NOT synthetic 503
@@ -1419,9 +1415,7 @@ async def test_429_full_stream_client_gets_original_429():
         None,
     )
 
-    response = await _handle_full_stream_request(
-        req, provider, instance_name
-    )
+    response = await _handle_full_stream_request(req, provider, instance_name)
     await asyncio.sleep(0.01)
 
     # Client gets original 429, NOT synthetic 503
@@ -1485,9 +1479,7 @@ async def test_400_full_stream_client_gets_original_400_unchanged():
             headers={"content-type": "application/json", "x-custom": "test-value"},
         )
 
-        response = await _handle_full_stream_request(
-            req, provider, instance_name
-        )
+        response = await _handle_full_stream_request(req, provider, instance_name)
 
     # Verify forward_error_to_client was called (new implementation path)
     assert mock_forward.called, (
@@ -1545,9 +1537,7 @@ async def test_SEC1_aclose_in_finally_via_upstream_attempt():
             media_type="application/json",
         )
 
-        response = await _handle_full_stream_request(
-            req, provider, instance_name
-        )
+        response = await _handle_full_stream_request(req, provider, instance_name)
 
     # Verify forward_error_to_client was called — aclose happens inside it
     assert mock_forward.called, (
@@ -1733,9 +1723,7 @@ async def test_SEC2_aread_fails_for_non_400_finally_still_calls_aclose():
         None,
     )
 
-    response = await _handle_full_stream_request(
-        req, provider, instance_name
-    )
+    response = await _handle_full_stream_request(req, provider, instance_name)
 
     # Verify: aread was called (even though it failed) — inside forward_error_to_client
     assert upstream_response.aread.called
@@ -1792,9 +1780,7 @@ async def test_6_2_handle_full_stream_request_read_error_intercepted():
         None,
     )
 
-    response = await _handle_full_stream_request(
-        req, provider, instance_name
-    )
+    response = await _handle_full_stream_request(req, provider, instance_name)
 
     # Handler returns StreamingResponse immediately (before stream is consumed)
     assert isinstance(response, StreamingResponse)
@@ -2064,9 +2050,7 @@ async def test_6_6_read_error_log_contains_provider_and_model(caplog):
     with caplog.at_level(
         logging.WARNING, logger="src.services.gateway.gateway_service"
     ):
-        response = await _handle_full_stream_request(
-            req, provider, instance_name
-        )
+        response = await _handle_full_stream_request(req, provider, instance_name)
 
         # Iterate the stream to trigger the ReadError and WARNING log
         with pytest.raises(GatewayStreamError):
@@ -2120,9 +2104,7 @@ async def test_SEC3_read_error_does_not_bubble_as_unhandled_500():
         None,
     )
 
-    response = await _handle_full_stream_request(
-        req, provider, instance_name
-    )
+    response = await _handle_full_stream_request(req, provider, instance_name)
 
     assert isinstance(response, StreamingResponse)
 

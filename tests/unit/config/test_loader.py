@@ -170,3 +170,53 @@ providers:
         # Ensure other default values are still present
         assert provider.worker_health_policy.amnesty_threshold_days == 2.0
         assert provider.worker_health_policy.adaptive_batching.start_batch_size == 10
+
+
+def test_load_yaml_with_explicit_adaptive_batching_values():
+    """
+    Test that explicit adaptive_batching values in YAML are loaded correctly
+    and match the new defaults: start_batch_size=10, start_batch_delay_sec=30.0.
+    """
+    mock_yaml_content = """database:
+  host: localhost
+  port: 5432
+  password: test_password
+keeper:
+  max_concurrent_providers: 5
+providers:
+  test_provider:
+    enabled: true
+    provider_type: "gemini"
+    api_base_url: "https://api.test.com/v1"
+    access_control:
+      gateway_access_token: "test_token"
+    gateway_policy:
+      debug_mode: "disabled"
+      streaming_mode: "auto"
+    worker_health_policy:
+      adaptive_batching:
+        start_batch_size: 10
+        start_batch_delay_sec: 30.0
+"""
+
+    with (
+        patch.dict(os.environ, _BASE_ENV),
+        patch("os.path.exists", return_value=True),
+        patch("builtins.open", mock_open(read_data=mock_yaml_content)),
+    ):
+        loader = ConfigLoader(path="dummy_path.yaml")
+        config = loader.load()
+
+        provider = config.providers["test_provider"]
+        adaptive = provider.worker_health_policy.adaptive_batching
+
+        # Verify the explicit adaptive batching values
+        assert adaptive.start_batch_size == 10
+        assert adaptive.start_batch_delay_sec == 30.0
+
+        # Verify other adaptive batching defaults remain intact
+        assert adaptive.min_batch_size == 5
+        assert adaptive.max_batch_size == 50
+        assert adaptive.min_batch_delay_sec == 3.0
+        assert adaptive.max_batch_delay_sec == 120.0
+        assert adaptive.failure_rate_threshold == 0.3

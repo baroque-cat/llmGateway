@@ -262,14 +262,14 @@ def test_ut_b04_health_policy_adaptive_batching_default_factory():
     """
     UT-B04: HealthPolicyConfig.adaptive_batching is always populated via
     default_factory. When creating HealthPolicyConfig() without specifying
-    adaptive_batching, it should have start_batch_size=30 and
-    start_batch_delay_sec=15.0 (the defaults from AdaptiveBatchingConfig).
+    adaptive_batching, it should have start_batch_size=10 and
+    start_batch_delay_sec=30.0 (the defaults from AdaptiveBatchingConfig).
     """
     policy = HealthPolicyConfig()
 
     assert isinstance(policy.adaptive_batching, AdaptiveBatchingConfig)
-    assert policy.adaptive_batching.start_batch_size == 30
-    assert policy.adaptive_batching.start_batch_delay_sec == 15.0
+    assert policy.adaptive_batching.start_batch_size == 10
+    assert policy.adaptive_batching.start_batch_delay_sec == 30.0
 
 
 def test_ut_b05_health_policy_default_on_success_hr():

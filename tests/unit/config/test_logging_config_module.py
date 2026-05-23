@@ -661,12 +661,12 @@ class TestHttpClientLogging:
 
                 # Verify the trace handler is set and is callable
                 handler = get_trace_handler()
-                assert handler is not None, (
-                    "trace handler should be non-None when trace_enabled=True"
-                )
-                assert callable(handler), (
-                    "trace handler should be callable when trace_enabled=True"
-                )
+                assert (
+                    handler is not None
+                ), "trace handler should be non-None when trace_enabled=True"
+                assert callable(
+                    handler
+                ), "trace handler should be callable when trace_enabled=True"
 
                 # Verify httpcore logger is set to DEBUG level
                 mock_httpcore_logger.setLevel.assert_called_once_with(logging.DEBUG)

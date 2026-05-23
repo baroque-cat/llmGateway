@@ -57,4 +57,3 @@ async def test_shared_key_status_bug_reproduction():
         f"Expected {expected_result} but got {result}. "
         "The shared key bug has been fixed by the flat provider pool architecture."
     )
-

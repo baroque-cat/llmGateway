@@ -568,6 +568,6 @@ class TestGeminiParseDetailsFromUrl:
         result = await provider.parse_request_details(path, content)
 
         assert isinstance(result, RequestDetails)
-        assert result.model_name == "gemini-2.5-pro", (
-            f"Expected 'gemini-2.5-pro', got '{result.model_name}'"
-        )
+        assert (
+            result.model_name == "gemini-2.5-pro"
+        ), f"Expected 'gemini-2.5-pro', got '{result.model_name}'"

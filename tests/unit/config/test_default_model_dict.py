@@ -28,9 +28,7 @@ class TestDefaultModelDict:
                             "gemini-2.5-flash": {
                                 "endpoint_suffix": ":generateContent",
                                 "test_payload": {
-                                    "contents": [
-                                        {"parts": [{"text": "Hello"}]}
-                                    ]
+                                    "contents": [{"parts": [{"text": "Hello"}]}]
                                 },
                             }
                         },
@@ -43,23 +41,19 @@ class TestDefaultModelDict:
         default_model = provider.default_model
 
         # Dict shape
-        assert isinstance(default_model, dict), (
-            "default_model must be a dict"
-        )
+        assert isinstance(default_model, dict), "default_model must be a dict"
         assert len(default_model) == 1
         assert "gemini-2.5-flash" in default_model
 
         # Value type
         model_info = default_model["gemini-2.5-flash"]
-        assert isinstance(model_info, ModelInfo), (
-            "Each value must be a ModelInfo instance"
-        )
+        assert isinstance(
+            model_info, ModelInfo
+        ), "Each value must be a ModelInfo instance"
 
         # Field contents
         assert model_info.endpoint_suffix == ":generateContent"
-        assert model_info.test_payload == {
-            "contents": [{"parts": [{"text": "Hello"}]}]
-        }
+        assert model_info.test_payload == {"contents": [{"parts": [{"text": "Hello"}]}]}
 
     def test_empty_default_model_is_valid(self):
         """
@@ -79,12 +73,10 @@ class TestDefaultModelDict:
         provider = config.providers["bare_provider"]
         default_model = provider.default_model
 
-        assert isinstance(default_model, dict), (
-            "default_model must be a dict"
-        )
-        assert default_model == {}, (
-            "Absent default_model should resolve to an empty dict"
-        )
+        assert isinstance(default_model, dict), "default_model must be a dict"
+        assert (
+            default_model == {}
+        ), "Absent default_model should resolve to an empty dict"
 
     def test_config_validation_rejects_models_field(self):
         """
@@ -98,24 +90,20 @@ class TestDefaultModelDict:
                     "providers": {
                         "old_format": {
                             "provider_type": "anthropic",
-                            "models": {
-                                "claude-3-haiku": {}
-                            },
+                            "models": {"claude-3-haiku": {}},
                         }
                     }
                 }
             )
 
         errors = exc_info.value.errors()
-        extra_errors = [
-            e for e in errors if e.get("type") == "extra_forbidden"
-        ]
-        assert extra_errors, (
-            f"Expected at least one 'extra_forbidden' error but got: {errors}"
-        )
+        extra_errors = [e for e in errors if e.get("type") == "extra_forbidden"]
+        assert (
+            extra_errors
+        ), f"Expected at least one 'extra_forbidden' error but got: {errors}"
 
         # Also confirm it mentions the offending field
         field_names = [e.get("loc", []) for e in extra_errors]
-        assert any("models" in loc for loc in field_names), (
-            f"Expected 'models' in error loc paths but got: {field_names}"
-        )
+        assert any(
+            "models" in loc for loc in field_names
+        ), f"Expected 'models' in error loc paths but got: {field_names}"

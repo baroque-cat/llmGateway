@@ -49,9 +49,7 @@ class TestTransparentModelRouting:
         ):
             # Even with an unknown model in the request, the handler
             # should NOT reject it — it just forwards transparently.
-            result = await _handle_full_stream_request(
-                request, provider, "openai"
-            )
+            result = await _handle_full_stream_request(request, provider, "openai")
 
             assert result is mock_streaming_response
             # Verify the provider was called — meaning the request was forwarded
@@ -69,12 +67,18 @@ class TestTransparentModelRouting:
         # Replace default_model with a sentinel that fails if accessed
         sentinel = MagicMock()
         sentinel.__getitem__ = Mock(
-            side_effect=AssertionError("default_model should NOT be accessed in hot path")
+            side_effect=AssertionError(
+                "default_model should NOT be accessed in hot path"
+            )
         )
         sentinel.get = Mock(
-            side_effect=AssertionError("default_model should NOT be accessed in hot path")
+            side_effect=AssertionError(
+                "default_model should NOT be accessed in hot path"
+            )
         )
-        mock_provider_config = request.app.state.accessor.get_provider_or_raise.return_value
+        mock_provider_config = (
+            request.app.state.accessor.get_provider_or_raise.return_value
+        )
         mock_provider_config.default_model = sentinel
 
         provider = _make_mock_provider()
@@ -87,9 +91,7 @@ class TestTransparentModelRouting:
             "src.services.gateway.gateway_service.forward_success_stream",
             new=AsyncMock(return_value=mock_streaming_response),
         ):
-            result = await _handle_full_stream_request(
-                request, provider, "openai"
-            )
+            result = await _handle_full_stream_request(request, provider, "openai")
 
             # Should succeed without ever touching default_model
             assert result is mock_streaming_response
@@ -165,7 +167,9 @@ class TestDispatchLogic:
         """
         request = _make_mock_request()
         # Verify default config: debug disabled, retry disabled
-        mock_provider_config = request.app.state.accessor.get_provider_or_raise.return_value
+        mock_provider_config = (
+            request.app.state.accessor.get_provider_or_raise.return_value
+        )
         assert mock_provider_config.gateway_policy.debug_mode == "disabled"
         assert mock_provider_config.gateway_policy.retry.enabled is False
 
@@ -179,9 +183,7 @@ class TestDispatchLogic:
             "src.services.gateway.gateway_service.forward_success_stream",
             new=AsyncMock(return_value=mock_streaming_response),
         ):
-            result = await _handle_full_stream_request(
-                request, provider, "openai"
-            )
+            result = await _handle_full_stream_request(request, provider, "openai")
 
             assert result is mock_streaming_response
 
@@ -193,7 +195,9 @@ class TestDispatchLogic:
         bodies. Verify the buffered handler processes successfully.
         """
         request = _make_mock_request()
-        mock_provider_config = request.app.state.accessor.get_provider_or_raise.return_value
+        mock_provider_config = (
+            request.app.state.accessor.get_provider_or_raise.return_value
+        )
         mock_provider_config.gateway_policy.debug_mode = "full_body"
         mock_provider_config.gateway_policy.retry.enabled = False
 
@@ -229,7 +233,9 @@ class TestDispatchLogic:
         across retry attempts.
         """
         request = _make_mock_request()
-        mock_provider_config = request.app.state.accessor.get_provider_or_raise.return_value
+        mock_provider_config = (
+            request.app.state.accessor.get_provider_or_raise.return_value
+        )
         mock_provider_config.gateway_policy.retry.enabled = True
         retry_policy = MagicMock()
         retry_policy.attempts = 3
@@ -271,7 +277,9 @@ class TestDispatchLogic:
         ``provider_config.timeouts.total`` value.
         """
         request = _make_mock_request()
-        mock_provider_config = request.app.state.accessor.get_provider_or_raise.return_value
+        mock_provider_config = (
+            request.app.state.accessor.get_provider_or_raise.return_value
+        )
         mock_provider_config.gateway_policy.retry.enabled = True
         mock_provider_config.timeouts = MagicMock()
         mock_provider_config.timeouts.total = 30.0
@@ -353,9 +361,7 @@ class TestBodyHandling:
             "src.services.gateway.gateway_service.forward_success_stream",
             new=AsyncMock(return_value=mock_streaming_response),
         ):
-            result = await _handle_full_stream_request(
-                request, provider, "openai"
-            )
+            result = await _handle_full_stream_request(request, provider, "openai")
 
             # Must succeed without ever calling request.body()
             assert result is mock_streaming_response
@@ -387,9 +393,7 @@ class TestBodyHandling:
             "src.services.gateway.gateway_service.forward_success_stream",
             new=AsyncMock(return_value=mock_streaming_response),
         ):
-            result = await _handle_full_stream_request(
-                request, provider, "openai"
-            )
+            result = await _handle_full_stream_request(request, provider, "openai")
 
             # Must succeed without ever calling parse_request_details()
             assert result is mock_streaming_response
