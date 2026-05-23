@@ -330,7 +330,7 @@ def test_ut_c01_timeout_config_default_connect():
     UT-C01: Default TimeoutConfig.connect is 15.0 (updated from old value of 5.0).
     """
     timeouts = TimeoutConfig()
-    assert timeouts.connect == 15.0
+    assert timeouts.connect == 10.0
 
 
 def test_ut_c02_timeout_config_default_read():
@@ -338,7 +338,7 @@ def test_ut_c02_timeout_config_default_read():
     UT-C02: Default TimeoutConfig.read is 300.0 (updated from old value of 20.0).
     """
     timeouts = TimeoutConfig()
-    assert timeouts.read == 300.0
+    assert timeouts.read == 120.0
 
 
 def test_ut_c03_timeout_config_default_write():
@@ -346,7 +346,7 @@ def test_ut_c03_timeout_config_default_write():
     UT-C03: Default TimeoutConfig.write is 35.0 (updated from old value of 10.0).
     """
     timeouts = TimeoutConfig()
-    assert timeouts.write == 35.0
+    assert timeouts.write == 20.0
 
 
 def test_ut_c04_timeout_config_default_pool():
@@ -354,7 +354,7 @@ def test_ut_c04_timeout_config_default_pool():
     UT-C04: Default TimeoutConfig.pool is 35.0 (updated from old value of 5.0).
     """
     timeouts = TimeoutConfig()
-    assert timeouts.pool == 35.0
+    assert timeouts.pool == 15.0
 
 
 # ==============================================================================
@@ -440,7 +440,7 @@ def test_g2_1_1_dedicated_http_client_default_is_false():
     field is not explicitly provided.
     """
     provider = ProviderConfig(provider_type="openai_like")
-    assert provider.dedicated_http_client is False
+    assert provider.dedicated_http_client is True
 
 
 def test_g2_1_2_dedicated_http_client_explicit_true():
@@ -519,7 +519,7 @@ def test_g2_1_5_yaml_dedicated_http_client_absent_defaults_to_false():
         config = loader.load()
 
         provider = config.providers["test_provider"]
-        assert provider.dedicated_http_client is False
+        assert provider.dedicated_http_client is True
 
 
 # ==============================================================================

@@ -372,13 +372,16 @@ class TimeoutConfig(BaseModel):
     """
 
     # Timeout for establishing a connection.
-    connect: float = Field(default=15.0, gt=0)
+    connect: float = Field(default=10.0, gt=0)
     # Timeout for waiting for a chunk of the response.
-    read: float = Field(default=300.0, gt=0)
+    read: float = Field(default=120.0, gt=0)
     # Timeout for sending a chunk of the request.
-    write: float = Field(default=35.0, gt=0)
+    write: float = Field(default=20.0, gt=0)
     # Timeout for acquiring a connection from the connection pool.
-    pool: float = Field(default=35.0, gt=0)
+    pool: float = Field(default=15.0, gt=0)
+    # Total wall-clock deadline for the entire request lifecycle (including retries).
+    # Enforced via ``asyncio.timeout()`` around the gateway retry loop.
+    total: float = Field(default=600.0, gt=0)
 
 
 class ErrorParsingRule(BaseModel):
@@ -454,6 +457,52 @@ class ErrorParsingConfig(BaseModel):
                 )
             status_priorities[rule.status_code].add(rule.priority)
         return self
+
+
+class HttpClientPoolConfig(BaseModel):
+    """
+    HTTP client connection pool limits passed to ``httpx.Limits``.
+
+    Applied globally at the ``httpx.AsyncClient`` level — every client created
+    by ``HttpClientFactory`` uses these limits, affecting both Keeper and Gateway.
+    """
+
+    # Maximum total connections in the pool.
+    max_connections: int = Field(default=100, gt=0)
+    # Maximum keep-alive connections in the pool.
+    max_keepalive_connections: int = Field(default=20, gt=0)
+    # Keep-alive connection expiry in seconds.
+    keepalive_expiry: float = Field(default=5.0, gt=0)
+
+
+class HttpClientConfig(BaseModel):
+    """
+    Global HTTP client configuration — pool limits and HTTP/2 toggle.
+
+    Top-level ``http_client`` section in the config, applied to every
+    ``httpx.AsyncClient`` created by ``HttpClientFactory``.
+    """
+
+    # Enable or disable HTTP/2 for upstream connections.
+    http2: bool = True
+    # Connection pool limits.
+    pool: HttpClientPoolConfig = Field(default_factory=HttpClientPoolConfig)
+
+
+class HttpClientLoggingConfig(BaseModel):
+    """
+    Independent log level control for httpx and httpcore libraries.
+
+    Nested under the ``logging`` config section. Defaults silence both
+    libraries at ``WARNING`` level regardless of the application log level.
+    """
+
+    # Log level for the httpx logger.
+    httpx_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "WARNING"
+    # Log level for the httpcore logger.
+    httpcore_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "WARNING"
+    # If True, httpx per-request trace events are enabled via ``extensions={"trace": handler}``.
+    trace_enabled: bool = False
 
 
 class GatewayPolicyConfig(BaseModel):
@@ -534,8 +583,8 @@ class ProviderConfig(BaseModel):
     # If True, the instance gets a dedicated httpx.AsyncClient (separate connection pool).
     # Useful for high-load instances (e.g., litellm with agents) so their
     # TCP connections do not starve connections from other providers in the shared client.
-    # Defaults to False — a shared client is used with other providers of the same proxy mode.
-    dedicated_http_client: bool = False
+    # Defaults to True for connection pool isolation per provider.
+    dedicated_http_client: bool = True
 
     # --- Nested Configuration Objects ---
     # These fields are intentionally not Optional. By using default_factory, we ensure
@@ -584,13 +633,21 @@ class DatabasePoolConfig(BaseModel):
     PostgreSQL connection pool settings.
 
     Defines the minimum and maximum size of the async connection pool
-    used by ``asyncpg.create_pool()``.
+    used by ``asyncpg.create_pool()``, plus query timeout parameters.
     """
 
     # Minimum number of connections in the pool.
     min_size: int = Field(default=1, gt=0)
     # Maximum number of connections in the pool.
     max_size: int = Field(default=15, gt=0)
+    # Maximum time (seconds) for a single query to execute before being cancelled.
+    # Applies to ALL queries through the pool. Fire-and-forget tasks
+    # (``_report_key_failure``, ``cache.refresh_key_pool``) benefit
+    # from this safety net. Default 30s.
+    command_timeout: float = Field(default=30.0, gt=0)
+    # Maximum time (seconds) to wait for a TCP connection to the database.
+    # Default is 60s (matching asyncpg's built-in default).
+    connect_timeout: float = Field(default=60.0, gt=0)
 
     @model_validator(mode="after")
     def check_bounds(self) -> "DatabasePoolConfig":
@@ -644,6 +701,10 @@ class LoggingConfig(BaseModel):
 
     # The global log level for the application. Can be "DEBUG", "INFO", "WARNING", "ERROR".
     level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+    # Independent log level control for httpx and httpcore HTTP client libraries.
+    http_client: HttpClientLoggingConfig = Field(
+        default_factory=HttpClientLoggingConfig
+    )
 
 
 class GatewayConfig(BaseModel):
@@ -681,6 +742,7 @@ class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
+    http_client: HttpClientConfig = Field(default_factory=HttpClientConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     keeper: KeeperConfig = Field(default_factory=KeeperConfig)
     metrics: MetricsConfig = Field(default_factory=MetricsConfig)

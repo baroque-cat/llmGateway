@@ -1411,3 +1411,176 @@ class TestInspectDefaultModel:
         assert result == ["model-a", "model-b"], (
             f"Expected ['model-a', 'model-b'], got {result}"
         )
+
+
+class TestEnhancedNetworkErrorLogging:
+    """
+    Test suite for enhanced network error logging in _send_proxy_request.
+
+    Verifies that different httpx.RequestError subclasses produce
+    descriptive log messages with the correct detail strings, and
+    that the 3-tuple return contract is preserved.
+    """
+
+    @staticmethod
+    def _create_provider() -> MockAIBaseProvider:
+        """Create a MockAIBaseProvider with default config."""
+        return MockAIBaseProvider(
+            "test_provider",
+            ProviderConfig(provider_type="openai_like"),
+        )
+
+    # --- 1. ReadTimeout logged with detail ---
+
+    @pytest.mark.asyncio
+    async def test_read_timeout_logged_with_detail(self):
+        """
+        Scenario 1: httpx.ReadTimeout raised by client.send().
+
+        Verifies: log message contains [ReadTimeout], provider name,
+        upstream URL, and "no data received" detail.
+        """
+        provider = self._create_provider()
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.send = AsyncMock(
+            side_effect=httpx.ReadTimeout("read timeout")
+        )
+        mock_request = MagicMock(spec=httpx.Request)
+        mock_request.url = "https://api.example.com/v1/chat"
+
+        with patch("src.providers.base.logger") as mock_logger:
+            response, check_result, body_bytes = await provider._send_proxy_request(
+                mock_client, mock_request
+            )
+
+        # Verify logger.error was called exactly once
+        mock_logger.error.assert_called_once()
+        log_message: str = mock_logger.error.call_args[0][0]
+
+        assert "[ReadTimeout]" in log_message
+        assert "test_provider" in log_message
+        assert "api.example.com" in log_message
+        assert "no data received" in log_message
+
+        # Verify 3-tuple return contract
+        assert response.status_code == 503
+        assert check_result.available is False
+        assert check_result.error_reason == ErrorReason.NETWORK_ERROR
+        assert body_bytes is None
+
+    # --- 2. RemoteProtocolError logged with detail ---
+
+    @pytest.mark.asyncio
+    async def test_remote_protocol_error_logged_with_detail(self):
+        """
+        Scenario 2: httpx.RemoteProtocolError raised by client.send().
+
+        Verifies: log message contains [RemoteProtocolError] and
+        "HTTP/2 protocol error" detail.
+        """
+        provider = self._create_provider()
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.send = AsyncMock(
+            side_effect=httpx.RemoteProtocolError("protocol error")
+        )
+        mock_request = MagicMock(spec=httpx.Request)
+        mock_request.url = "https://api.example.com/v1/chat"
+
+        with patch("src.providers.base.logger") as mock_logger:
+            response, check_result, body_bytes = await provider._send_proxy_request(
+                mock_client, mock_request
+            )
+
+        mock_logger.error.assert_called_once()
+        log_message: str = mock_logger.error.call_args[0][0]
+
+        assert "[RemoteProtocolError]" in log_message
+        assert "HTTP/2 protocol error" in log_message
+
+        # Verify 3-tuple return contract
+        assert response.status_code == 503
+        assert check_result.available is False
+        assert check_result.error_reason == ErrorReason.NETWORK_ERROR
+        assert body_bytes is None
+
+    # --- 3. PoolTimeout logged with detail ---
+
+    @pytest.mark.asyncio
+    async def test_pool_timeout_logged_with_detail(self):
+        """
+        Scenario 3: httpx.PoolTimeout raised by client.send().
+
+        Verifies: log message contains [PoolTimeout] and
+        "connection pool exhausted" detail.
+        """
+        provider = self._create_provider()
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.send = AsyncMock(
+            side_effect=httpx.PoolTimeout("pool timeout")
+        )
+        mock_request = MagicMock(spec=httpx.Request)
+        mock_request.url = "https://api.example.com/v1/chat"
+
+        with patch("src.providers.base.logger") as mock_logger:
+            response, check_result, body_bytes = await provider._send_proxy_request(
+                mock_client, mock_request
+            )
+
+        mock_logger.error.assert_called_once()
+        log_message: str = mock_logger.error.call_args[0][0]
+
+        assert "[PoolTimeout]" in log_message
+        assert "connection pool exhausted" in log_message
+
+        # Verify 3-tuple return contract
+        assert response.status_code == 503
+        assert check_result.available is False
+        assert check_result.error_reason == ErrorReason.NETWORK_ERROR
+        assert body_bytes is None
+
+    # --- 4. Unknown RequestError (CloseError) ---
+
+    @pytest.mark.asyncio
+    async def test_unknown_request_error_has_type_name_no_extra_detail(self):
+        """
+        Scenario 4: httpx.CloseError (unhandled RequestError subclass).
+
+        Verifies: log message contains [CloseError] type name but
+        none of the specific detail strings from handled subclasses.
+        """
+        provider = self._create_provider()
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.send = AsyncMock(
+            side_effect=httpx.CloseError("connection closed unexpectedly")
+        )
+        mock_request = MagicMock(spec=httpx.Request)
+        mock_request.url = "https://api.example.com/v1/chat"
+
+        with patch("src.providers.base.logger") as mock_logger:
+            response, check_result, body_bytes = await provider._send_proxy_request(
+                mock_client, mock_request
+            )
+
+        mock_logger.error.assert_called_once()
+        log_message: str = mock_logger.error.call_args[0][0]
+
+        # Type name is present
+        assert "[CloseError]" in log_message
+
+        # None of the specific detail strings from handled subclasses appear
+        assert "no data received" not in log_message
+        assert "connection pool exhausted" not in log_message
+        assert "HTTP/2 protocol error" not in log_message
+        assert "TCP connection failed" not in log_message
+        assert "send stalled" not in log_message
+        assert "TCP handshake timed out" not in log_message
+
+        # Verify 3-tuple return contract
+        assert response.status_code == 503
+        assert check_result.available is False
+        assert check_result.error_reason == ErrorReason.NETWORK_ERROR
+        assert body_bytes is None

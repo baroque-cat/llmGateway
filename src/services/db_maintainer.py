@@ -98,6 +98,9 @@ class DatabaseMaintainer(IDatabaseMaintainer):
 
             if should_vacuum(health, threshold):
                 async with pool.acquire() as conn:
+                    # Override pool-level command_timeout for VACUUM which can
+                    # legitimately take longer than the default 30s.
+                    await conn.execute("SET statement_timeout = 0")
                     # VACUUM ANALYZE must run outside a transaction block.
                     await conn.execute(f'VACUUM ANALYZE "{health.table_name}"')
                 vacuum_counter.inc(labels={"table": health.table_name})

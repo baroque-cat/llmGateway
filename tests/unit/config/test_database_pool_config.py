@@ -49,6 +49,16 @@ class TestDatabasePoolConfigDefaults:
         assert pool.min_size == 5
         assert pool.max_size == 5
 
+    def test_command_timeout_default(self):
+        """DatabasePoolConfig() → command_timeout defaults to 30.0."""
+        pool = DatabasePoolConfig()
+        assert pool.command_timeout == 30.0
+
+    def test_connect_timeout_default(self):
+        """DatabasePoolConfig() → connect_timeout defaults to 60.0."""
+        pool = DatabasePoolConfig()
+        assert pool.connect_timeout == 60.0
+
 
 # ==============================================================================
 # UT-P03, UT-P05, UT-P06: Validation errors
@@ -90,6 +100,28 @@ class TestDatabasePoolConfigValidation:
 
         error_message = str(exc_info.value)
         assert "max_size" in error_message
+        assert "greater than 0" in error_message
+
+    def test_command_timeout_zero_rejected(self):
+        """DatabasePoolConfig(command_timeout=0) → raises ValidationError
+        (zero value rejected by gt=0 constraint).
+        """
+        with pytest.raises(ValidationError) as exc_info:
+            DatabasePoolConfig(command_timeout=0)
+
+        error_message = str(exc_info.value)
+        assert "command_timeout" in error_message
+        assert "greater than 0" in error_message
+
+    def test_connect_timeout_zero_rejected(self):
+        """DatabasePoolConfig(connect_timeout=0) → raises ValidationError
+        (zero value rejected by gt=0 constraint).
+        """
+        with pytest.raises(ValidationError) as exc_info:
+            DatabasePoolConfig(connect_timeout=0)
+
+        error_message = str(exc_info.value)
+        assert "connect_timeout" in error_message
         assert "greater than 0" in error_message
 
 
@@ -160,6 +192,31 @@ class TestDatabasePoolConfigYamlLoading:
 
             assert config.database.pool.min_size == 2
             assert config.database.pool.max_size == 12
+
+    def test_yaml_with_custom_timeouts(self):
+        """YAML with database pool specifying command_timeout=45 and connect_timeout=90
+        → ConfigLoader loads timeout values correctly.
+        """
+        yaml_content = """database:
+  host: localhost
+  password: test_password
+  pool:
+    min_size: 2
+    max_size: 12
+    command_timeout: 45.0
+    connect_timeout: 90.0
+"""
+        with (
+            patch("os.path.exists", return_value=True),
+            patch("builtins.open", mock_open(read_data=yaml_content)),
+        ):
+            loader = ConfigLoader(path="dummy.yaml")
+            config = loader.load()
+
+            assert config.database.pool.min_size == 2
+            assert config.database.pool.max_size == 12
+            assert config.database.pool.command_timeout == 45.0
+            assert config.database.pool.connect_timeout == 90.0
 
 
 # ==============================================================================

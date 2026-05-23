@@ -47,6 +47,13 @@ The gateway SHALL use full-stream request handling (no body buffering, no body p
 #### Scenario: Retry mode forces buffered handling
 - **WHEN** a provider has `gateway_policy.retry.enabled: true`
 - **THEN** the gateway SHALL handle requests via `_handle_buffered_retryable_request()` to enable key rotation on failure
+- **AND** the retry loop SHALL enforce the `timeouts.total` deadline via `asyncio.timeout()`
+- **AND** timeout exhaustion SHALL return `504 Gateway Timeout` with structured error body `{"error": "...", "attempts": <int>, "last_error": "<reason>"}`
+
+#### Scenario: Network error logged with structured detail
+- **WHEN** `_send_proxy_request()` catches any `httpx.RequestError`
+- **THEN** the log message SHALL include the exception type name (e.g., `[ReadTimeout]`), provider name, upstream URL, and human-readable detail specific to the error subtype
+- **AND** the log message SHALL be emitted at `ERROR` level without requiring `DEBUG` log level
 
 ### Requirement: Gateway does not parse request bodies in full-stream path
 In full-stream mode, the gateway SHALL NOT call `provider.parse_request_details()` with the request body. The body SHALL be streamed directly to the upstream without intermediate buffering or parsing.
@@ -64,3 +71,20 @@ For Gemini provider instances in full-stream mode, `provider.parse_request_detai
 - **THEN** `parse_request_details(path=request.url.path, content=b"")` MAY be called
 - **AND** the extracted model name `"gemini-2.5-pro"` MAY be used in log messages
 - **AND** the model name SHALL NOT be used for key selection or request validation
+
+### Requirement: Database query timeout via command_timeout
+The `DatabasePoolConfig` schema SHALL include `command_timeout` (default 30.0 seconds, gt=0) and `connect_timeout` (default 60.0 seconds, gt=0) fields. `init_db_pool()` SHALL pass these values to `asyncpg.create_pool()`. All queries through the pool SHALL be subject to `command_timeout` unless explicitly overridden.
+
+#### Scenario: Default command_timeout is 30 seconds
+- **WHEN** the YAML config omits the `command_timeout` field from `database.pool`
+- **THEN** `asyncpg.create_pool()` SHALL be called with `command_timeout=30.0`
+
+#### Scenario: Query exceeding command_timeout raises exception
+- **WHEN** a fire-and-forget `_report_key_failure` task executes `UPDATE key_model_status` and the database does not respond within 30 seconds
+- **THEN** asyncpg SHALL raise a timeout exception
+- **AND** the exception SHALL be caught by the `try/except` in `_report_key_failure` and logged
+
+#### Scenario: VACUUM ANALYZE overrides command_timeout
+- **WHEN** `DatabaseMaintainer` runs `VACUUM ANALYZE`
+- **THEN** it SHALL execute `SET statement_timeout = 0` on the connection before issuing VACUUM
+- **AND** the VACUUM operation SHALL NOT be terminated by the pool-level `command_timeout`

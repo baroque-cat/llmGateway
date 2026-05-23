@@ -7,6 +7,22 @@
 logging:
   # The global log level for the application. Can be "DEBUG", "INFO", "WARNING", "ERROR".
   level: "INFO"
+  # Independent log level control for HTTP client libraries (httpx, httpcore).
+  http_client:
+    httpx_level: "WARNING"
+    httpcore_level: "WARNING"
+    # Set to True for per-request httpx trace events via extensions={"trace": handler}.
+    trace_enabled: false
+
+# --- HTTP CLIENT SETTINGS ---
+http_client:
+  # Enable or disable HTTP/2 for upstream connections.
+  http2: true
+  # Connection pool limits applied globally to all httpx.AsyncClient instances.
+  pool:
+    max_connections: 200
+    max_keepalive_connections: 50
+    keepalive_expiry: 30.0
 
 # --- METRICS SETTINGS ---
 metrics:
@@ -43,6 +59,8 @@ database:
   pool:
     min_size: 1 # Minimum connections in the pool
     max_size: 15 # Maximum connections in the pool
+    command_timeout: 30.0 # Max time for a single query before cancellation
+    connect_timeout: 60.0 # Max time for TCP connection handshake
   # Retry policy for transient database errors (connection lost, deadlock, etc.).
   # The background worker will automatically retry DB operations on these errors.
   retry:
@@ -65,7 +83,7 @@ providers:
 
     api_base_url: "https://generativelanguage.googleapis.com"
     # Set to true to give this instance its own HTTP client pool (high-load instances)
-    dedicated_http_client: false
+    dedicated_http_client: true
 
     # Defined models for this provider (used by Keeper for health checks)
     default_model:
@@ -86,10 +104,11 @@ providers:
       # static_url: "http://user:pass@proxy:8080" # Required if mode is static
 
     timeouts:
-      connect: 15.0
-      read: 300.0
-      write: 35.0
-      pool: 35.0
+      connect: 10.0
+      read: 120.0
+      write: 20.0
+      pool: 15.0
+      total: 600.0
 
     # Health check policy for the background worker
     worker_health_policy:
@@ -204,7 +223,7 @@ providers:
     enabled: true
 
     api_base_url: "https://api.deepseek.com"
-    dedicated_http_client: false
+    dedicated_http_client: true
 
     default_model:
       deepseek-chat:
@@ -228,7 +247,7 @@ providers:
     enabled: true
 
     api_base_url: "https://api.anthropic.com"
-    dedicated_http_client: false
+    dedicated_http_client: true
 
     default_model:
       claude-sonnet-4-20250514:
@@ -253,10 +272,11 @@ providers:
       gateway_access_token: "${ANTHROPIC_TOKEN}"
 
     timeouts:
-      connect: 15.0
-      read: 300.0
-      write: 35.0
-      pool: 35.0
+      connect: 10.0
+      read: 120.0
+      write: 20.0
+      pool: 15.0
+      total: 600.0
 
     worker_health_policy:
       # Intervals in Minutes
@@ -357,7 +377,7 @@ providers:
     # Base URL for ALL DashScope API calls (both compatible-mode and native SDK).
     # The client's original request path is appended directly to this URL.
     api_base_url: "https://dashscope.aliyuncs.com"
-    dedicated_http_client: false
+    dedicated_http_client: true
 
     # Models used by the Keeper for health checks.
     # endpoint_suffix is the URL path appended to api_base_url for the test request.
@@ -380,10 +400,11 @@ providers:
       mode: "none"
 
     timeouts:
-      connect: 15.0
-      read: 300.0
-      write: 35.0
-      pool: 35.0
+      connect: 10.0
+      read: 120.0
+      write: 20.0
+      pool: 15.0
+      total: 600.0
 
     worker_health_policy:
       on_server_error_min: 30

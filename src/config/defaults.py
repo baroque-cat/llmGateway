@@ -13,6 +13,20 @@ def get_default_config() -> dict[str, Any]:
         # --- LOGGING SETTINGS ---
         "logging": {
             "level": "INFO",
+            "http_client": {
+                "httpx_level": "WARNING",
+                "httpcore_level": "WARNING",
+                "trace_enabled": False,
+            },
+        },
+        # --- HTTP CLIENT SETTINGS ---
+        "http_client": {
+            "http2": True,
+            "pool": {
+                "max_connections": 100,
+                "max_keepalive_connections": 20,
+                "keepalive_expiry": 5.0,
+            },
         },
         # The metrics accessor key belongs here in the future when added.
         # --- GATEWAY SETTINGS ---
@@ -40,6 +54,8 @@ def get_default_config() -> dict[str, Any]:
             "pool": {
                 "min_size": 1,
                 "max_size": 15,
+                "command_timeout": 30.0,
+                "connect_timeout": 60.0,
             },
             # Retry policy for transient database errors
             "retry": {
@@ -64,7 +80,7 @@ def get_default_config() -> dict[str, Any]:
                 "enabled": True,
                 "api_base_url": "https://api.example.com/v1",
                 # Set to true to give this instance its own HTTP client pool (high-load instances)
-                "dedicated_http_client": False,
+                "dedicated_http_client": True,
                 "default_model": {},
                 "access_control": {
                     "gateway_access_token": "${LLM_PROVIDER_DEFAULT_TOKEN}",
@@ -74,10 +90,11 @@ def get_default_config() -> dict[str, Any]:
                     "static_url": None,
                 },
                 "timeouts": {
-                    "connect": 15.0,
-                    "read": 300.0,
-                    "write": 35.0,
-                    "pool": 35.0,
+                    "connect": 10.0,
+                    "read": 120.0,
+                    "write": 20.0,
+                    "pool": 15.0,
+                    "total": 600.0,
                 },
                 # Policy for the background worker's health checks.
                 # REFACTORED: This section now perfectly matches the updated HealthPolicyConfig schema.

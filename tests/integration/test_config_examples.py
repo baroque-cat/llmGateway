@@ -86,8 +86,8 @@ def test_load_minimal_config_example(mock_env):
     assert gemini.provider_type == "gemini"
     # Check that defaults (merged from defaults.py) are present even if not in minimal config
     # e.g. timeouts should come from defaults
-    assert gemini.timeouts.connect == 15.0
-    assert gemini.timeouts.read == 300.0
+    assert gemini.timeouts.connect == 10.0
+    assert gemini.timeouts.read == 120.0
 
     # Check that worker_health_policy defaults are correctly applied
     assert gemini.worker_health_policy.on_success_hr == 24
@@ -137,9 +137,9 @@ def test_full_config_dedicated_http_client_in_yaml():
             f"does not contain 'dedicated_http_client' key. "
             f"Available keys: {list(provider_data.keys())}"
         )
-        assert provider_data["dedicated_http_client"] is False, (
+        assert provider_data["dedicated_http_client"] is True, (
             f"Provider '{provider_name}' has dedicated_http_client="
-            f"{provider_data['dedicated_http_client']}, expected False"
+            f"{provider_data['dedicated_http_client']}, expected True"
         )
 
 
@@ -153,9 +153,9 @@ def test_full_config_dedicated_http_client_loaded(mock_env):
         assert hasattr(
             provider, "dedicated_http_client"
         ), f"Provider '{provider_name}' loaded object has no 'dedicated_http_client' attribute"
-        assert provider.dedicated_http_client is False, (
+        assert provider.dedicated_http_client is True, (
             f"Provider '{provider_name}' has dedicated_http_client="
-            f"{provider.dedicated_http_client}, expected False"
+            f"{provider.dedicated_http_client}, expected True"
         )
 
 

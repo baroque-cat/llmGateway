@@ -116,7 +116,13 @@ CREATE INDEX IF NOT EXISTS idx_key_status_gateway_lookup ON key_model_status(sta
 # --- Component 1: Connection Management ---
 
 
-async def init_db_pool(dsn: str, min_size: int = 1, max_size: int = 15) -> None:
+async def init_db_pool(
+    dsn: str,
+    min_size: int = 1,
+    max_size: int = 15,
+    command_timeout: float = 30.0,
+    connect_timeout: float = 60.0,
+) -> None:
     """
     Initializes an async connection pool to PostgreSQL.
 
@@ -124,6 +130,8 @@ async def init_db_pool(dsn: str, min_size: int = 1, max_size: int = 15) -> None:
         dsn: Database connection string.
         min_size: Minimum pool size (default 1).
         max_size: Maximum pool size (default 15).
+        command_timeout: Maximum time in seconds for a single query (default 30).
+        connect_timeout: Maximum time in seconds for TCP connection (default 60).
 
     Raises:
         Exception: If pool initialization fails.
@@ -133,8 +141,12 @@ async def init_db_pool(dsn: str, min_size: int = 1, max_size: int = 15) -> None:
         logger.warning("Database pool already initialized.")
         return
     try:
-        _db_pool = await asyncpg.create_pool(
-            dsn=dsn, min_size=min_size, max_size=max_size
+        _db_pool = await asyncpg.create_pool(  # pyright: ignore[reportUnknownVariableType, reportCallIssue]
+            dsn=dsn,
+            min_size=min_size,
+            max_size=max_size,
+            command_timeout=command_timeout,
+            connect_timeout=connect_timeout,
         )
         logger.info("Database connection pool initialized successfully.")
     except Exception as e:

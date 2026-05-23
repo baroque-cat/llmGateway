@@ -2,10 +2,23 @@
 
 import logging
 import sys
+from collections.abc import Callable
+from typing import Any
 
 # REFACTORED: Import ConfigAccessor instead of the raw Config schema.
 # This makes the function dependent on the safe interface, not the data structure.
+from src.config.schemas import HttpClientLoggingConfig
 from src.core.accessor import ConfigAccessor
+
+# Module-level trace handler callable, set by _setup_http_client_logging()
+# when trace_enabled=True. Used by HttpClientFactory to attach to
+# httpx request extensions={"trace": handler}.
+_trace_handler: Callable[[dict[str, Any]], None] | None = None
+
+
+def get_trace_handler() -> Callable[[dict[str, Any]], None] | None:
+    """Returns the trace handler if trace_enabled, or None."""
+    return _trace_handler
 
 
 class MetricsEndpointFilter(logging.Filter):
@@ -56,6 +69,47 @@ class ComponentNameFilter(logging.Filter):
         else:
             record.component = module.rsplit(".", 1)[-1]
         return True
+
+
+def _setup_http_client_logging(cfg: HttpClientLoggingConfig) -> None:
+    """
+    Sets log levels for httpx and httpcore libraries independently from the
+    application log level.
+
+    If ``trace_enabled`` is True, also creates a trace handler callable that
+    ``HttpClientFactory`` attaches to each request via
+    ``extensions={"trace": handler}``.
+
+    Args:
+        cfg: The ``HttpClientLoggingConfig`` from the ``logging.http_client``
+            config section.
+    """
+    global _trace_handler
+
+    try:
+        logging.getLogger("httpx").setLevel(getattr(logging, cfg.httpx_level))
+    except (TypeError, AttributeError):
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+
+    try:
+        logging.getLogger("httpcore").setLevel(getattr(logging, cfg.httpcore_level))
+    except (TypeError, AttributeError):
+        logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+    if cfg.trace_enabled:
+        trace_logger = logging.getLogger("httpcore.trace")
+
+        def _trace_handler_impl(event: dict[str, Any]) -> None:
+            event_type = event.get("event", "unknown")
+            info = event.get("info", {})
+            msg_parts: list[str] = [event_type]
+            for key, val in sorted(info.items()):
+                msg_parts.append(f"{key}={val}")
+            trace_logger.debug(" | ".join(msg_parts))
+
+        _trace_handler = _trace_handler_impl
+    else:
+        _trace_handler = None
 
 
 def setup_logging(accessor: ConfigAccessor) -> None:
@@ -119,8 +173,8 @@ def setup_logging(accessor: ConfigAccessor) -> None:
     logging.getLogger("apscheduler.scheduler").setLevel(logging.WARNING)
     logging.getLogger("apscheduler.executors.default").setLevel(logging.WARNING)
     logging.getLogger("urllib3.connectionpool").setLevel(logging.INFO)
-    # Silence httpx logs as we will provide our own unified transaction logs.
-    logging.getLogger("httpx").setLevel(logging.WARNING)
+    # Configure httpx and httpcore logger levels from config.
+    _setup_http_client_logging(accessor.get_logging_config().http_client)
 
     # A log message to confirm that logging has been successfully configured.
     logging.getLogger(__name__).info(

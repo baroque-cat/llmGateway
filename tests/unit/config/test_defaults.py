@@ -85,8 +85,8 @@ def test_default_config_keys_and_values():
     """
     defaults = get_default_config()
 
-    # Verify top-level key order (metrics is not in defaults yet)
-    expected_keys = ["logging", "gateway", "keeper", "database", "providers"]
+    # Verify top-level key order
+    expected_keys = ["logging", "http_client", "gateway", "keeper", "database", "providers"]
     actual_keys = list(defaults.keys())
     assert (
         actual_keys == expected_keys
@@ -124,8 +124,8 @@ def test_default_config_dedicated_http_client():
         f"Available keys: {list(llm_default.keys())}"
     )
     assert (
-        llm_default["dedicated_http_client"] is False
-    ), f"Expected dedicated_http_client=False, got {llm_default['dedicated_http_client']}"
+        llm_default["dedicated_http_client"] is True
+    ), f"Expected dedicated_http_client=True, got {llm_default['dedicated_http_client']}"
 
 
 # --- Test moved from integration/test_config_examples.py ---
@@ -143,6 +143,7 @@ def test_full_config_key_order():
         data = yaml.load(f)
     expected_order = [
         "logging",
+        "http_client",
         "metrics",
         "gateway",
         "keeper",

@@ -9,6 +9,14 @@ metrics:
   # Set to empty string to disable metrics endpoint even if enabled=true
   access_token: "${METRICS_ACCESS_TOKEN}"
 
+# --- HTTP CLIENT SETTINGS ---
+http_client:
+  http2: true
+  pool:
+    max_connections: 100
+    max_keepalive_connections: 20
+    keepalive_expiry: 5.0
+
 # --- KEEPER SETTINGS ---
 keeper:
   max_concurrent_providers: 5
@@ -22,6 +30,9 @@ database:
   user: "${DB_USER}"
   password: "${DB_PASSWORD}"
   dbname: "${DB_NAME}"
+  pool:
+    command_timeout: 30.0
+    connect_timeout: 60.0
 
 # --- PROVIDER SETTINGS ---
 providers:

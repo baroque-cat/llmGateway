@@ -263,6 +263,62 @@ class TestDispatchLogic:
 
             assert result is mock_streaming_response
 
+    @pytest.mark.asyncio
+    async def test_retry_mode_uses_asyncio_timeout(self):
+        """
+        When retry is enabled, the buffered handler wraps the retry loop
+        in ``asyncio.timeout`` with the configured
+        ``provider_config.timeouts.total`` value.
+        """
+        request = _make_mock_request()
+        mock_provider_config = request.app.state.accessor.get_provider_or_raise.return_value
+        mock_provider_config.gateway_policy.retry.enabled = True
+        mock_provider_config.timeouts = MagicMock()
+        mock_provider_config.timeouts.total = 30.0
+
+        retry_policy = MagicMock()
+        retry_policy.attempts = 3
+        retry_policy.backoff_sec = 0
+        retry_policy.backoff_factor = 1.0
+        mock_provider_config.gateway_policy.retry.on_key_error = retry_policy
+        mock_provider_config.gateway_policy.retry.on_server_error = MagicMock()
+        mock_provider_config.gateway_policy.retry.on_server_error.attempts = 3
+        mock_provider_config.gateway_policy.retry.on_server_error.backoff_sec = 0
+        mock_provider_config.gateway_policy.retry.on_server_error.backoff_factor = 1.0
+
+        request.body = AsyncMock(return_value=b'{"model": "any-model"}')
+
+        provider = _make_mock_provider()
+        mock_response = _make_mock_response(status_code=200)
+        success_result = CheckResult.success(status_code=200)
+        provider.proxy_request.return_value = (
+            mock_response,
+            success_result,
+            b'{"ok": true}',
+        )
+
+        mock_streaming_response = MagicMock(spec=StreamingResponse)
+        with (
+            patch(
+                "src.services.gateway.gateway_service.forward_success_stream",
+                new=AsyncMock(return_value=mock_streaming_response),
+            ),
+            patch(
+                "src.services.gateway.gateway_service.asyncio.timeout",
+            ) as mock_timeout,
+        ):
+            mock_timeout_cm = MagicMock()
+            mock_timeout_cm.__aenter__ = AsyncMock()
+            mock_timeout_cm.__aexit__ = AsyncMock(return_value=False)
+            mock_timeout.return_value = mock_timeout_cm
+
+            result = await _handle_buffered_retryable_request(
+                request, provider, "openai"
+            )
+
+            assert result is mock_streaming_response
+            mock_timeout.assert_called_once_with(30.0)
+
 
 # ---------------------------------------------------------------------------
 # Body handling — full-stream never buffers
@@ -304,3 +360,37 @@ class TestBodyHandling:
             # Must succeed without ever calling request.body()
             assert result is mock_streaming_response
             request.body.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_full_stream_bypasses_parse_request_details(self):
+        """
+        The full-stream handler must NOT call
+        ``provider.parse_request_details()``. Setting
+        parse_request_details to raise if called verifies this invariant.
+        """
+        request = _make_mock_request(path="/v1/chat/completions")
+        provider = _make_mock_provider()
+
+        # parse_request_details must NOT be called in the full-stream path
+        provider.parse_request_details = AsyncMock(
+            side_effect=AssertionError(
+                "parse_request_details() must not be called in full-stream handler"
+            )
+        )
+
+        mock_response = _make_mock_response(status_code=200)
+        success_result = CheckResult.success(status_code=200)
+        provider.proxy_request.return_value = (mock_response, success_result, None)
+
+        mock_streaming_response = MagicMock(spec=StreamingResponse)
+        with patch(
+            "src.services.gateway.gateway_service.forward_success_stream",
+            new=AsyncMock(return_value=mock_streaming_response),
+        ):
+            result = await _handle_full_stream_request(
+                request, provider, "openai"
+            )
+
+            # Must succeed without ever calling parse_request_details()
+            assert result is mock_streaming_response
+            provider.parse_request_details.assert_not_called()

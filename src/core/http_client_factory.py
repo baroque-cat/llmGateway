@@ -2,10 +2,13 @@
 
 import asyncio
 import logging
+from collections.abc import Callable
+from typing import Any
 
 import httpx
 
 # REFACTORED: Import ConfigAccessor instead of the raw Config schema.
+from src.config.logging_config import get_trace_handler
 from src.core.accessor import ConfigAccessor
 
 
@@ -31,6 +34,16 @@ class HttpClientFactory:
         """
         self.accessor: ConfigAccessor = accessor
         self.logger: logging.Logger = logging.getLogger(__name__)
+
+        # Read global HTTP client config for pool limits and HTTP/2 toggle.
+        http_config = accessor.get_http_client_config()
+        self._http2_enabled: bool = http_config.http2
+        self._pool_config = http_config.pool
+
+        # Trace handler for per-request httpx trace events.
+        self._trace_handler: Callable[[dict[str, Any]], None] | None = (
+            get_trace_handler()
+        )
 
         # The cache to store long-lived client instances.
         # The key is a unique identifier for the client's configuration (e.g., proxy URL).
@@ -137,7 +150,7 @@ class HttpClientFactory:
                 connection_desc = f"provider '{provider_name}' (proxy config not found)"
 
             self.logger.debug(
-                f"Cache miss for {connection_desc}. Creating new HTTP/2 client..."
+                f"Cache miss for {connection_desc}. Creating new HTTP/{'2' if self._http2_enabled else '1.1'} client..."
             )
 
             proxy_url = None
@@ -146,10 +159,20 @@ class HttpClientFactory:
                 proxy_url = proxy_config.static_url
 
             try:
-                client = httpx.AsyncClient(
-                    http2=True,  # Enable HTTP/2 for better performance.
-                    proxy=proxy_url,  # Set the proxy URL if one is required.
+                limits = httpx.Limits(
+                    max_connections=self._pool_config.max_connections,
+                    max_keepalive_connections=self._pool_config.max_keepalive_connections,
+                    keepalive_expiry=self._pool_config.keepalive_expiry,
                 )
+                client_kwargs: dict[str, Any] = {
+                    "http2": self._http2_enabled,
+                    "proxy": proxy_url,
+                    "limits": limits,
+                }
+                if self._trace_handler is not None:
+                    client_kwargs["extensions"] = {"trace": self._trace_handler}
+
+                client = httpx.AsyncClient(**client_kwargs)
 
                 self._clients[cache_key] = client
                 self.logger.debug(

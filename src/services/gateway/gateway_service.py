@@ -542,171 +542,221 @@ async def _handle_buffered_retryable_request(
     total_attempts = 0
     key_error_attempts = 0
     server_error_attempts = 0
+    last_reason: ErrorReason | None = None
 
-    while True:
-        total_attempts += 1
-        key_info = cache.get_key_from_pool(
-            instance_name, exclude_key_ids=failed_key_ids
-        )
-        if not key_info:
-            return JSONResponse(
-                status_code=503,
-                content={"error": "No available API keys to handle the request."},
-            )
+    timeout_sec = provider_config.timeouts.total
+    # Guard against mocked configs in tests where timeout values may be MagicMock
+    # rather than a real float (pyright sees the annotated type, not the runtime type).
+    if not isinstance(
+        timeout_sec, (int, float)
+    ):  # pyright: ignore[reportUnnecessaryIsInstance]
+        timeout_sec = 600.0
 
-        key_id, api_key = key_info
-        client = await http_factory.get_client_for_provider(instance_name)
+    try:
+        async with asyncio.timeout(timeout_sec):
+            while True:
+                total_attempts += 1
+                key_info = cache.get_key_from_pool(
+                    instance_name, exclude_key_ids=failed_key_ids
+                )
+                if not key_info:
+                    return JSONResponse(
+                        status_code=503,
+                        content={
+                            "error": "No available API keys to handle the request."
+                        },
+                    )
 
-        upstream_response, check_result, body_bytes = await provider.proxy_request(
-            client=client,
-            token=api_key,
-            method=request.method,
-            headers=dict(request.headers),
-            path=request.url.path,
-            query_params=str(request.url.query),
-            content=request_body,
-        )
+                key_id, api_key = key_info
+                client = await http_factory.get_client_for_provider(instance_name)
 
-        if check_result.ok:
-            # Case 1: Success. Check if debug logging is needed.
-            effective_debug_mode = request.app.state.debug_mode_map.get(
-                instance_name, "disabled"
-            )
-
-            if effective_debug_mode != "disabled":
-                return await forward_buffered_body(upstream_response, body_bytes)
-            else:
-                # Normal streaming response when debug is disabled
-                client_ip = request.client.host if request.client else "unknown"
-                return await forward_success_stream(
-                    upstream_response=upstream_response,
-                    check_result=check_result,
-                    client_ip=client_ip,
-                    request_method=request.method,
-                    request_path=str(request.url),
-                    provider_name=instance_name,
-                    model_name=ALL_MODELS_MARKER,
+                upstream_response, check_result, body_bytes = (
+                    await provider.proxy_request(
+                        client=client,
+                        token=api_key,
+                        method=request.method,
+                        headers=dict(request.headers),
+                        path=request.url.path,
+                        query_params=str(request.url.query),
+                        content=request_body,
+                    )
                 )
 
-        reason = check_result.error_reason
-        logger.warning(
-            f"Attempt {total_attempts} failed for '{instance_name}'. Reason: [{reason.value}]"
-        )
-        logger.info(
-            f"Retry status - Total attempts: {total_attempts}, Key errors: {key_error_attempts}/{key_error_policy.attempts}, "
-            f"Server errors (current key): {server_error_attempts}/{server_error_policy.attempts}"
-        )
+                if check_result.ok:
+                    # Case 1: Success. Check if debug logging is needed.
+                    effective_debug_mode = request.app.state.debug_mode_map.get(
+                        instance_name, "disabled"
+                    )
 
-        if reason.is_client_error():
-            # Case 2: Client-side error. Retrying is pointless. Abort the loop.
-            logger.error(
-                f"Non-retryable client error received: {reason.value}. Aborting retry cycle."
-            )
-            effective_debug_mode = request.app.state.debug_mode_map.get(
-                instance_name, "disabled"
-            )
-            if effective_debug_mode != "disabled":
-                return await forward_buffered_body(upstream_response, body_bytes)
+                    if effective_debug_mode != "disabled":
+                        return await forward_buffered_body(
+                            upstream_response, body_bytes
+                        )
+                    else:
+                        # Normal streaming response when debug is disabled
+                        client_ip = request.client.host if request.client else "unknown"
+                        return await forward_success_stream(
+                            upstream_response=upstream_response,
+                            check_result=check_result,
+                            client_ip=client_ip,
+                            request_method=request.method,
+                            request_path=str(request.url),
+                            provider_name=instance_name,
+                            model_name=ALL_MODELS_MARKER,
+                        )
 
-            return await forward_error_to_client(
-                upstream_response, check_result, body_bytes
-            )
-
-        # Case 3: Key-specific failures OR Overloaded (503).
-        if (not reason.is_retryable()) or (reason == ErrorReason.OVERLOADED):
-            # Add to local blacklist to prevent fetching the same broken key again
-            failed_key_ids.add(key_id)
-
-            logger.warning(
-                f"Key fault detected (Reason: {reason.value}). "
-                f"Marking key_id {key_id} as failed and removing from pool."
-            )
-
-            asyncio.create_task(
-                _report_key_failure(
-                    db_manager,
-                    key_id,
-                    instance_name,
-                    check_result,
-                    accessor,
-                )
-            )
-            asyncio.create_task(cache.remove_key_from_pool(instance_name, key_id))
-
-            key_error_attempts += 1
-            server_error_attempts = 0
-
-            if key_error_attempts < key_error_policy.attempts:
-                # Intermediate attempt: discard and retry with next key
-                await discard_response(upstream_response, body_bytes)
-                delay = key_error_policy.backoff_sec * (
-                    key_error_policy.backoff_factor ** (key_error_attempts - 1)
-                )
-                logger.info(
-                    f"Rotating key... Backoff {delay:.2f}s. (Key Error Attempt {key_error_attempts}/{key_error_policy.attempts})"
-                )
-                await asyncio.sleep(delay)
-                continue
-            else:
-                logger.error(
-                    f"Exhausted all {key_error_policy.attempts} retry attempts for key errors."
-                )
-                return await forward_error_to_client(
-                    upstream_response, check_result, body_bytes
-                )
-
-        # Case 4: True Transient Server Errors (Timeout, Connection Error, etc).
-        elif reason.is_retryable():
-            server_error_attempts += 1
-            if server_error_attempts < server_error_policy.attempts:
-                # Intermediate server error attempt: discard and retry
-                await discard_response(upstream_response, body_bytes)
-                delay = server_error_policy.backoff_sec * (
-                    server_error_policy.backoff_factor ** (server_error_attempts - 1)
-                )
-                logger.info(
-                    f"Server error detected. Retrying in {delay:.2f}s... (Server Error Attempt {server_error_attempts}/{server_error_policy.attempts})"
-                )
-                await asyncio.sleep(delay)
-                continue
-            else:
+                reason = check_result.error_reason
+                last_reason = reason
                 logger.warning(
-                    f"Exhausted all {server_error_policy.attempts} retry attempts for server errors. Penalizing key {key_id}."
+                    f"Attempt {total_attempts} failed for '{instance_name}'. "
+                    f"Reason: [{reason.value}], "
+                    f"Key: #{key_id}, "
+                    f"Status: {upstream_response.status_code}"
+                )
+                logger.info(
+                    f"Retry status - Total attempts: {total_attempts}, Key errors: {key_error_attempts}/{key_error_policy.attempts}, "
+                    f"Server errors (current key): {server_error_attempts}/{server_error_policy.attempts}"
                 )
 
-                # Add to local blacklist
-                failed_key_ids.add(key_id)
-
-                # Treat exhaustion as a key failure: Penalize and Rotate
-                asyncio.create_task(
-                    _report_key_failure(
-                        db_manager,
-                        key_id,
-                        instance_name,
-                        check_result,
-                        accessor,
+                if reason.is_client_error():
+                    # Case 2: Client-side error. Retrying is pointless. Abort the loop.
+                    logger.error(
+                        f"Non-retryable client error received: {reason.value}. Aborting retry cycle."
                     )
-                )
-                asyncio.create_task(cache.remove_key_from_pool(instance_name, key_id))
-
-                # Fall through to Key Rotation logic
-                key_error_attempts += 1
-                server_error_attempts = 0
-
-                if key_error_attempts < key_error_policy.attempts:
-                    await discard_response(upstream_response, body_bytes)
-                    delay = key_error_policy.backoff_sec * (
-                        key_error_policy.backoff_factor ** (key_error_attempts - 1)
+                    effective_debug_mode = request.app.state.debug_mode_map.get(
+                        instance_name, "disabled"
                     )
-                    logger.info(
-                        f"Rotating key after server retry exhaustion... Backoff {delay:.2f}s."
-                    )
-                    await asyncio.sleep(delay)
-                    continue
-                else:
+                    if effective_debug_mode != "disabled":
+                        return await forward_buffered_body(
+                            upstream_response, body_bytes
+                        )
+
                     return await forward_error_to_client(
                         upstream_response, check_result, body_bytes
                     )
+
+                # Case 3: Key-specific failures OR Overloaded (503).
+                if (not reason.is_retryable()) or (reason == ErrorReason.OVERLOADED):
+                    # Add to local blacklist to prevent fetching the same broken key again
+                    failed_key_ids.add(key_id)
+
+                    logger.warning(
+                        f"Key fault detected (Reason: {reason.value}). "
+                        f"Marking key_id {key_id} as failed and removing from pool."
+                    )
+
+                    asyncio.create_task(
+                        _report_key_failure(
+                            db_manager,
+                            key_id,
+                            instance_name,
+                            check_result,
+                            accessor,
+                        )
+                    )
+                    asyncio.create_task(
+                        cache.remove_key_from_pool(instance_name, key_id)
+                    )
+
+                    key_error_attempts += 1
+                    server_error_attempts = 0
+
+                    if key_error_attempts < key_error_policy.attempts:
+                        # Intermediate attempt: discard and retry with next key
+                        await discard_response(upstream_response, body_bytes)
+                        delay = key_error_policy.backoff_sec * (
+                            key_error_policy.backoff_factor ** (key_error_attempts - 1)
+                        )
+                        logger.info(
+                            f"Rotating key... Backoff {delay:.2f}s. (Key Error Attempt {key_error_attempts}/{key_error_policy.attempts})"
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                    else:
+                        logger.error(
+                            f"Exhausted all {key_error_policy.attempts} retry attempts for key errors."
+                        )
+                        return await forward_error_to_client(
+                            upstream_response, check_result, body_bytes
+                        )
+
+                # Case 4: True Transient Server Errors (Timeout, Connection Error, etc).
+                elif reason.is_retryable():
+                    server_error_attempts += 1
+                    if server_error_attempts < server_error_policy.attempts:
+                        # Intermediate server error attempt: discard and retry
+                        await discard_response(upstream_response, body_bytes)
+                        delay = server_error_policy.backoff_sec * (
+                            server_error_policy.backoff_factor
+                            ** (server_error_attempts - 1)
+                        )
+                        logger.info(
+                            f"Server error detected. Retrying in {delay:.2f}s... (Server Error Attempt {server_error_attempts}/{server_error_policy.attempts})"
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                    else:
+                        logger.warning(
+                            f"Exhausted all {server_error_policy.attempts} retry attempts for server errors. Penalizing key {key_id}."
+                        )
+
+                        # Add to local blacklist
+                        failed_key_ids.add(key_id)
+
+                        # Treat exhaustion as a key failure: Penalize and Rotate
+                        asyncio.create_task(
+                            _report_key_failure(
+                                db_manager,
+                                key_id,
+                                instance_name,
+                                check_result,
+                                accessor,
+                            )
+                        )
+                        asyncio.create_task(
+                            cache.remove_key_from_pool(instance_name, key_id)
+                        )
+
+                        # Fall through to Key Rotation logic
+                        key_error_attempts += 1
+                        server_error_attempts = 0
+
+                        if key_error_attempts < key_error_policy.attempts:
+                            await discard_response(upstream_response, body_bytes)
+                            delay = key_error_policy.backoff_sec * (
+                                key_error_policy.backoff_factor
+                                ** (key_error_attempts - 1)
+                            )
+                            logger.info(
+                                f"Rotating key after server retry exhaustion... Backoff {delay:.2f}s."
+                            )
+                            await asyncio.sleep(delay)
+                            continue
+                        else:
+                            return await forward_error_to_client(
+                                upstream_response, check_result, body_bytes
+                            )
+
+    except TimeoutError:
+        last_reason_str = last_reason.value if last_reason else "unknown"
+        logger.error(
+            f"Request to '{instance_name}' timed out after {timeout_sec:.0f}s "
+            f"(total attempts: {total_attempts}, "
+            f"key_errors: {key_error_attempts}, "
+            f"server_errors: {server_error_attempts}). "
+            f"Last error: [{last_reason_str}]."
+        )
+        return JSONResponse(
+            status_code=504,
+            content={
+                "error": (
+                    f"Gateway timeout: upstream request did not complete "
+                    f"within {timeout_sec:.0f}s"
+                ),
+                "attempts": total_attempts,
+                "last_error": last_reason_str,
+            },
+        )
 
 
 # --- FastAPI Application Factory and Event Handlers ---
@@ -785,7 +835,11 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
             dsn = accessor.get_database_dsn()
             pool_cfg = accessor.get_pool_config()
             await database.init_db_pool(
-                dsn, min_size=pool_cfg.min_size, max_size=pool_cfg.max_size
+                dsn,
+                min_size=pool_cfg.min_size,
+                max_size=pool_cfg.max_size,
+                command_timeout=pool_cfg.command_timeout,
+                connect_timeout=pool_cfg.connect_timeout,
             )
 
             # Wait for the Worker to finish initializing the database schema.

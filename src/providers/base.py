@@ -284,7 +284,33 @@ class AIBaseProvider(IProvider):
                     )
 
         except httpx.RequestError as e:
-            error_message = f"Upstream request failed with a network-level error: {e}"
+            error_type = type(e).__name__
+            url = str(getattr(request, "url", "unknown"))
+
+            if isinstance(e, httpx.PoolTimeout):
+                detail = " — connection pool exhausted"
+            elif isinstance(e, httpx.ConnectError):
+                detail = " — TCP connection failed"
+            elif isinstance(e, httpx.ReadTimeout):
+                detail = (
+                    f" — no data received (read_timeout={self.config.timeouts.read}s)"
+                )
+            elif isinstance(e, httpx.RemoteProtocolError):
+                detail = " — HTTP/2 protocol error (server may have reset connection)"
+            elif isinstance(e, httpx.WriteTimeout):
+                detail = " — send stalled"
+            elif isinstance(e, httpx.ConnectTimeout):
+                detail = f" — TCP handshake timed out (connect_timeout={self.config.timeouts.connect}s)"
+            else:
+                detail = ""
+
+            error_message = (
+                f"Upstream network error: [{error_type}] "
+                f"provider='{self.name}' "
+                f"url='{url}'"
+                f"{detail}"
+                f" — {e}"
+            )
             logger.error(error_message)
             check_result = CheckResult.fail(
                 ErrorReason.NETWORK_ERROR, error_message, status_code=503

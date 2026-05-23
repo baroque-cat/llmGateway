@@ -10,7 +10,7 @@ to return a ``MemoryMetricsCollector``.
 """
 
 import logging
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
@@ -121,8 +121,10 @@ async def test_run_conditional_vacuum_one_table_needs_vacuum(
 
     assert result == 1
 
-    # VACUUM only called for api_keys
-    conn.execute.assert_called_once_with('VACUUM ANALYZE "public.api_keys"')
+    # VACUUM called 2 times for api_keys: SET statement_timeout + VACUUM ANALYZE
+    assert conn.execute.call_count == 2
+    conn.execute.assert_any_call("SET statement_timeout = 0")
+    conn.execute.assert_any_call('VACUUM ANALYZE "public.api_keys"')
 
     # Verify metrics were recorded in the memory collector
     body, _ = memory_collector.generate_metrics()
@@ -227,7 +229,7 @@ async def test_run_conditional_vacuum_all_tables_need_vacuum(
         )
 
     assert result == 2
-    assert conn.execute.call_count == 2
+    assert conn.execute.call_count == 4
 
 
 # ---------------------------------------------------------------------------
@@ -305,6 +307,59 @@ async def test_run_conditional_vacuum_empty_table_list_skips(
 
     assert result == 0
     assert any("No table health data" in record.message for record in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# N30.1 — SET statement_timeout = 0 is called before VACUUM ANALYZE
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_run_conditional_vacuum_statement_timeout_before_vacuum(
+    maintainer: DatabaseMaintainer,
+    db_manager: MagicMock,
+    memory_collector: MemoryMetricsCollector,
+) -> None:
+    """N30.1: Verify SET statement_timeout = 0 is called before VACUUM ANALYZE.
+
+    Uses assert_has_calls to check the strict ordering of the two execute calls
+    — the timeout override must happen first so VACUUM is not killed early.
+    """
+    tables = [
+        DatabaseTableHealth(
+            table_name="public.api_keys",
+            n_dead_tup=500,
+            n_live_tup=500,
+            last_vacuum=None,
+            last_analyze=None,
+            dead_tuple_ratio=0.5,
+        ),
+    ]
+
+    conn = AsyncMock()
+    pool = _make_pool_mock(conn)
+
+    with (
+        patch("src.services.db_maintainer.get_pool", return_value=pool),
+        patch(
+            "src.services.db_maintainer._db_maintainer_collector",
+            return_value=memory_collector,
+        ),
+    ):
+        result = await maintainer.run_conditional_vacuum(
+            tables, db_manager, threshold=0.3
+        )
+
+    assert result == 1
+    assert conn.execute.call_count == 2
+
+    # Strict ordering: SET statement_timeout must come first.
+    conn.execute.assert_has_calls(
+        [
+            call("SET statement_timeout = 0"),
+            call('VACUUM ANALYZE "public.api_keys"'),
+        ]
+    )
 
 
 # ---------------------------------------------------------------------------

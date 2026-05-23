@@ -10,8 +10,10 @@ import pytest
 from src.config.logging_config import (
     ComponentNameFilter,
     MetricsEndpointFilter,
+    get_trace_handler,
     setup_logging,
 )
+from src.config.schemas import HttpClientLoggingConfig
 from src.core.accessor import ConfigAccessor
 
 
@@ -547,3 +549,179 @@ class TestAPSchedulerSuppression:
         logger.propagate = original_propagate
         for h in original_handlers:
             logger.addHandler(h)
+
+
+class TestHttpClientLogging:
+    """Tests for HTTP client logging configuration via _setup_http_client_logging."""
+
+    def test_default_config_silences_httpx_and_httpcore(self):
+        """Verify default HttpClientLoggingConfig (WARNING/WARNING) silences both libraries."""
+        mock_accessor = Mock(spec=ConfigAccessor)
+        mock_logging_config = Mock()
+        mock_logging_config.level = "INFO"
+        mock_logging_config.http_client = HttpClientLoggingConfig()
+        mock_accessor.get_logging_config.return_value = mock_logging_config
+
+        with patch("logging.getLogger") as mock_get_logger:
+            mock_root_logger = Mock(spec=logging.Logger)
+            mock_httpx_logger = Mock(spec=logging.Logger)
+            mock_httpcore_logger = Mock(spec=logging.Logger)
+            mock_uvicorn_access_logger = Mock(spec=logging.Logger)
+            mock_uvicorn_error_logger = Mock(spec=logging.Logger)
+            mock_apscheduler_logger = Mock(spec=logging.Logger)
+            mock_apscheduler_executor_logger = Mock(spec=logging.Logger)
+            mock_urllib3_logger = Mock(spec=logging.Logger)
+            mock_module_logger = Mock(spec=logging.Logger)
+
+            def get_logger_side_effect(name: str | None = None) -> Mock:
+                if name is None or name == "":
+                    return mock_root_logger
+                if name == "httpx":
+                    return mock_httpx_logger
+                if name == "httpcore":
+                    return mock_httpcore_logger
+                if name == "uvicorn.access":
+                    return mock_uvicorn_access_logger
+                if name == "uvicorn.error":
+                    return mock_uvicorn_error_logger
+                if name == "apscheduler.scheduler":
+                    return mock_apscheduler_logger
+                if name == "apscheduler.executors.default":
+                    return mock_apscheduler_executor_logger
+                if name == "urllib3.connectionpool":
+                    return mock_urllib3_logger
+                if name == "src.config.logging_config":
+                    return mock_module_logger
+                return Mock(spec=logging.Logger)
+
+            mock_get_logger.side_effect = get_logger_side_effect
+            mock_root_logger.handlers = []
+            mock_root_logger.hasHandlers.return_value = False
+
+            setup_logging(mock_accessor)
+
+            # Default config: both httpx and httpcore should be silenced to WARNING
+            mock_httpx_logger.setLevel.assert_called_once_with(logging.WARNING)
+            mock_httpcore_logger.setLevel.assert_called_once_with(logging.WARNING)
+
+    def test_debug_trace_enables_trace_handler(self):
+        """Verify httpcore_level=DEBUG with trace_enabled=True sets up a trace handler."""
+        import src.config.logging_config as lc_mod
+
+        original_trace_handler = lc_mod._trace_handler
+        try:
+            mock_accessor = Mock(spec=ConfigAccessor)
+            mock_logging_config = Mock()
+            mock_logging_config.level = "INFO"
+            mock_logging_config.http_client = HttpClientLoggingConfig(
+                httpcore_level="DEBUG", trace_enabled=True
+            )
+            mock_accessor.get_logging_config.return_value = mock_logging_config
+
+            with patch("logging.getLogger") as mock_get_logger:
+                mock_root_logger = Mock(spec=logging.Logger)
+                mock_httpx_logger = Mock(spec=logging.Logger)
+                mock_httpcore_logger = Mock(spec=logging.Logger)
+                mock_httpcore_trace_logger = Mock(spec=logging.Logger)
+                mock_uvicorn_access_logger = Mock(spec=logging.Logger)
+                mock_uvicorn_error_logger = Mock(spec=logging.Logger)
+                mock_apscheduler_logger = Mock(spec=logging.Logger)
+                mock_apscheduler_executor_logger = Mock(spec=logging.Logger)
+                mock_urllib3_logger = Mock(spec=logging.Logger)
+                mock_module_logger = Mock(spec=logging.Logger)
+
+                def get_logger_side_effect(name: str | None = None) -> Mock:
+                    if name is None or name == "":
+                        return mock_root_logger
+                    if name == "httpx":
+                        return mock_httpx_logger
+                    if name == "httpcore":
+                        return mock_httpcore_logger
+                    if name == "httpcore.trace":
+                        return mock_httpcore_trace_logger
+                    if name == "uvicorn.access":
+                        return mock_uvicorn_access_logger
+                    if name == "uvicorn.error":
+                        return mock_uvicorn_error_logger
+                    if name == "apscheduler.scheduler":
+                        return mock_apscheduler_logger
+                    if name == "apscheduler.executors.default":
+                        return mock_apscheduler_executor_logger
+                    if name == "urllib3.connectionpool":
+                        return mock_urllib3_logger
+                    if name == "src.config.logging_config":
+                        return mock_module_logger
+                    return Mock(spec=logging.Logger)
+
+                mock_get_logger.side_effect = get_logger_side_effect
+                mock_root_logger.handlers = []
+                mock_root_logger.hasHandlers.return_value = False
+
+                setup_logging(mock_accessor)
+
+                # Verify the trace handler is set and is callable
+                handler = get_trace_handler()
+                assert handler is not None, (
+                    "trace handler should be non-None when trace_enabled=True"
+                )
+                assert callable(handler), (
+                    "trace handler should be callable when trace_enabled=True"
+                )
+
+                # Verify httpcore logger is set to DEBUG level
+                mock_httpcore_logger.setLevel.assert_called_once_with(logging.DEBUG)
+        finally:
+            lc_mod._trace_handler = original_trace_handler
+
+    def test_warning_level_prevents_info_noise_when_root_is_info(self):
+        """Verify httpcore_level=WARNING isolates httpcore from root INFO level."""
+        mock_accessor = Mock(spec=ConfigAccessor)
+        mock_logging_config = Mock()
+        mock_logging_config.level = "INFO"
+        mock_logging_config.http_client = HttpClientLoggingConfig(
+            httpcore_level="WARNING"
+        )
+        mock_accessor.get_logging_config.return_value = mock_logging_config
+
+        with patch("logging.getLogger") as mock_get_logger:
+            mock_root_logger = Mock(spec=logging.Logger)
+            mock_httpx_logger = Mock(spec=logging.Logger)
+            mock_httpcore_logger = Mock(spec=logging.Logger)
+            mock_uvicorn_access_logger = Mock(spec=logging.Logger)
+            mock_uvicorn_error_logger = Mock(spec=logging.Logger)
+            mock_apscheduler_logger = Mock(spec=logging.Logger)
+            mock_apscheduler_executor_logger = Mock(spec=logging.Logger)
+            mock_urllib3_logger = Mock(spec=logging.Logger)
+            mock_module_logger = Mock(spec=logging.Logger)
+
+            def get_logger_side_effect(name: str | None = None) -> Mock:
+                if name is None or name == "":
+                    return mock_root_logger
+                if name == "httpx":
+                    return mock_httpx_logger
+                if name == "httpcore":
+                    return mock_httpcore_logger
+                if name == "uvicorn.access":
+                    return mock_uvicorn_access_logger
+                if name == "uvicorn.error":
+                    return mock_uvicorn_error_logger
+                if name == "apscheduler.scheduler":
+                    return mock_apscheduler_logger
+                if name == "apscheduler.executors.default":
+                    return mock_apscheduler_executor_logger
+                if name == "urllib3.connectionpool":
+                    return mock_urllib3_logger
+                if name == "src.config.logging_config":
+                    return mock_module_logger
+                return Mock(spec=logging.Logger)
+
+            mock_get_logger.side_effect = get_logger_side_effect
+            mock_root_logger.handlers = []
+            mock_root_logger.hasHandlers.return_value = False
+
+            setup_logging(mock_accessor)
+
+            # Root logger should be set to INFO
+            mock_root_logger.setLevel.assert_called_once_with(logging.INFO)
+            # httpcore should stay at WARNING, NOT follow root INFO
+            mock_httpcore_logger.setLevel.assert_called_once_with(logging.WARNING)

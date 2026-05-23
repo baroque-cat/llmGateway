@@ -15,7 +15,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from src.config.schemas import ProviderConfig, ProxyConfig
+from src.config.schemas import (
+    HttpClientConfig,
+    HttpClientPoolConfig,
+    ProviderConfig,
+    ProxyConfig,
+)
 from src.core.http_client_factory import HttpClientFactory
 
 # ==============================================================================
@@ -33,7 +38,7 @@ def _make_proxy_config(
 
 
 def _make_provider_config(
-    dedicated: bool = False,
+    dedicated: bool = True,
     proxy_mode: str = "none",
     static_url: str | None = None,
 ) -> ProviderConfig:
@@ -48,6 +53,7 @@ def _make_provider_config(
 def _make_accessor_mock(
     providers: dict[str, ProviderConfig] | None = None,
     proxy_configs: dict[str, ProxyConfig] | None = None,
+    http_client_config: HttpClientConfig | None = None,
 ) -> MagicMock:
     """Create a mock ConfigAccessor.
 
@@ -57,6 +63,8 @@ def _make_accessor_mock(
             the proxy_config that would come from the provider. This allows
             testing fallback scenarios where get_provider returns None but
             get_proxy_config returns a valid config.
+        http_client_config: Overrides the response of get_http_client_config().
+            If None, returns a default HttpClientConfig().
     """
     accessor = MagicMock()
     providers = providers or {}
@@ -73,6 +81,9 @@ def _make_accessor_mock(
 
     accessor.get_provider = MagicMock(side_effect=get_provider)
     accessor.get_proxy_config = MagicMock(side_effect=get_proxy_config)
+    accessor.get_http_client_config = MagicMock(
+        return_value=http_client_config or HttpClientConfig()
+    )
     return accessor
 
 
@@ -613,3 +624,226 @@ class TestProxyModeSimplification:
         assert (
             "NotImplementedError" not in source_text
         ), "http_client_factory.py should not contain 'NotImplementedError'"
+
+
+# ==============================================================================
+# Section E: Pool Limits Verification
+# ==============================================================================
+
+
+class TestDefaultPoolLimits:
+    """Verify httpx.Limits is created with the default pool configuration."""
+
+    @pytest.mark.asyncio
+    async def test_default_pool_limits_applied(self) -> None:
+        """Default config creates httpx.Limits with max_connections=100,
+        max_keepalive_connections=20, keepalive_expiry=5.0."""
+        provider = _make_provider_config(dedicated=True, proxy_mode="none")
+        accessor = _make_accessor_mock(providers={"test_prov": provider})
+        factory = HttpClientFactory(accessor)
+
+        mock_client = MagicMock(spec=httpx.AsyncClient)
+        mock_client.aclose = AsyncMock()
+
+        captured_kwargs: dict[str, object] = {}
+
+        def capture_client(**kwargs: object) -> MagicMock:
+            captured_kwargs.update(kwargs)
+            return mock_client
+
+        with patch(
+            "src.core.http_client_factory.httpx.AsyncClient",
+            side_effect=capture_client,
+        ):
+            await factory.get_client_for_provider("test_prov")
+
+        limits = captured_kwargs["limits"]
+        assert isinstance(limits, httpx.Limits)
+        assert limits.max_connections == 100
+        assert limits.max_keepalive_connections == 20
+        assert limits.keepalive_expiry == 5.0
+
+
+class TestCustomPoolLimits:
+    """Verify custom pool limits from config are passed to httpx.Limits."""
+
+    @pytest.mark.asyncio
+    async def test_custom_pool_limits_applied(self) -> None:
+        """Custom HttpClientPoolConfig values are used when creating httpx.Limits."""
+        provider = _make_provider_config(dedicated=True, proxy_mode="none")
+        custom_pool = HttpClientPoolConfig(
+            max_connections=50,
+            max_keepalive_connections=10,
+            keepalive_expiry=30.0,
+        )
+        custom_http = HttpClientConfig(pool=custom_pool)
+        accessor = _make_accessor_mock(
+            providers={"test_prov": provider},
+            http_client_config=custom_http,
+        )
+        factory = HttpClientFactory(accessor)
+
+        mock_client = MagicMock(spec=httpx.AsyncClient)
+        mock_client.aclose = AsyncMock()
+
+        captured_kwargs: dict[str, object] = {}
+
+        def capture_client(**kwargs: object) -> MagicMock:
+            captured_kwargs.update(kwargs)
+            return mock_client
+
+        with patch(
+            "src.core.http_client_factory.httpx.AsyncClient",
+            side_effect=capture_client,
+        ):
+            await factory.get_client_for_provider("test_prov")
+
+        limits = captured_kwargs["limits"]
+        assert isinstance(limits, httpx.Limits)
+        assert limits.max_connections == 50
+        assert limits.max_keepalive_connections == 10
+        assert limits.keepalive_expiry == 30.0
+
+
+# ==============================================================================
+# Section F: HTTP/2 Toggle Verification
+# ==============================================================================
+
+
+class TestHttp2Toggle:
+    """Verify http2 is enabled or disabled per HttpClientConfig."""
+
+    @pytest.mark.asyncio
+    async def test_http2_enabled(self) -> None:
+        """http2=True in config creates client with http2=True."""
+        provider = _make_provider_config(dedicated=True, proxy_mode="none")
+        http_config = HttpClientConfig(http2=True)
+        accessor = _make_accessor_mock(
+            providers={"test_prov": provider},
+            http_client_config=http_config,
+        )
+        factory = HttpClientFactory(accessor)
+
+        mock_client = MagicMock(spec=httpx.AsyncClient)
+        mock_client.aclose = AsyncMock()
+
+        captured_kwargs: dict[str, object] = {}
+
+        def capture_client(**kwargs: object) -> MagicMock:
+            captured_kwargs.update(kwargs)
+            return mock_client
+
+        with patch(
+            "src.core.http_client_factory.httpx.AsyncClient",
+            side_effect=capture_client,
+        ):
+            await factory.get_client_for_provider("test_prov")
+
+        assert captured_kwargs["http2"] is True
+
+    @pytest.mark.asyncio
+    async def test_http2_disabled(self) -> None:
+        """http2=False in config creates client with http2=False."""
+        provider = _make_provider_config(dedicated=True, proxy_mode="none")
+        http_config = HttpClientConfig(http2=False)
+        accessor = _make_accessor_mock(
+            providers={"test_prov": provider},
+            http_client_config=http_config,
+        )
+        factory = HttpClientFactory(accessor)
+
+        mock_client = MagicMock(spec=httpx.AsyncClient)
+        mock_client.aclose = AsyncMock()
+
+        captured_kwargs: dict[str, object] = {}
+
+        def capture_client(**kwargs: object) -> MagicMock:
+            captured_kwargs.update(kwargs)
+            return mock_client
+
+        with patch(
+            "src.core.http_client_factory.httpx.AsyncClient",
+            side_effect=capture_client,
+        ):
+            await factory.get_client_for_provider("test_prov")
+
+        assert captured_kwargs["http2"] is False
+
+
+# ==============================================================================
+# Section G: Dedicated Client Isolation (Default = True)
+# ==============================================================================
+
+
+class TestDedicatedClientIsolation:
+    """Verify dedicated_http_client=True (new default) isolates clients per provider."""
+
+    @pytest.mark.asyncio
+    async def test_new_default_dedicated_creates_isolated_clients(self) -> None:
+        """Two providers with dedicated_http_client=True (default) get separate clients."""
+        p1 = _make_provider_config(proxy_mode="none")
+        p2 = _make_provider_config(proxy_mode="none")
+        accessor = _make_accessor_mock(
+            providers={"instance_a": p1, "instance_b": p2}
+        )
+        factory = HttpClientFactory(accessor)
+
+        mock_a = MagicMock(spec=httpx.AsyncClient)
+        mock_a.aclose = AsyncMock()
+        mock_b = MagicMock(spec=httpx.AsyncClient)
+        mock_b.aclose = AsyncMock()
+
+        call_count = 0
+
+        def create_client(**kwargs: object) -> MagicMock:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return mock_a
+            return mock_b
+
+        with patch(
+            "src.core.http_client_factory.httpx.AsyncClient",
+            side_effect=create_client,
+        ):
+            client_a = await factory.get_client_for_provider("instance_a")
+            client_b = await factory.get_client_for_provider("instance_b")
+
+        assert client_a is mock_a
+        assert client_b is mock_b
+        assert client_a is not client_b
+        assert len(factory._clients) == 2
+
+
+# ==============================================================================
+# Section H: Shared Client Pooling (dedicated_http_client=False)
+# ==============================================================================
+
+
+class TestSharedClientPooling:
+    """Verify dedicated_http_client=False shares clients across providers."""
+
+    @pytest.mark.asyncio
+    async def test_two_shared_clients_share_same_object(self) -> None:
+        """Two providers with dedicated_http_client=False share the same client."""
+        p1 = _make_provider_config(dedicated=False, proxy_mode="none")
+        p2 = _make_provider_config(dedicated=False, proxy_mode="none")
+        accessor = _make_accessor_mock(
+            providers={"shared_a": p1, "shared_b": p2}
+        )
+        factory = HttpClientFactory(accessor)
+
+        mock_client = MagicMock(spec=httpx.AsyncClient)
+        mock_client.aclose = AsyncMock()
+
+        with patch(
+            "src.core.http_client_factory.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            client_a = await factory.get_client_for_provider("shared_a")
+            client_b = await factory.get_client_for_provider("shared_b")
+
+        assert client_a is mock_client
+        assert client_b is mock_client
+        assert client_a is client_b
+        assert len(factory._clients) == 1

@@ -10,6 +10,7 @@ from src.config.schemas import (
     DatabasePoolConfig,
     GatewayConfig,
     HealthPolicyConfig,
+    HttpClientConfig,
     KeeperConfig,
     LoggingConfig,
     MetricsConfig,
@@ -231,3 +232,7 @@ class ConfigAccessor:
     def get_pool_config(self) -> DatabasePoolConfig:
         """Returns the PostgreSQL connection pool config (min_size, max_size)."""
         return self._config.database.pool
+
+    def get_http_client_config(self) -> HttpClientConfig:
+        """Returns the global HTTP client configuration (pool limits, http2 toggle)."""
+        return self._config.http_client
