@@ -5,8 +5,10 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from httpcore._async.http11 import AsyncHTTP11Connection
 from httpcore._models import Origin
 
+from src.core.http2.h2_connection import FixedHTTP2Connection
 from src.core.http2.pool import CapacityAwareHttp2Pool
 
 
@@ -260,3 +262,100 @@ class TestCapacityAwareHttp2Pool:
 
         mock_assign.assert_called_once()
         pool._close_connections.assert_called_once_with([])  # type: ignore[reportPrivateUsage]
+
+    # ------------------------------------------------------------------
+    # get_health_summary tests
+    # ------------------------------------------------------------------
+
+    def test_get_health_summary_connection_counts(self) -> None:
+        """Total, active, idle connection counts are consistent."""
+        pool = self._make_pool()
+
+        idle_conn = self._make_mock_connection(is_idle=True)
+        active_conn1 = self._make_mock_connection(is_idle=False)
+        active_conn2 = self._make_mock_connection(is_idle=False)
+
+        pool._connections = [idle_conn, active_conn1, active_conn2]  # type: ignore[reportPrivateUsage]
+        pool._requests = []  # type: ignore[reportPrivateUsage]
+
+        summary = pool.get_health_summary()
+
+        assert summary["total_connections"] == 3
+        assert summary["active_connections"] == 2
+        assert summary["idle_connections"] == 1
+        assert (
+            summary["total_connections"]
+            == summary["active_connections"] + summary["idle_connections"]
+        )
+
+        # All values must be non-negative integers.
+        for key in ("total_connections", "active_connections", "idle_connections"):
+            assert isinstance(summary[key], int)
+            assert summary[key] >= 0
+
+    def test_get_health_summary_protocol_split(self) -> None:
+        """H2 and H1 connection counts are reported by protocol type."""
+        pool = self._make_pool()
+
+        # Shell instances for isinstance checks — bypass complex constructors.
+        h2_inner1 = object.__new__(FixedHTTP2Connection)
+        h2_inner2 = object.__new__(FixedHTTP2Connection)
+        h1_inner = object.__new__(AsyncHTTP11Connection)
+
+        h2_conn1 = self._make_mock_connection(is_idle=False)
+        h2_conn1._connection = h2_inner1
+
+        h2_conn2 = self._make_mock_connection(is_idle=False)
+        h2_conn2._connection = h2_inner2
+
+        h1_conn = self._make_mock_connection(is_idle=True)
+        h1_conn._connection = h1_inner
+
+        pool._connections = [h2_conn1, h2_conn2, h1_conn]  # type: ignore[reportPrivateUsage]
+        pool._requests = []  # type: ignore[reportPrivateUsage]
+
+        summary = pool.get_health_summary()
+
+        assert summary["h2_connections"] == 2
+        assert summary["h1_connections"] == 1
+        assert isinstance(summary["h2_connections"], int)
+        assert isinstance(summary["h1_connections"], int)
+
+    def test_get_health_summary_stream_metrics(self) -> None:
+        """Active H2 streams and max capacity reflect assigned requests."""
+        pool = self._make_pool()
+
+        h2_inner = object.__new__(FixedHTTP2Connection)
+
+        h2_conn = self._make_mock_connection(is_idle=False, max_conc_val=100)
+        h2_conn._connection = h2_inner
+
+        pool._connections = [h2_conn]  # type: ignore[reportPrivateUsage]
+
+        # Two requests assigned to the H2 connection (not queued).
+        req1 = self._make_mock_pool_request(queued=False, connection=h2_conn)
+        req2 = self._make_mock_pool_request(queued=False, connection=h2_conn)
+        pool._requests = [req1, req2]  # type: ignore[reportPrivateUsage]
+
+        summary = pool.get_health_summary()
+
+        assert summary["active_h2_streams"] == 2
+        assert summary["max_h2_stream_capacity"] == 100
+
+    def test_get_health_summary_queue_depth(self) -> None:
+        """Queued requests count reflects requests awaiting assignment."""
+        pool = self._make_pool()
+
+        conn = self._make_mock_connection(is_idle=False)
+        pool._connections = [conn]  # type: ignore[reportPrivateUsage]
+
+        queued1 = self._make_mock_pool_request(queued=True)
+        queued2 = self._make_mock_pool_request(queued=True)
+        assigned = self._make_mock_pool_request(queued=False, connection=conn)
+        pool._requests = [queued1, queued2, assigned]  # type: ignore[reportPrivateUsage]
+
+        summary = pool.get_health_summary()
+
+        assert summary["queued_requests"] == 2
+        assert isinstance(summary["queued_requests"], int)
+        assert summary["queued_requests"] >= 0

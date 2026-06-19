@@ -3,12 +3,14 @@ Unit tests for core gateway_service logic.
 
 Tests cover:
   1-5: _handle_full_stream_request / _handle_buffered_retryable_request
-  6-8: create_app factory
-  9-11: _sanitize_headers / _sanitize_body
+  6-8: Pool health log loop (_pool_health_log_loop)
+  9-11: create_app factory
   12-15: Static analysis / Pydantic validation (moved from integration)
 """
 
+import asyncio
 import inspect
+import logging
 import re
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
@@ -25,6 +27,7 @@ from src.services.gateway.gateway_service import (
     GatewayStreamError,
     _handle_buffered_retryable_request,
     _handle_full_stream_request,
+    _pool_health_log_loop,
     create_app,
 )
 
@@ -187,6 +190,41 @@ class TestFullStreamRequest:
                 # the client reads the stream, not during the handler call.
                 assert isinstance(result, StreamingResponse)
 
+    @pytest.mark.asyncio
+    async def test_full_stream_skips_penalty_for_client_error(self):
+        """Client-side error (BAD_REQUEST) → forwarded without key penalty."""
+        request = _make_mock_request()
+        provider = _make_mock_provider()
+        mock_response = _make_mock_response(status_code=400)
+        fail_result = CheckResult.fail(ErrorReason.BAD_REQUEST, status_code=400)
+
+        provider.proxy_request.return_value = (
+            mock_response,
+            fail_result,
+            b'{"error": "bad request"}',
+        )
+
+        mock_forwarded_response = MagicMock()
+        with (
+            patch(
+                "src.services.gateway.gateway_service.forward_error_to_client",
+                new=AsyncMock(return_value=mock_forwarded_response),
+            ) as mock_forward_error,
+            patch(
+                "src.services.gateway.gateway_service._report_key_failure",
+                new=AsyncMock(),
+            ) as mock_report,
+        ):
+            result = await _handle_full_stream_request(request, provider, "openai")
+
+            # Should forward the error to client, not return 503 JSONResponse
+            assert result is mock_forwarded_response
+            mock_forward_error.assert_awaited_once()
+
+            # Key MUST NOT be penalized or removed from pool
+            mock_report.assert_not_called()
+            request.app.state.gateway_cache.remove_key_from_pool.assert_not_called()
+
 
 class TestBufferedRetryableRequest:
     """Tests for _handle_buffered_retryable_request."""
@@ -338,9 +376,228 @@ class TestBufferedRetryableRequest:
             # Verify key was removed from pool
             request.app.state.gateway_cache.remove_key_from_pool.assert_called()
 
+    @pytest.mark.asyncio
+    async def test_retry_handler_aborts_for_client_error(self):
+        """Client error (BAD_REQUEST) → abort retry loop immediately, no counters advanced."""
+        request = _make_mock_request()
+        mock_provider_config = (
+            request.app.state.accessor.get_provider_or_raise.return_value
+        )
+        mock_provider_config.gateway_policy.retry.enabled = True
+        retry_policy = MagicMock()
+        retry_policy.attempts = 3
+        retry_policy.backoff_sec = 0
+        retry_policy.backoff_factor = 1.0
+        mock_provider_config.gateway_policy.retry.on_server_error = retry_policy
+        mock_provider_config.gateway_policy.retry.on_key_error = MagicMock()
+        mock_provider_config.gateway_policy.retry.on_key_error.attempts = 3
+        mock_provider_config.gateway_policy.retry.on_key_error.backoff_sec = 0
+        mock_provider_config.gateway_policy.retry.on_key_error.backoff_factor = 1.0
+
+        request.body = AsyncMock(return_value=b'{"model": "gpt-4"}')
+
+        provider = _make_mock_provider()
+        mock_response = _make_mock_response(status_code=400)
+        fail_result = CheckResult.fail(ErrorReason.BAD_REQUEST, status_code=400)
+
+        provider.proxy_request.return_value = (
+            mock_response,
+            fail_result,
+            b'{"error": "bad request"}',
+        )
+
+        mock_forwarded_response = MagicMock()
+        with (
+            patch(
+                "src.services.gateway.gateway_service.forward_error_to_client",
+                new=AsyncMock(return_value=mock_forwarded_response),
+            ) as mock_forward_error,
+            patch(
+                "src.services.gateway.gateway_service.discard_response",
+                new=AsyncMock(),
+            ),
+            patch(
+                "src.services.gateway.gateway_service.asyncio.sleep",
+                new=AsyncMock(),
+            ) as mock_sleep,
+            patch(
+                "src.services.gateway.gateway_service._report_key_failure",
+                new=AsyncMock(),
+            ) as mock_report,
+        ):
+            result = await _handle_buffered_retryable_request(
+                request, provider, "openai"
+            )
+
+            # Should forward error to client, not 503
+            assert result is mock_forwarded_response
+            mock_forward_error.assert_awaited_once()
+
+            # Should NOT execute second iteration — exactly one proxy_request call
+            assert provider.proxy_request.call_count == 1
+
+            # Retry/sleep paths MUST NOT be entered
+            mock_sleep.assert_not_called()
+            # Key MUST NOT be penalized or removed
+            mock_report.assert_not_called()
+            request.app.state.gateway_cache.remove_key_from_pool.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
-# Tests 6-8: create_app factory
+# Tests 9-11: Pool health log loop
+# ---------------------------------------------------------------------------
+
+
+class TestPoolHealthLogLoop:
+    """Tests for _pool_health_log_loop background task."""
+
+    @pytest.mark.asyncio
+    async def test_pool_health_log_line_format(self, caplog):
+        """Log line matches expected HTTP_POOL_HEALTH format."""
+        mock_factory = MagicMock()
+        mock_factory.get_pool_health_summary.return_value = {
+            "proxy:http://proxy1:8080": {
+                "total_connections": 12,
+                "active_connections": 4,
+                "idle_connections": 8,
+                "h2_connections": 12,
+                "h1_connections": 0,
+                "active_h2_streams": 45,
+                "max_h2_stream_capacity": 1200,
+                "queued_requests": 0,
+            }
+        }
+
+        sleep_calls: list[int | float] = []
+
+        async def sleep_then_cancel(delay):
+            sleep_calls.append(delay)
+            if len(sleep_calls) >= 2:
+                raise asyncio.CancelledError()
+
+        with (
+            patch("asyncio.sleep", side_effect=sleep_then_cancel),
+            caplog.at_level(logging.INFO),
+        ):
+            await _pool_health_log_loop(mock_factory, 60)
+
+        health_logs = [r for r in caplog.records if "HTTP_POOL_HEALTH |" in r.message]
+        assert len(health_logs) >= 1, (
+            f"Expected at least 1 HTTP_POOL_HEALTH log line, got {len(health_logs)}"
+        )
+        log_msg = health_logs[0].message
+        assert "HTTP_POOL_HEALTH | proxy:http://proxy1:8080" in log_msg
+        assert "conns: 12 total (4 active, 8 idle)" in log_msg
+        assert "proto: 12 H2 / 0 H1" in log_msg
+        assert "streams: 45 active / 1200 max_capacity" in log_msg
+        assert "queued: 0" in log_msg
+
+    @pytest.mark.asyncio
+    async def test_pool_health_log_respects_interval(self):
+        """Background task executes approximately every N seconds."""
+        mock_factory = MagicMock()
+        mock_factory.get_pool_health_summary.return_value = {
+            "proxy:http://proxy1:8080": {
+                "total_connections": 1,
+                "active_connections": 0,
+                "idle_connections": 1,
+                "h2_connections": 1,
+                "h1_connections": 0,
+                "active_h2_streams": 0,
+                "max_h2_stream_capacity": 100,
+                "queued_requests": 0,
+            }
+        }
+
+        interval = 2
+        sleep_delays: list[int | float] = []
+
+        async def track_sleep(delay):
+            sleep_delays.append(delay)
+            if len(sleep_delays) >= 3:
+                raise asyncio.CancelledError()
+
+        with patch("asyncio.sleep", side_effect=track_sleep):
+            await _pool_health_log_loop(mock_factory, interval)
+
+        # Should have slept at least 3 times
+        assert len(sleep_delays) >= 3, (
+            f"Expected at least 3 sleep calls, got {len(sleep_delays)}"
+        )
+        # Each sleep call must use the configured interval
+        for i, delay in enumerate(sleep_delays):
+            assert delay == interval, (
+                f"Sleep call {i}: expected {interval}, got {delay}"
+            )
+
+    @pytest.mark.asyncio
+    async def test_pool_health_log_disabled_when_interval_zero(self, caplog):
+        """When pool_health_log_interval_sec is 0, no health task is started
+        and no health log lines are emitted."""
+        accessor = MagicMock()
+        accessor.get_enabled_providers = Mock(return_value={})
+        accessor.get_database_dsn = Mock(
+            return_value="postgresql://test:test@localhost/test"
+        )
+        accessor.get_pool_config = Mock()
+        accessor.get_pool_config.return_value.min_size = 2
+        accessor.get_pool_config.return_value.max_size = 5
+        accessor.get_metrics_config = Mock()
+        accessor.get_metrics_config.return_value.enabled = False
+        accessor.get_metrics_config.return_value.access_token = None
+
+        with (
+            patch(
+                "src.services.gateway.gateway_service.database.init_db_pool",
+                new=AsyncMock(),
+            ),
+            patch(
+                "src.services.gateway.gateway_service.DatabaseManager"
+            ) as mock_dm_cls,
+            patch(
+                "src.services.gateway.gateway_service.HttpClientFactory",
+            ) as mock_hcf_cls,
+            patch(
+                "src.services.gateway.gateway_service.GatewayCache"
+            ) as mock_gc_cls,
+            patch(
+                "src.services.gateway.gateway_service._cache_refresh_loop",
+                new=AsyncMock(),
+            ),
+            caplog.at_level(logging.INFO),
+        ):
+            mock_dm_cls.return_value.wait_for_schema_ready = AsyncMock()
+            mock_gc_cls.return_value.populate_caches = AsyncMock()
+
+            # Set pool_health_log_interval_sec to 0 on the factory instance
+            mock_factory_instance = MagicMock()
+            mock_factory_instance._pool_health_log_interval_sec = 0
+            mock_factory_instance.close_all = AsyncMock()
+            mock_hcf_cls.return_value = mock_factory_instance
+
+            app = create_app(accessor)
+
+            # Trigger the lifespan (startup + shutdown) via ASGI transport
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(
+                transport=transport, base_url="http://test"
+            ):
+                # Lifespan has started — check that no health task was created
+                assert not hasattr(app.state, "pool_health_task"), (
+                    "pool_health_task should NOT be set when interval is 0"
+                )
+
+        # After full lifespan (shutdown included), verify no health log lines
+        health_logs = [
+            r for r in caplog.records if "HTTP_POOL_HEALTH" in r.message
+        ]
+        assert len(health_logs) == 0, (
+            f"Expected 0 HTTP_POOL_HEALTH log lines, got {len(health_logs)}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Tests 9-11: create_app factory
 # ---------------------------------------------------------------------------
 
 

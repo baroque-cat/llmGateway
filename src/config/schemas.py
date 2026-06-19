@@ -487,6 +487,9 @@ class HttpClientConfig(BaseModel):
     http2: bool = True
     # Connection pool limits.
     pool: HttpClientPoolConfig = Field(default_factory=HttpClientPoolConfig)
+    # Interval in seconds for periodic pool health logging at INFO level.
+    # Set to 0 to disable.
+    pool_health_log_interval_sec: int = Field(default=60, ge=0)
 
 
 class HttpClientLoggingConfig(BaseModel):

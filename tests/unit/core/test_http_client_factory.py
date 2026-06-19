@@ -909,6 +909,71 @@ class TestDedicatedClientIsolation:
 
 
 # ==============================================================================
+# Section K: get_pool_health_summary (pool health factory)
+# ==============================================================================
+
+
+class TestGetPoolHealthSummary:
+    """Tests for HttpClientFactory.get_pool_health_summary."""
+
+    def test_get_pool_health_summary_all_clients(self) -> None:
+        """When get_pool_health_summary() is called with cached clients,
+        returns one entry per client with their pool health summary dicts.
+        """
+        accessor = _make_accessor_mock()
+        factory = HttpClientFactory(accessor)
+
+        # Build mock client A with transport → pool → get_health_summary chain
+        mock_client_a = MagicMock()
+        mock_pool_a = MagicMock()
+        mock_pool_a.get_health_summary.return_value = {
+            "available": 5,
+            "max_connections": 10,
+            "active": 3,
+        }
+        mock_transport_a = MagicMock()
+        mock_transport_a._pool = mock_pool_a
+        mock_client_a._transport = mock_transport_a
+
+        # Build mock client B with transport → pool → get_health_summary chain
+        mock_client_b = MagicMock()
+        mock_pool_b = MagicMock()
+        mock_pool_b.get_health_summary.return_value = {
+            "available": 2,
+            "max_connections": 8,
+            "active": 6,
+        }
+        mock_transport_b = MagicMock()
+        mock_transport_b._pool = mock_pool_b
+        mock_client_b._transport = mock_transport_b
+
+        # Populate the internal clients cache directly
+        factory._clients = {
+            "instance_a": mock_client_a,
+            "instance_b": mock_client_b,
+        }
+
+        result = factory.get_pool_health_summary()
+
+        assert isinstance(result, dict)
+        assert set(result.keys()) == {"instance_a", "instance_b"}
+        assert result["instance_a"] == {"available": 5, "max_connections": 10, "active": 3}
+        assert result["instance_b"] == {"available": 2, "max_connections": 8, "active": 6}
+
+    def test_get_pool_health_summary_empty_cache(self) -> None:
+        """When get_pool_health_summary() is called and no clients are cached,
+        an empty dict is returned.
+        """
+        accessor = _make_accessor_mock()
+        factory = HttpClientFactory(accessor)
+
+        # No clients have been added — _clients is an empty dict
+        result = factory.get_pool_health_summary()
+
+        assert result == {}
+
+
+# ==============================================================================
 # Section H: Shared Client Pooling (dedicated_http_client=False)
 # ==============================================================================
 

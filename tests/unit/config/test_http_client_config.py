@@ -8,7 +8,7 @@ Tests cover defaults, validation, bounds checking, YAML loading via
 ConfigLoader, and integration with the root Config model.
 
 Test IDs:
-  UT-HC01..UT-HC20 — Functional tests for HTTP client config models
+  UT-HC01..UT-HC28 — Functional tests for HTTP client config models
 """
 
 from unittest.mock import mock_open, patch
@@ -374,6 +374,41 @@ http_client:
         assert config.logging.http_client.httpx_level == "WARNING"
         assert config.logging.http_client.httpcore_level == "WARNING"
         assert config.logging.http_client.trace_enabled is False
+
+
+# ==============================================================================
+# UT-HC25..UT-HC27: pool_health_log_interval_sec field (default, custom, disabled)
+# ==============================================================================
+
+
+class TestHttpClientConfigPoolHealthLogInterval:
+    """Test pool_health_log_interval_sec field — default, custom, and 0=disabled."""
+
+    def test_ut_hc25_default_value(self):
+        """UT-HC25: HttpClientConfig() → pool_health_log_interval_sec defaults to 60."""
+        config = HttpClientConfig()
+        assert config.pool_health_log_interval_sec == 60
+
+    def test_ut_hc26_custom_value(self):
+        """UT-HC26: HttpClientConfig(pool_health_log_interval_sec=30) → value is 30."""
+        config = HttpClientConfig(pool_health_log_interval_sec=30)
+        assert config.pool_health_log_interval_sec == 30
+
+    def test_ut_hc27_zero_disables_logging(self):
+        """UT-HC27: HttpClientConfig(pool_health_log_interval_sec=0) → value is 0
+        (ge=0 constraint allows zero for disabled)."""
+        config = HttpClientConfig(pool_health_log_interval_sec=0)
+        assert config.pool_health_log_interval_sec == 0
+
+    def test_ut_hc28_negative_rejected(self):
+        """UT-HC28: HttpClientConfig(pool_health_log_interval_sec=-1) → ValidationError
+        (ge=0 constraint violated by negative value)."""
+        with pytest.raises(ValidationError) as exc_info:
+            HttpClientConfig(pool_health_log_interval_sec=-1)
+
+        error_message = str(exc_info.value)
+        assert "pool_health_log_interval_sec" in error_message
+        assert "greater than or equal to 0" in error_message
 
 
 # ==============================================================================

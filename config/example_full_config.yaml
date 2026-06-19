@@ -23,6 +23,9 @@ http_client:
     max_connections: 200
     max_keepalive_connections: 50
     keepalive_expiry: 30.0
+  # Interval in seconds for periodic INFO-level pool health logging.
+  # Set to 0 to disable.
+  pool_health_log_interval_sec: 60
 
 # --- METRICS SETTINGS ---
 metrics:

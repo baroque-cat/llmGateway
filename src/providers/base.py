@@ -297,6 +297,8 @@ class AIBaseProvider(IProvider):
                 )
             elif isinstance(e, httpx.RemoteProtocolError):
                 detail = " — HTTP/2 protocol error (server may have reset connection)"
+            elif isinstance(e, httpx.LocalProtocolError):
+                detail = " — connection pool saturated (all HTTP/2 streams in use)"
             elif isinstance(e, httpx.WriteTimeout):
                 detail = " — send stalled"
             elif isinstance(e, httpx.ConnectTimeout):
@@ -312,9 +314,14 @@ class AIBaseProvider(IProvider):
                 f" — {e}"
             )
             logger.error(error_message)
-            check_result = CheckResult.fail(
-                ErrorReason.NETWORK_ERROR, error_message, status_code=503
-            )
+            if isinstance(e, httpx.LocalProtocolError):
+                check_result = CheckResult.fail(
+                    ErrorReason.BAD_REQUEST, error_message, status_code=503
+                )
+            else:
+                check_result = CheckResult.fail(
+                    ErrorReason.NETWORK_ERROR, error_message, status_code=503
+                )
             upstream_response = httpx.Response(503, content=error_message.encode())
             content_bytes = None
 

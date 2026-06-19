@@ -40,6 +40,9 @@ class HttpClientFactory:
         http_config = accessor.get_http_client_config()
         self._http2_enabled: bool = http_config.http2
         self._pool_config = http_config.pool
+        self._pool_health_log_interval_sec: int = (
+            http_config.pool_health_log_interval_sec
+        )
 
         # Trace handler for per-request httpx trace events.
         self._trace_handler: Callable[[dict[str, Any]], None] | None = (
@@ -217,3 +220,21 @@ class HttpClientFactory:
         self.logger.info(
             "All HTTP clients have been closed and cache has been cleared."
         )
+
+    def get_pool_health_summary(self) -> dict[str, dict[str, int]]:
+        """Return pool health summaries for all cached HTTP clients.
+
+        Iterates over ``_clients`` and calls
+        ``CapacityAwareHttp2Pool.get_health_summary()`` on each
+        client's transport pool.
+
+        Returns:
+            A mapping from cache key to pool health summary dict.
+            Returns an empty dict when no clients are cached.
+        """
+        result: dict[str, dict[str, int]] = {}
+        for cache_key, client in self._clients.items():
+            pool = getattr(client._transport, "_pool", None)  # type: ignore[reportPrivateUsage]
+            if pool is not None and hasattr(pool, "get_health_summary"):
+                result[cache_key] = pool.get_health_summary()
+        return result

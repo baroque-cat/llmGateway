@@ -1351,6 +1351,87 @@ class TestSendProxyRequestChangedContract:
             # Verify: _parse_proxy_error called with content=None (aread failed)
             mock_parse.assert_called_once_with(mock_upstream, None)
 
+    # --- Scenario 1: LocalProtocolError → BAD_REQUEST ---
+
+    @pytest.mark.asyncio
+    async def test_local_protocol_error_maps_to_bad_request(self):
+        """
+        Scenario 1: httpx.LocalProtocolError raised by client.send().
+
+        Verifies: ErrorReason.BAD_REQUEST (not NETWORK_ERROR),
+        status_code=503, body_bytes=None,
+        error_message contains "connection pool saturated (all HTTP/2 streams in use)".
+        """
+        provider = self._create_provider_with_config()
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.send = AsyncMock(
+            side_effect=httpx.LocalProtocolError("All streams busy")
+        )
+        mock_request = MagicMock(spec=httpx.Request)
+
+        response, check_result, body_bytes = await provider._send_proxy_request(
+            mock_client, mock_request
+        )
+
+        # Verify: ErrorReason.BAD_REQUEST, not NETWORK_ERROR
+        assert check_result.available is False
+        assert check_result.error_reason == ErrorReason.BAD_REQUEST
+
+        # Verify: detail string in error_message
+        assert " — connection pool saturated" in check_result.message
+        assert "all HTTP/2 streams in use" in check_result.message
+
+        # Verify: status_code=503
+        assert response.status_code == 503
+
+        # Verify: body_bytes is None
+        assert body_bytes is None
+
+    # --- Scenario 2: other RequestErrors → NETWORK_ERROR ---
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "error_class",
+        [
+            httpx.PoolTimeout,
+            httpx.ConnectError,
+            httpx.RemoteProtocolError,
+            httpx.ReadTimeout,
+            httpx.WriteTimeout,
+            httpx.ConnectTimeout,
+            httpx.RequestError,
+        ],
+    )
+    async def test_other_request_errors_still_map_to_network_error(
+        self, error_class: type[httpx.RequestError]
+    ):
+        """
+        Scenario 2: Non-LocalProtocolError httpx.RequestError subclasses.
+
+        Verifies: All map to ErrorReason.NETWORK_ERROR,
+        status_code=503, body_bytes=None.
+        """
+        provider = self._create_provider_with_config()
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.send = AsyncMock(side_effect=error_class("test error"))
+        mock_request = MagicMock(spec=httpx.Request)
+
+        response, check_result, body_bytes = await provider._send_proxy_request(
+            mock_client, mock_request
+        )
+
+        # Verify: NETWORK_ERROR for all non-LocalProtocolError subclasses
+        assert check_result.available is False
+        assert check_result.error_reason == ErrorReason.NETWORK_ERROR
+
+        # Verify: status_code=503
+        assert response.status_code == 503
+
+        # Verify: body_bytes=None
+        assert body_bytes is None
+
 
 class TestCheckFastFailRemoved:
     """Test suite verifying _check_fast_fail method has been removed."""

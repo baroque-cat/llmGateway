@@ -23,11 +23,13 @@ import ssl
 import typing
 
 from httpcore._async.connection_pool import AsyncConnectionPool
+from httpcore._async.http11 import AsyncHTTP11Connection
 from httpcore._async.interfaces import AsyncConnectionInterface
 from httpcore._backends.base import SOCKET_OPTION, AsyncNetworkBackend
 from httpcore._models import Origin
 
 from src.core.http2.connection import CapacityAwareHTTPConnection
+from src.core.http2.h2_connection import FixedHTTP2Connection
 
 logger = logging.getLogger("httpcore.connection")
 
@@ -216,3 +218,61 @@ class CapacityAwareHttp2Pool(AsyncConnectionPool):
             return int(connection.max_concurrent_requests())  # type: ignore[reportUnknownMemberType]
         except AttributeError:
             return 1
+
+    # ------------------------------------------------------------------
+    # get_health_summary — pool health statistics
+    # ------------------------------------------------------------------
+
+    def get_health_summary(self) -> dict[str, int]:
+        """Return pool-level health statistics as a dict.
+
+        Returns:
+            A dictionary with keys ``total_connections``,
+            ``active_connections``, ``idle_connections``,
+            ``h2_connections``, ``h1_connections``,
+            ``active_h2_streams``, ``max_h2_stream_capacity``,
+            and ``queued_requests`` — all non-negative integers.
+        """
+        connections = self._connections
+
+        total_connections = len(connections)
+        idle_connections = sum(1 for c in connections if c.is_idle())
+        active_connections = total_connections - idle_connections
+
+        # Protocol split: inspect the underlying connection type.
+        h2_connections = 0
+        h1_connections = 0
+        active_h2_streams = 0
+        max_h2_stream_capacity = 0
+
+        # Count active (assigned) requests per connection.
+        streams_per_conn: dict[AsyncConnectionInterface, int] = dict.fromkeys(
+            connections, 0
+        )
+        for r in self._requests:
+            conn = r.connection
+            if conn is not None and not r.is_queued():
+                streams_per_conn[conn] = streams_per_conn.get(conn, 0) + 1
+
+        for conn in connections:
+            # Protocol detection via the inner connection.
+            inner = getattr(conn, "_connection", None)
+            if isinstance(inner, FixedHTTP2Connection):
+                h2_connections += 1
+                active_h2_streams += streams_per_conn.get(conn, 0)
+                max_h2_stream_capacity += self._max_concurrent_requests(conn)
+            elif isinstance(inner, AsyncHTTP11Connection):
+                h1_connections += 1
+
+        queued_requests = sum(1 for r in self._requests if r.is_queued())
+
+        return {
+            "total_connections": total_connections,
+            "active_connections": active_connections,
+            "idle_connections": idle_connections,
+            "h2_connections": h2_connections,
+            "h1_connections": h1_connections,
+            "active_h2_streams": active_h2_streams,
+            "max_h2_stream_capacity": max_h2_stream_capacity,
+            "queued_requests": queued_requests,
+        }

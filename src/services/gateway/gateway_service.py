@@ -404,6 +404,48 @@ async def _cache_refresh_loop(cache: GatewayCache, interval_sec: int) -> None:
             logger.error("An error occurred in the cache refresh loop.", exc_info=True)
 
 
+async def _pool_health_log_loop(factory: HttpClientFactory, interval_sec: int) -> None:
+    """Periodically log HTTP pool health summaries at INFO level.
+
+    Args:
+        factory: The ``HttpClientFactory`` that owns the cached clients.
+        interval_sec: Seconds between log iterations.
+    """
+    logger.info(
+        f"Starting pool health log loop with an interval of {interval_sec} seconds."
+    )
+    while True:
+        try:
+            await asyncio.sleep(interval_sec)
+            summaries = factory.get_pool_health_summary()
+            if not summaries:
+                logger.info("HTTP_POOL_HEALTH | no active clients")
+                continue
+            for cache_key, summary in summaries.items():
+                logger.info(
+                    "HTTP_POOL_HEALTH | %s | conns: %d total (%d active, %d idle) | "
+                    "proto: %d H2 / %d H1 | "
+                    "streams: %d active / %d max_capacity | "
+                    "queued: %d",
+                    cache_key,
+                    summary.get("total_connections", 0),
+                    summary.get("active_connections", 0),
+                    summary.get("idle_connections", 0),
+                    summary.get("h2_connections", 0),
+                    summary.get("h1_connections", 0),
+                    summary.get("active_h2_streams", 0),
+                    summary.get("max_h2_stream_capacity", 0),
+                    summary.get("queued_requests", 0),
+                )
+        except asyncio.CancelledError:
+            logger.info("Pool health log loop is shutting down.")
+            break
+        except Exception:
+            logger.error(
+                "An error occurred in the pool health log loop.", exc_info=True
+            )
+
+
 def _get_token_from_headers(
     authorization: Annotated[str | None, Header()] = None,
     x_goog_api_key: Annotated[str | None, Header()] = None,
@@ -857,6 +899,15 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
             )
             app.state.cache_refresh_task = task
 
+            # Launch pool health logging background task.
+            factory = app.state.http_client_factory
+            interval = factory._pool_health_log_interval_sec
+            if interval > 0:
+                health_task = asyncio.create_task(
+                    _pool_health_log_loop(factory, interval)
+                )
+                app.state.pool_health_task = health_task
+
             # Assign the pre-calculated dispatcher state
             app.state.full_stream_instances = full_stream_instances
             app.state.debug_mode_map = debug_mode_map
@@ -874,6 +925,8 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
         logger.info("Gateway service shutting down...")
         if task := getattr(app.state, "cache_refresh_task", None):
             task.cancel()
+        if health_task := getattr(app.state, "pool_health_task", None):
+            health_task.cancel()
         if http_factory := getattr(app.state, "http_client_factory", None):
             await http_factory.close_all()
         await database.close_db_pool()
