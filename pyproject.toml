@@ -30,6 +30,9 @@ package-mode = false
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "slow: tests that exercise real network stack (deselect with '-m \"not slow\"')",
+]
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
