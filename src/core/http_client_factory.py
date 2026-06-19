@@ -10,6 +10,7 @@ import httpx
 # REFACTORED: Import ConfigAccessor instead of the raw Config schema.
 from src.config.logging_config import get_trace_handler
 from src.core.accessor import ConfigAccessor
+from src.core.http2 import CapacityAwareHttp2Transport
 
 
 class HttpClientFactory:
@@ -164,8 +165,15 @@ class HttpClientFactory:
                     max_keepalive_connections=self._pool_config.max_keepalive_connections,
                     keepalive_expiry=self._pool_config.keepalive_expiry,
                 )
+                transport = CapacityAwareHttp2Transport(
+                    verify=True,
+                    http1=True,
+                    http2=self._http2_enabled,
+                    limits=limits,
+                )
                 client_kwargs: dict[str, Any] = {
                     "http2": self._http2_enabled,
+                    "transport": transport,
                     "proxy": proxy_url,
                     "limits": limits,
                 }

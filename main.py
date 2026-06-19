@@ -17,6 +17,7 @@ from src.services.keeper import run_keeper
 logger = logging.getLogger(__name__)
 
 # === MODULE LEVEL (executed on every import, including uvicorn workers) ===
+
 config = load_config()
 accessor = ConfigAccessor(config)
 setup_logging(accessor)

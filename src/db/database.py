@@ -141,7 +141,7 @@ async def init_db_pool(
         logger.warning("Database pool already initialized.")
         return
     try:
-        _db_pool = await asyncpg.create_pool(  # pyright: ignore[reportUnknownVariableType, reportCallIssue]
+        _db_pool = await asyncpg.create_pool(
             dsn=dsn,
             min_size=min_size,
             max_size=max_size,
