@@ -11,12 +11,17 @@ sys.path.insert(0, "./src")
 from src.config import load_config
 from src.config.logging_config import setup_logging
 from src.core.accessor import ConfigAccessor
+from src.core.httpcore_patch import apply_patch
 from src.services.gateway.gateway_service import create_app
 from src.services.keeper import run_keeper
 
 logger = logging.getLogger(__name__)
 
 # === MODULE LEVEL (executed on every import, including uvicorn workers) ===
+
+# Patch httpcore BEFORE any httpx client is created.
+apply_patch()
+
 config = load_config()
 accessor = ConfigAccessor(config)
 setup_logging(accessor)

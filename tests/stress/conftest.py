@@ -13,6 +13,11 @@ from typing import Any
 import pytest
 import pytest_asyncio
 
+from src.core.httpcore_patch import apply_patch
+
+# Apply httpcore HTTP/2 stream desync fix before any httpx client is used.
+apply_patch()
+
 from tests.stress.ephemeral_api import EphemeralHttp2Server
 from tests.stress.metrics import MetricsCollector
 
