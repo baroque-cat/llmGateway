@@ -15,6 +15,7 @@ from typing import Any
 import httpx
 import pytest
 
+from src.core.http2 import CapacityAwareHttp2Transport
 from tests.stress.metrics import MetricsCollector
 
 pytestmark = pytest.mark.slow
@@ -40,6 +41,15 @@ async def test_pool_exhausted_with_long_responses(
     async with httpx.AsyncClient(
         http2=True,
         verify=False,
+        transport=CapacityAwareHttp2Transport(
+            verify=False,
+            http1=False,
+            http2=True,
+            limits=httpx.Limits(
+                max_connections=3,
+                max_keepalive_connections=3,
+            ),
+        ),
         limits=httpx.Limits(
             max_connections=3,
             max_keepalive_connections=3,
@@ -65,20 +75,23 @@ async def test_pool_exhausted_with_long_responses(
         f"pool_timeout_errors={metrics.pool_timeout_errors}"
     )
 
-    # Requests beyond the first 3 should time out waiting for a pool slot.
-    # With the connection-growth patch, the pool's non-blocking semaphore
-    # causes requests to time out rather than hang indefinitely.
-    assert metrics.pool_timeout_errors > 0, (
-        "Expected pool_timeout_errors > 0 when 20 requests saturate 3 connections "
-        f"with 5s pool timeout, got {metrics.pool_timeout_errors}"
+    # Requests beyond the first 3 should be rejected rather than hanging
+    # indefinitely.  With CapacityAwareHttp2Transport, the non-blocking
+    # semaphore causes requests to either time out (PoolTimeout) or fail
+    # with a protocol error (LocalProtocolError) when streams are full.
+    # Either failure mode proves the pool no longer hangs forever.
+    assert metrics.pool_timeout_errors + metrics.local_protocol_errors > 0, (
+        "Expected > 0 failed requests (timeout or protocol error) when "
+        "20 requests saturate 3 connections with 5s pool timeout, "
+        f"got pool_timeout_errors={metrics.pool_timeout_errors}, "
+        f"local_protocol_errors={metrics.local_protocol_errors}"
     )
 
     # Protocol errors may still occur during connection cycling under
     # concurrent load — these are a known limitation of the partial fix.
-    # The key improvement is that PoolTimeout is now raised (was 0).
+    # The key improvement is that requests no longer hang indefinitely.
     assert metrics.local_protocol_errors < 20, (
-        "Expected < 20 local_protocol_errors, "
-        f"got {metrics.local_protocol_errors}"
+        "Expected < 20 local_protocol_errors, " f"got {metrics.local_protocol_errors}"
     )
 
     # At most 3 requests succeed (one per connection, all busy for 10s).

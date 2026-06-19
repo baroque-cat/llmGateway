@@ -14,6 +14,7 @@ from typing import Any
 import httpx
 import pytest
 
+from src.core.http2 import CapacityAwareHttp2Transport
 from tests.stress.metrics import MetricsCollector
 
 pytestmark = pytest.mark.slow
@@ -49,6 +50,16 @@ async def test_six_connections_for_thirty_requests(
     async with httpx.AsyncClient(
         http2=True,
         verify=False,
+        transport=CapacityAwareHttp2Transport(
+            verify=False,
+            http1=False,
+            http2=True,
+            limits=httpx.Limits(
+                max_connections=10,
+                max_keepalive_connections=10,
+                keepalive_expiry=30.0,
+            ),
+        ),
         limits=httpx.Limits(
             max_connections=10,
             max_keepalive_connections=10,
@@ -81,10 +92,9 @@ async def test_six_connections_for_thirty_requests(
         f"client_connections_created={metrics.client_connections_created}"
     )
 
-    # With the connection-growth patch applied, the pool opens multiple
-    # connections (was 1 before the patch).  Full PR #1088 behaviour
-    # (6+ connections, 30/30 successes) requires upstream httpcore changes
-    # that are too invasive for a monkey-patch.
+    # With CapacityAwareHttp2Transport, the pool opens multiple
+    # connections (was 1 before the fix).  Full PR #1088 behaviour
+    # (6+ connections, 30/30 successes) requires upstream httpcore changes.
     assert metrics.client_connections_created >= 2, (
         f"Expected ≥ 2 connections created (pool growth is working), "
         f"got {metrics.client_connections_created}"

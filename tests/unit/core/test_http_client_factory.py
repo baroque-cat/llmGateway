@@ -771,6 +771,101 @@ class TestHttp2Toggle:
 
 
 # ==============================================================================
+# Section I: CapacityAwareHttp2Transport injection tests (HTTP/2 refactor)
+# ==============================================================================
+
+
+class TestTransportInjection:
+    """Verify CapacityAwareHttp2Transport is injected into httpx.AsyncClient."""
+
+    # --- Task 1, test 1: transport created for http2 clients ---
+    @pytest.mark.asyncio
+    async def test_transport_created_for_http2_client(self) -> None:
+        """When http2=True, the client receives CapacityAwareHttp2Transport as transport."""
+        from src.core.http2.transport import CapacityAwareHttp2Transport
+
+        provider = _make_provider_config(dedicated=True, proxy_mode="none")
+        http_config = HttpClientConfig(http2=True)
+        accessor = _make_accessor_mock(
+            providers={"test_prov": provider},
+            http_client_config=http_config,
+        )
+        factory = HttpClientFactory(accessor)
+
+        mock_client = MagicMock(spec=httpx.AsyncClient)
+        mock_client.aclose = AsyncMock()
+
+        captured_kwargs: dict[str, object] = {}
+
+        def capture_client(**kwargs: object) -> MagicMock:
+            captured_kwargs.update(kwargs)
+            return mock_client
+
+        with patch(
+            "src.core.http_client_factory.httpx.AsyncClient",
+            side_effect=capture_client,
+        ):
+            await factory.get_client_for_provider("test_prov")
+
+        transport = captured_kwargs.get("transport")
+        assert transport is not None, "transport kwarg must be present"
+        assert isinstance(
+            transport, CapacityAwareHttp2Transport
+        ), f"Expected CapacityAwareHttp2Transport, got {type(transport)}"
+        assert captured_kwargs.get("http2") is True
+
+    # --- Task 1, test 2: transport config passed correctly ---
+    @pytest.mark.asyncio
+    async def test_transport_config_passed_correctly(self) -> None:
+        """Pool config values are correctly forwarded to the transport constructor."""
+        from src.core.http2.transport import CapacityAwareHttp2Transport
+
+        provider = _make_provider_config(dedicated=True, proxy_mode="none")
+        custom_pool = HttpClientPoolConfig(
+            max_connections=42,
+            max_keepalive_connections=7,
+            keepalive_expiry=30.0,
+        )
+        http_config = HttpClientConfig(http2=True, pool=custom_pool)
+        accessor = _make_accessor_mock(
+            providers={"test_prov": provider},
+            http_client_config=http_config,
+        )
+        factory = HttpClientFactory(accessor)
+
+        mock_client = MagicMock(spec=httpx.AsyncClient)
+        mock_client.aclose = AsyncMock()
+
+        captured_kwargs: dict[str, object] = {}
+
+        def capture_client(**kwargs: object) -> MagicMock:
+            captured_kwargs.update(kwargs)
+            return mock_client
+
+        with patch(
+            "src.core.http_client_factory.httpx.AsyncClient",
+            side_effect=capture_client,
+        ):
+            await factory.get_client_for_provider("test_prov")
+
+        transport = captured_kwargs.get("transport")
+        assert isinstance(transport, CapacityAwareHttp2Transport)
+
+        # Verify pool config values are correctly forwarded to the inner pool
+        pool = transport._pool
+        assert (
+            pool._max_connections == 42
+        ), f"Expected max_connections=42, got {pool._max_connections}"
+        assert pool._max_keepalive_connections == 7, (
+            f"Expected max_keepalive_connections=7, "
+            f"got {pool._max_keepalive_connections}"
+        )
+        assert (
+            pool._keepalive_expiry == 30.0
+        ), f"Expected keepalive_expiry=30.0, got {pool._keepalive_expiry}"
+
+
+# ==============================================================================
 # Section G: Dedicated Client Isolation (Default = True)
 # ==============================================================================
 
