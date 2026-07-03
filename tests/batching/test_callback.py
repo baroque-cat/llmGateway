@@ -1,4 +1,4 @@
-# tests/test_batching/test_callback.py
+# tests/batching/test_callback.py
 """Callback pattern unit tests for IResourceProbe (scenarios UT-03..UT-11)."""
 
 from collections.abc import Callable
