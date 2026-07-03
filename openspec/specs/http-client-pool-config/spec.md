@@ -4,9 +4,10 @@
 
 Provides global HTTP client connection pool configuration (`max_connections`,
 `max_keepalive_connections`, `keepalive_expiry`) applicable to both Keeper and
-Gateway processes. Enables operators to tune httpx connection pooling for their
-deployment, and sets `dedicated_http_client=True` by default for per-provider
-connection pool isolation.
+Gateway processes, and per-provider H2 stream concurrency cap
+(`max_concurrent_streams_per_connection`). Enables operators to tune httpx
+connection pooling for their deployment. Every provider always receives a
+dedicated `httpx.AsyncClient` with an isolated connection pool.
 
 ## Requirements
 
@@ -59,18 +60,27 @@ This model SHALL be a field on the root `Config`.
 - **WHEN** the YAML config contains `http_client: { http2: false }`
 - **THEN** `HttpClientFactory` SHALL create clients without `http2=True`
 
-### Requirement: dedicated_http_client defaults to True
-The `ProviderConfig.dedicated_http_client` field SHALL default to `True`,
-meaning each provider instance receives its own isolated `httpx.AsyncClient`
-unless explicitly overridden.
+### Requirement: Per-provider max_concurrent_streams_per_connection field
 
-#### Scenario: New provider gets dedicated client by default
-- **WHEN** a provider is defined without a `dedicated_http_client` field
-- **THEN** `provider_config.dedicated_http_client` SHALL be `True`
-- **AND** `HttpClientFactory` SHALL create a dedicated client for that provider
+`ProviderConfig` SHALL include a `max_concurrent_streams_per_connection: int` field
+with `default=5`, `ge=1`, `le=1000`. This field is per-provider, not global.
 
-#### Scenario: Explicit false still works
-- **WHEN** a provider is defined with `dedicated_http_client: false`
-- **THEN** `provider_config.dedicated_http_client` SHALL be `False`
-- **AND** the provider SHALL share a client with other providers using the
-  same proxy config
+#### Scenario: Field defaults to 5
+
+- **WHEN** a provider is defined without `max_concurrent_streams_per_connection` in YAML
+- **THEN** `provider_config.max_concurrent_streams_per_connection` SHALL be `5`
+
+#### Scenario: Field set in YAML
+
+- **WHEN** a provider is defined with `max_concurrent_streams_per_connection: 100`
+- **THEN** `provider_config.max_concurrent_streams_per_connection` SHALL be `100`
+
+#### Scenario: Field validates bounds
+
+- **WHEN** the YAML config contains `max_concurrent_streams_per_connection: 0`
+- **THEN** Pydantic validation SHALL reject the config with a `ValidationError`
+
+#### Scenario: Field rejects values above 1000
+
+- **WHEN** the YAML config contains `max_concurrent_streams_per_connection: 1001`
+- **THEN** Pydantic validation SHALL reject the config with a `ValidationError`

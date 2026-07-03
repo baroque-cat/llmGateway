@@ -58,36 +58,12 @@ class HttpClientFactory:
         # same client simultaneously.
         self._locks: dict[str, asyncio.Lock] = {}
 
-    def _get_cache_key_for_proxy(self, provider_name: str) -> str:
-        """
-        Determines the unique cache key based on the provider's proxy configuration.
-        """
-        # REFACTORED: Use accessor to get proxy config
-        proxy_config = self.accessor.get_proxy_config(provider_name)
-        if not proxy_config:
-            raise ValueError(f"Proxy config not found for provider '{provider_name}'")
-
-        if proxy_config.mode == "none":
-            # A constant key for all direct connections.
-            return "__none__"
-        elif proxy_config.mode == "static":
-            # The proxy URL itself is the unique key. This ensures providers
-            # sharing the same static proxy also share the same client instance.
-            if not proxy_config.static_url:
-                raise ValueError("Static proxy mode requires a 'static_url' to be set.")
-            return proxy_config.static_url
-        raise ValueError(
-            f"Proxy mode '{proxy_config.mode}' is not supported by the factory yet."
-        )
-
     def _get_cache_key_for_provider(self, provider_name: str) -> str:
         """
         Determines the httpx.AsyncClient cache key for a provider.
 
-        If the provider has ``dedicated_http_client=True``, returns the instance name
-        (unique dedicated client for this instance). Otherwise the key is determined
-        via ``_get_cache_key_for_proxy`` — proxy-based caching (shared client
-        for providers with the same proxy mode).
+        Every provider always gets a dedicated client (keyed by instance name),
+        ensuring full connection-pool isolation between providers.
 
         Args:
             provider_name: The provider instance name from the configuration.
@@ -95,20 +71,15 @@ class HttpClientFactory:
         Returns:
             str: The cache key for the httpx.AsyncClient.
         """
-        provider = self.accessor.get_provider(provider_name)
-        if provider and provider.dedicated_http_client:
-            return provider_name
-        return self._get_cache_key_for_proxy(provider_name)
+        return provider_name
 
     async def get_client_for_provider(self, provider_name: str) -> httpx.AsyncClient:
         """
         Retrieves or creates an httpx.AsyncClient for a specific provider.
 
-        Uses an internal cache to avoid recreating clients. If the provider
-        has ``dedicated_http_client=True``, a dedicated client is created with
-        key = instance name (not shared with other providers). Otherwise the
-        client is cached by proxy configuration (shared among providers with
-        the same proxy mode).
+        Uses an internal cache to avoid recreating clients. Each provider
+        always gets a dedicated client (keyed by instance name) for full
+        connection-pool isolation.
 
         Args:
             provider_name: The name of the provider instance as defined in the config.
@@ -168,11 +139,18 @@ class HttpClientFactory:
                     max_keepalive_connections=self._pool_config.max_keepalive_connections,
                     keepalive_expiry=self._pool_config.keepalive_expiry,
                 )
+                provider_config = self.accessor.get_provider(provider_name)
                 transport = CapacityAwareHttp2Transport(
                     verify=True,
                     http1=True,
                     http2=self._http2_enabled,
                     limits=limits,
+                    max_concurrent_streams_cap=(
+                        provider_config.max_concurrent_streams_per_connection
+                        if provider_config is not None
+                        else None
+                    ),
+                    provider_name=provider_name,
                 )
                 client_kwargs: dict[str, Any] = {
                     "http2": self._http2_enabled,
@@ -221,7 +199,9 @@ class HttpClientFactory:
             "All HTTP clients have been closed and cache has been cleared."
         )
 
-    def get_pool_health_summary(self) -> dict[str, dict[str, int]]:
+    def get_pool_health_summary(
+        self,
+    ) -> dict[str, dict[str, int | list[dict[str, int | str]]]]:
         """Return pool health summaries for all cached HTTP clients.
 
         Iterates over ``_clients`` and calls
@@ -232,7 +212,7 @@ class HttpClientFactory:
             A mapping from cache key to pool health summary dict.
             Returns an empty dict when no clients are cached.
         """
-        result: dict[str, dict[str, int]] = {}
+        result: dict[str, dict[str, int | list[dict[str, int | str]]]] = {}
         for cache_key, client in self._clients.items():
             pool = getattr(client._transport, "_pool", None)  # type: ignore[reportPrivateUsage]
             if pool is not None and hasattr(pool, "get_health_summary"):

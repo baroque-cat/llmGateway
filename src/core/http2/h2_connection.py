@@ -70,6 +70,7 @@ class FixedHTTP2Connection(AsyncHTTP2Connection):
         stream: typing.Any,
         keepalive_expiry: float | None = None,
         on_capacity_update: typing.Callable[..., typing.Any] | None = None,
+        max_concurrent_streams_cap: int | None = None,
     ) -> None:
         super().__init__(
             origin=origin,
@@ -80,6 +81,7 @@ class FixedHTTP2Connection(AsyncHTTP2Connection):
             on_capacity_update
         )
         self._closed_streams: set[int] = set()
+        self._max_streams_cap: int | None = max_concurrent_streams_cap
 
     # ------------------------------------------------------------------
     # _response_closed — stream desync fix (PR #1022)
@@ -201,6 +203,8 @@ class FixedHTTP2Connection(AsyncHTTP2Connection):
                 max_concurrent_streams.new_value,
                 self._h2_state.local_settings.max_concurrent_streams,
             )
+            if self._max_streams_cap is not None:
+                new_max_streams = min(new_max_streams, self._max_streams_cap)
             if new_max_streams and new_max_streams != self._max_streams:
                 while new_max_streams > self._max_streams:
                     await self._max_streams_semaphore.release()
@@ -300,6 +304,10 @@ class FixedHTTP2Connection(AsyncHTTP2Connection):
                 local_settings_max_streams = (
                     self._h2_state.local_settings.max_concurrent_streams
                 )
+                if self._max_streams_cap is not None:
+                    local_settings_max_streams = min(
+                        local_settings_max_streams, self._max_streams_cap
+                    )
                 # [CHANGE 1] Use NonBlockingSemaphore instead of AsyncSemaphore.
                 self._max_streams_semaphore = NonBlockingSemaphore(
                     local_settings_max_streams

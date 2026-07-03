@@ -39,12 +39,16 @@ class CapacityAwareHTTPConnection(AsyncHTTPConnection):
         self,
         *args: typing.Any,
         on_capacity_update: typing.Callable[..., typing.Any] | None = None,
+        max_concurrent_streams_cap: int | None = None,
+        connection_label: str = "",
         **kwargs: typing.Any,
     ) -> None:
         super().__init__(*args, **kwargs)
         self._on_capacity_update: typing.Callable[..., typing.Any] | None = (
             on_capacity_update
         )
+        self._max_concurrent_streams_cap: int | None = max_concurrent_streams_cap
+        self._connection_label: str = connection_label
 
     async def handle_async_request(self, request: typing.Any) -> Response:
         """Handle request, creating ``FixedHTTP2Connection`` for HTTP/2.
@@ -74,6 +78,7 @@ class CapacityAwareHTTPConnection(AsyncHTTPConnection):
                             stream=stream,
                             keepalive_expiry=self._keepalive_expiry,
                             on_capacity_update=self._on_capacity_update,
+                            max_concurrent_streams_cap=self._max_concurrent_streams_cap,
                         )
                     else:
                         self._connection = AsyncHTTP11Connection(
@@ -97,3 +102,9 @@ class CapacityAwareHTTPConnection(AsyncHTTPConnection):
         if self._connection is None:
             return 1
         return self._connection.max_concurrent_requests()  # type: ignore[reportUnknownMemberType]
+
+    async def aclose(self) -> None:
+        """Close the connection, logging the closure with its label."""
+        label = getattr(self, "_connection_label", "")
+        logger.info(f"Connection '{label}' closing via aclose()")
+        await super().aclose()

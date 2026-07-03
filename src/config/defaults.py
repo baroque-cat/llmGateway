@@ -79,8 +79,8 @@ def get_default_config() -> dict[str, Any]:
                 "provider_type": "gemini",
                 "enabled": True,
                 "api_base_url": "https://api.example.com/v1",
-                # Set to true to give this instance its own HTTP client pool (high-load instances)
-                "dedicated_http_client": True,
+                # Max concurrent HTTP/2 streams per TCP connection (prevents cascading freezes).
+                "max_concurrent_streams_per_connection": 5,
                 "default_model": {},
                 "access_control": {
                     "gateway_access_token": "${LLM_PROVIDER_DEFAULT_TOKEN}",

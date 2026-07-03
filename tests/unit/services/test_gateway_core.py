@@ -449,11 +449,20 @@ class TestBufferedRetryableRequest:
 
 
 class TestPoolHealthLogLoop:
-    """Tests for _pool_health_log_loop background task."""
+    """Tests for _pool_health_log_loop background task.
+
+    Covers the per-connection health breakdown emitted alongside the
+    aggregate ``HTTP_POOL_HEALTH`` summary line.
+    """
 
     @pytest.mark.asyncio
-    async def test_pool_health_log_line_format(self, caplog):
-        """Log line matches expected HTTP_POOL_HEALTH format."""
+    async def test_health_log_includes_per_connection_details(self, caplog):
+        """Health log emits the aggregate HTTP_POOL_HEALTH summary line plus
+        one HTTP_POOL_CONN line per connection with label/state/protocol/streams.
+
+        Verifies the new per-connection breakdown format introduced by the
+        h2-per-provider-stream-cap change.
+        """
         mock_factory = MagicMock()
         mock_factory.get_pool_health_summary.return_value = {
             "proxy:http://proxy1:8080": {
@@ -465,6 +474,22 @@ class TestPoolHealthLogLoop:
                 "active_h2_streams": 45,
                 "max_h2_stream_capacity": 1200,
                 "queued_requests": 0,
+                "connections": [
+                    {
+                        "label": "openai-conn-0",
+                        "state": "active",
+                        "protocol": "h2",
+                        "active_streams": 3,
+                        "max_streams": 5,
+                    },
+                    {
+                        "label": "openai-conn-1",
+                        "state": "idle",
+                        "protocol": "h2",
+                        "active_streams": 0,
+                        "max_streams": 5,
+                    },
+                ],
             }
         }
 
@@ -481,10 +506,11 @@ class TestPoolHealthLogLoop:
         ):
             await _pool_health_log_loop(mock_factory, 60)
 
+        # --- Aggregate health summary line ---
         health_logs = [r for r in caplog.records if "HTTP_POOL_HEALTH |" in r.message]
-        assert len(health_logs) >= 1, (
-            f"Expected at least 1 HTTP_POOL_HEALTH log line, got {len(health_logs)}"
-        )
+        assert (
+            len(health_logs) >= 1
+        ), f"Expected at least 1 HTTP_POOL_HEALTH log line, got {len(health_logs)}"
         log_msg = health_logs[0].message
         assert "HTTP_POOL_HEALTH | proxy:http://proxy1:8080" in log_msg
         assert "conns: 12 total (4 active, 8 idle)" in log_msg
@@ -492,9 +518,30 @@ class TestPoolHealthLogLoop:
         assert "streams: 45 active / 1200 max_capacity" in log_msg
         assert "queued: 0" in log_msg
 
+        # --- Per-connection breakdown lines ---
+        conn_logs = [r for r in caplog.records if "HTTP_POOL_CONN |" in r.message]
+        assert len(conn_logs) == 2, (
+            f"Expected 2 HTTP_POOL_CONN log lines (one per connection), "
+            f"got {len(conn_logs)}"
+        )
+        # First connection — active H2 with 3/5 streams
+        assert (
+            "HTTP_POOL_CONN | proxy:http://proxy1:8080 | openai-conn-0 "
+            "| active | h2 | streams: 3/5"
+        ) in conn_logs[0].message
+        # Second connection — idle H2 with 0/5 streams
+        assert (
+            "HTTP_POOL_CONN | proxy:http://proxy1:8080 | openai-conn-1 "
+            "| idle | h2 | streams: 0/5"
+        ) in conn_logs[1].message
+
     @pytest.mark.asyncio
-    async def test_pool_health_log_respects_interval(self):
-        """Background task executes approximately every N seconds."""
+    async def test_health_logging_respects_interval(self):
+        """Background task sleeps for the configured interval between iterations.
+
+        Each ``asyncio.sleep`` call must use the interval value passed to
+        ``_pool_health_log_loop``.
+        """
         mock_factory = MagicMock()
         mock_factory.get_pool_health_summary.return_value = {
             "proxy:http://proxy1:8080": {
@@ -506,6 +553,7 @@ class TestPoolHealthLogLoop:
                 "active_h2_streams": 0,
                 "max_h2_stream_capacity": 100,
                 "queued_requests": 0,
+                "connections": [],
             }
         }
 
@@ -521,19 +569,23 @@ class TestPoolHealthLogLoop:
             await _pool_health_log_loop(mock_factory, interval)
 
         # Should have slept at least 3 times
-        assert len(sleep_delays) >= 3, (
-            f"Expected at least 3 sleep calls, got {len(sleep_delays)}"
-        )
+        assert (
+            len(sleep_delays) >= 3
+        ), f"Expected at least 3 sleep calls, got {len(sleep_delays)}"
         # Each sleep call must use the configured interval
         for i, delay in enumerate(sleep_delays):
-            assert delay == interval, (
-                f"Sleep call {i}: expected {interval}, got {delay}"
-            )
+            assert (
+                delay == interval
+            ), f"Sleep call {i}: expected {interval}, got {delay}"
 
     @pytest.mark.asyncio
-    async def test_pool_health_log_disabled_when_interval_zero(self, caplog):
+    async def test_health_logging_disabled_when_zero(self, caplog):
         """When pool_health_log_interval_sec is 0, no health task is started
-        and no health log lines are emitted."""
+        and no health log lines are emitted.
+
+        The lifespan startup code guards task creation with ``if interval > 0``,
+        so a zero interval must skip ``_pool_health_log_loop`` entirely.
+        """
         accessor = MagicMock()
         accessor.get_enabled_providers = Mock(return_value={})
         accessor.get_database_dsn = Mock(
@@ -557,9 +609,7 @@ class TestPoolHealthLogLoop:
             patch(
                 "src.services.gateway.gateway_service.HttpClientFactory",
             ) as mock_hcf_cls,
-            patch(
-                "src.services.gateway.gateway_service.GatewayCache"
-            ) as mock_gc_cls,
+            patch("src.services.gateway.gateway_service.GatewayCache") as mock_gc_cls,
             patch(
                 "src.services.gateway.gateway_service._cache_refresh_loop",
                 new=AsyncMock(),
@@ -570,6 +620,7 @@ class TestPoolHealthLogLoop:
             mock_gc_cls.return_value.populate_caches = AsyncMock()
 
             # Set pool_health_log_interval_sec to 0 on the factory instance
+            # to avoid the pre-existing MagicMock > int TypeError in lifespan.
             mock_factory_instance = MagicMock()
             mock_factory_instance._pool_health_log_interval_sec = 0
             mock_factory_instance.close_all = AsyncMock()
@@ -579,21 +630,17 @@ class TestPoolHealthLogLoop:
 
             # Trigger the lifespan (startup + shutdown) via ASGI transport
             transport = httpx.ASGITransport(app=app)
-            async with httpx.AsyncClient(
-                transport=transport, base_url="http://test"
-            ):
+            async with httpx.AsyncClient(transport=transport, base_url="http://test"):
                 # Lifespan has started — check that no health task was created
-                assert not hasattr(app.state, "pool_health_task"), (
-                    "pool_health_task should NOT be set when interval is 0"
-                )
+                assert not hasattr(
+                    app.state, "pool_health_task"
+                ), "pool_health_task should NOT be set when interval is 0"
 
         # After full lifespan (shutdown included), verify no health log lines
-        health_logs = [
-            r for r in caplog.records if "HTTP_POOL_HEALTH" in r.message
-        ]
-        assert len(health_logs) == 0, (
-            f"Expected 0 HTTP_POOL_HEALTH log lines, got {len(health_logs)}"
-        )
+        health_logs = [r for r in caplog.records if "HTTP_POOL_HEALTH" in r.message]
+        assert (
+            len(health_logs) == 0
+        ), f"Expected 0 HTTP_POOL_HEALTH log lines, got {len(health_logs)}"
 
 
 # ---------------------------------------------------------------------------

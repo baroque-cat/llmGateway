@@ -53,6 +53,8 @@ class CapacityAwareHttp2Transport(httpx.AsyncHTTPTransport):
         local_address: str | None = None,
         retries: int = 0,
         socket_options: typing.Iterable[typing.Any] | None = None,
+        max_concurrent_streams_cap: int | None = None,
+        provider_name: str = "unknown",
     ) -> None:
         ssl_context = httpx.create_ssl_context(
             verify=verify, cert=cert, trust_env=trust_env
@@ -70,6 +72,8 @@ class CapacityAwareHttp2Transport(httpx.AsyncHTTPTransport):
                 local_address=local_address,
                 retries=retries,
                 socket_options=socket_options,
+                max_concurrent_streams_cap=max_concurrent_streams_cap,
+                provider_name=provider_name,
             )
         else:
             raise ValueError(

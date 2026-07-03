@@ -41,6 +41,21 @@ class EphemeralHttp2Server:
         response_delay_ms: Artificial delay before each response.
         response_status: HTTP status code to return.
         response_body: Raw body bytes to return.
+        internal_concurrency: Hidden server-side concurrency limit
+            (``None`` = unbounded). When set, an :class:`asyncio.Semaphore`
+            caps real concurrent request processing independently of the
+            client-visible ``max_concurrent_streams``.
+        stream_headers: When ``True``, response headers are sent
+            *immediately* (before ``response_delay_ms``), simulating a
+            real LLM API that returns ``200 OK`` before streaming tokens.
+            The body is sent after the delay.  When ``False`` (default),
+            headers and body are sent together after the delay.
+        chunk_interval_ms: When set (requires ``stream_headers=True``
+            and ``response_delay_ms > 0``), the response body is split
+            into chunks and drip-fed at this interval during the delay.
+            This keeps the H2 socket active, simulating SSE token
+            streaming and preventing socket-level read timeouts from
+            firing for starved streams on the same connection.
     """
 
     def __init__(
@@ -51,6 +66,9 @@ class EphemeralHttp2Server:
         response_delay_ms: int = 0,
         response_status: int = 200,
         response_body: bytes = b'{"ok":true}',
+        internal_concurrency: int | None = None,
+        stream_headers: bool = False,
+        chunk_interval_ms: int | None = None,
     ) -> None:
         self._host = host
         self._port = port
@@ -58,10 +76,23 @@ class EphemeralHttp2Server:
         self._response_delay_ms = response_delay_ms
         self._response_status = response_status
         self._response_body = response_body
+        self._stream_headers: bool = stream_headers
+        self._chunk_interval_ms: int | None = chunk_interval_ms
 
         self._server: asyncio.AbstractServer | None = None
         self._actual_port: int = 0
         self._lock = asyncio.Lock()
+
+        # Internal concurrency bottleneck — models a hidden upstream limit
+        # (proxy queue, LLM API internal limit) invisible to the H2 client.
+        # When None, the server processes all received requests truly
+        # concurrently (existing behaviour preserved).
+        self._concurrency_sem: asyncio.Semaphore | None = (
+            asyncio.Semaphore(internal_concurrency)
+            if internal_concurrency is not None
+            else None
+        )
+        self._concurrency_waiters: int = 0
 
         # Connection lifecycle counters
         self._active_connections: int = 0
@@ -97,6 +128,9 @@ class EphemeralHttp2Server:
             ``peak_concurrent_streams`` — highest ``active_streams`` observed.
             ``total_requests`` — total requests handled (cumulative).
             ``errors`` — total stream-reset or unexpected protocol errors.
+            ``concurrency_waiters`` — requests currently blocked on the
+            internal concurrency semaphore (always ``0`` when
+            ``internal_concurrency`` is ``None``).
         """
         return {
             "active_connections": self._active_connections,
@@ -106,6 +140,7 @@ class EphemeralHttp2Server:
             "peak_concurrent_streams": self._peak_concurrent_streams,
             "total_requests": self._total_requests,
             "errors": self._errors,
+            "concurrency_waiters": self._concurrency_waiters,
         }
 
     async def start(self) -> str:
@@ -154,6 +189,7 @@ class EphemeralHttp2Server:
         self._peak_concurrent_streams = 0
         self._total_requests = 0
         self._errors = 0
+        self._concurrency_waiters = 0
 
     # ------------------------------------------------------------------
     # Internal: connection / request handling
@@ -249,7 +285,11 @@ class EphemeralHttp2Server:
             async with self._lock:
                 self._errors += 1
         finally:
-            # Wait for any in-flight request tasks to finish before closing.
+            # Cancel any in-flight request tasks so the server does not
+            # hang waiting for long-running responses after the client
+            # disconnects (e.g. timeout cascade test).
+            for task in pending_tasks:
+                task.cancel()
             if pending_tasks:
                 await asyncio.gather(*pending_tasks, return_exceptions=True)
             with contextlib.suppress(Exception):
@@ -264,34 +304,121 @@ class EphemeralHttp2Server:
         conn_lock: asyncio.Lock,
         writer: asyncio.StreamWriter,
     ) -> None:
-        """Process one HTTP/2 request: apply delay, send response, track metrics."""
-        if self._response_delay_ms > 0:
-            await asyncio.sleep(self._response_delay_ms / 1000.0)
+        """Process one HTTP/2 request: apply delay, send response, track metrics.
 
-        response_headers = [
-            (":status", str(self._response_status)),
-            ("content-type", "application/json"),
-            ("content-length", str(len(self._response_body))),
-            ("server", "EphemeralHttp2Server"),
-        ]
+        When ``internal_concurrency`` is configured, the response body is
+        wrapped in an :class:`asyncio.Semaphore` that caps real concurrent
+        processing — modelling a hidden upstream bottleneck invisible to
+        the H2 client. The ``concurrency_waiters`` counter tracks requests
+        blocked on the semaphore.
+        """
 
-        async with conn_lock:
+        async def _send_data(data: bytes, end_stream: bool) -> bool:
+            """Send a DATA frame and flush. Returns False on error."""
+            async with conn_lock:
+                try:
+                    conn.send_data(event.stream_id, data, end_stream=end_stream)
+                except Exception:
+                    async with self._lock:
+                        self._errors += 1
+                    return False
+                outgoing = conn.data_to_send()
+            if outgoing:
+                writer.write(outgoing)
+                await writer.drain()
+            return True
+
+        async def _respond() -> None:
+            response_headers = [
+                (":status", str(self._response_status)),
+                ("content-type", "application/json"),
+                ("content-length", str(len(self._response_body))),
+                ("server", "EphemeralHttp2Server"),
+            ]
+
+            if self._stream_headers:
+                # Send headers immediately — simulates 200 OK arriving
+                # before LLM token generation begins.
+                async with conn_lock:
+                    try:
+                        conn.send_headers(event.stream_id, response_headers)
+                    except Exception:
+                        async with self._lock:
+                            self._errors += 1
+                        return
+                    outgoing = conn.data_to_send()
+                if outgoing:
+                    writer.write(outgoing)
+                    await writer.drain()
+
+                if (
+                    self._chunk_interval_ms is not None
+                    and self._response_delay_ms > 0
+                    and len(self._response_body) > 0
+                ):
+                    # Drip-feed body chunks at regular intervals — keeps
+                    # the socket active, simulating SSE token streaming.
+                    # Prevents socket-level read timeouts from firing for
+                    # starved streams on the same connection.
+                    body = self._response_body
+                    total_intervals = max(
+                        1,
+                        self._response_delay_ms // self._chunk_interval_ms,
+                    )
+                    chunk_size = max(1, len(body) // total_intervals)
+                    interval = self._chunk_interval_ms / 1000.0
+                    pos = 0
+                    while pos < len(body):
+                        await asyncio.sleep(interval)
+                        end = min(pos + chunk_size, len(body))
+                        chunk = body[pos:end]
+                        pos = end
+                        if not await _send_data(chunk, end_stream=pos >= len(body)):
+                            return
+                else:
+                    # Delay, then send body in one shot.
+                    if self._response_delay_ms > 0:
+                        await asyncio.sleep(self._response_delay_ms / 1000.0)
+                    if not await _send_data(self._response_body, end_stream=True):
+                        return
+            else:
+                # Original behaviour: delay, then headers + body together.
+                if self._response_delay_ms > 0:
+                    await asyncio.sleep(self._response_delay_ms / 1000.0)
+
+                async with conn_lock:
+                    try:
+                        conn.send_headers(event.stream_id, response_headers)
+                        conn.send_data(
+                            event.stream_id,
+                            self._response_body,
+                            end_stream=True,
+                        )
+                    except Exception:
+                        async with self._lock:
+                            self._errors += 1
+                        return
+                    outgoing = conn.data_to_send()
+                if outgoing:
+                    writer.write(outgoing)
+                    await writer.drain()
+
+            async with self._lock:
+                self._active_streams = max(0, self._active_streams - 1)
+
+        if self._concurrency_sem is not None:
+            self._concurrency_waiters += 1
+            acquired = False
             try:
-                conn.send_headers(event.stream_id, response_headers)
-                conn.send_data(event.stream_id, self._response_body, end_stream=True)
-            except Exception:
-                async with self._lock:
-                    self._errors += 1
-                return
-
-            outgoing = conn.data_to_send()
-
-        if outgoing:
-            writer.write(outgoing)
-            await writer.drain()
-
-        async with self._lock:
-            self._active_streams = max(0, self._active_streams - 1)
+                async with self._concurrency_sem:
+                    acquired = True
+                    self._concurrency_waiters -= 1
+                    await _respond()
+            finally:
+                if not acquired:
+                    self._concurrency_waiters = max(0, self._concurrency_waiters - 1)
+        else:
+            await _respond()
 
 
 # ------------------------------------------------------------------

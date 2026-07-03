@@ -583,11 +583,12 @@ class ProviderConfig(BaseModel):
     # The gateway ignores this field entirely in transparent proxy mode.
     default_model: dict[str, ModelInfo] = Field(default_factory=dict)
 
-    # If True, the instance gets a dedicated httpx.AsyncClient (separate connection pool).
-    # Useful for high-load instances (e.g., litellm with agents) so their
-    # TCP connections do not starve connections from other providers in the shared client.
-    # Defaults to True for connection pool isolation per provider.
-    dedicated_http_client: bool = True
+    # Maximum concurrent HTTP/2 streams per TCP connection for this provider.
+    # The effective cap is min(this value, server-advertised MAX_CONCURRENT_STREAMS,
+    # local_settings=100). Prevents cascading freezes when a provider has a hidden
+    # internal concurrency limit lower than the advertised value.
+    # Default=5 is conservative; high-throughput providers should override in YAML.
+    max_concurrent_streams_per_connection: int = Field(default=5, ge=1, le=1000)
 
     # --- Nested Configuration Objects ---
     # These fields are intentionally not Optional. By using default_factory, we ensure

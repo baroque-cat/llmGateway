@@ -10,7 +10,10 @@ import h2.events
 import h2.settings
 import pytest
 from httpcore._async.http2 import HTTPConnectionState
+from httpcore._async.http11 import AsyncHTTP11Connection
+from httpcore._models import Origin
 
+from src.core.http2.connection import CapacityAwareHTTPConnection
 from src.core.http2.h2_connection import FixedHTTP2Connection
 from src.core.http2.semaphore import NonBlockingSemaphore
 
@@ -24,9 +27,19 @@ class TestFixedHTTP2Connection:
 
     @staticmethod
     def _make_conn(
-        max_streams: int = 100, sent_init: bool = True
+        max_streams: int = 100,
+        sent_init: bool = True,
+        max_streams_cap: int | None = None,
     ) -> FixedHTTP2Connection:
-        """Create a FixedHTTP2Connection with common mocks set up."""
+        """Create a FixedHTTP2Connection with common mocks set up.
+
+        Args:
+            max_streams: Initial value for ``_max_streams`` and the
+                ``local_settings.max_concurrent_streams`` mock.
+            sent_init: Whether ``_sent_connection_init`` is True.
+            max_streams_cap: Value for ``_max_streams_cap`` (the per-provider
+                cap). ``None`` means no cap (default behavior).
+        """
         # Bypass __init__ to avoid calling super().__init__ which needs real backends
         conn = object.__new__(FixedHTTP2Connection)
         conn._origin = MagicMock()  # type: ignore[reportPrivateUsage]
@@ -34,6 +47,7 @@ class TestFixedHTTP2Connection:
         conn._keepalive_expiry = None  # type: ignore[reportPrivateUsage]
         conn._on_capacity_update = None  # type: ignore[reportPrivateUsage]
         conn._closed_streams = set()  # type: ignore[reportPrivateUsage]
+        conn._max_streams_cap = max_streams_cap  # type: ignore[reportPrivateUsage]
         conn._events = {}  # type: ignore[reportPrivateUsage]
         conn._max_streams = max_streams  # type: ignore[reportPrivateUsage]
         conn._max_streams_semaphore = NonBlockingSemaphore(  # type: ignore[reportPrivateUsage]
@@ -232,3 +246,128 @@ class TestFixedHTTP2Connection:
         """Returns 1 before _sent_connection_init."""
         conn = self._make_conn(max_streams=100, sent_init=False)
         assert conn.max_concurrent_requests() == 1
+
+    # ------------------------------------------------------------------
+    # max_concurrent_streams_cap tests
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_cap_lower_than_server_advertised(self) -> None:
+        """Cap lower than server-advertised value caps effective max streams.
+
+        When ``max_concurrent_streams_cap=3`` and the server advertises
+        ``MAX_CONCURRENT_STREAMS=100``, the effective max concurrent streams
+        is capped to 3, not 100.
+        """
+        conn = self._make_conn(max_streams=100, max_streams_cap=3)
+        # Start below the target so the SETTINGS change is detected.
+        conn._max_streams = 1  # type: ignore[reportPrivateUsage]
+        # Local settings allow 100; server advertises 100.
+        conn._h2_state.local_settings.max_concurrent_streams = 100  # type: ignore[reportPrivateUsage]
+
+        event = MagicMock(spec=h2.events.RemoteSettingsChanged)
+        event.changed_settings = {
+            h2.settings.SettingCodes.MAX_CONCURRENT_STREAMS: MagicMock(
+                new_value=100,
+            )
+        }
+
+        await conn._receive_remote_settings_change(event)  # type: ignore[reportPrivateUsage]
+
+        # min(server=100, local=100, cap=3) = 3
+        assert conn._max_streams == 3  # type: ignore[reportPrivateUsage]
+
+    @pytest.mark.asyncio
+    async def test_cap_higher_than_server_advertised(self) -> None:
+        """Cap higher than server-advertised value does not exceed server limit.
+
+        When ``max_concurrent_streams_cap=200`` and the server advertises
+        ``MAX_CONCURRENT_STREAMS=100``, the effective max concurrent streams
+        is 100 (the server's limit), not 200 — the cap cannot raise the
+        limit beyond what the server offers.
+        """
+        conn = self._make_conn(max_streams=100, max_streams_cap=200)
+        # Start below the target so the SETTINGS change is detected.
+        conn._max_streams = 50  # type: ignore[reportPrivateUsage]
+        # Local settings allow 100; server advertises 100.
+        conn._h2_state.local_settings.max_concurrent_streams = 100  # type: ignore[reportPrivateUsage]
+
+        event = MagicMock(spec=h2.events.RemoteSettingsChanged)
+        event.changed_settings = {
+            h2.settings.SettingCodes.MAX_CONCURRENT_STREAMS: MagicMock(
+                new_value=100,
+            )
+        }
+
+        await conn._receive_remote_settings_change(event)  # type: ignore[reportPrivateUsage]
+
+        # min(server=100, local=100, cap=200) = 100
+        assert conn._max_streams == 100  # type: ignore[reportPrivateUsage]
+
+    @pytest.mark.asyncio
+    async def test_cap_none_uses_server_advertised(self) -> None:
+        """No cap (None) uses the server-advertised value unchanged.
+
+        When ``max_concurrent_streams_cap`` is ``None`` (the default), the
+        effective max concurrent streams equals the server-advertised value
+        — the pre-cap behavior is preserved.
+        """
+        conn = self._make_conn(max_streams=100, max_streams_cap=None)
+        # Start below the target so the SETTINGS change is detected.
+        conn._max_streams = 50  # type: ignore[reportPrivateUsage]
+        # Local settings allow 100; server advertises 100.
+        conn._h2_state.local_settings.max_concurrent_streams = 100  # type: ignore[reportPrivateUsage]
+
+        event = MagicMock(spec=h2.events.RemoteSettingsChanged)
+        event.changed_settings = {
+            h2.settings.SettingCodes.MAX_CONCURRENT_STREAMS: MagicMock(
+                new_value=100,
+            )
+        }
+
+        await conn._receive_remote_settings_change(event)  # type: ignore[reportPrivateUsage]
+
+        # No cap applied: min(server=100, local=100) = 100
+        assert conn._max_streams == 100  # type: ignore[reportPrivateUsage]
+
+    @pytest.mark.asyncio
+    async def test_cap_not_applied_to_h1(self) -> None:
+        """H1 connections are unaffected by max_concurrent_streams_cap.
+
+        When ALPN negotiates HTTP/1.1 (not h2), an ``AsyncHTTP11Connection``
+        is created without the cap parameter.  The cap has no effect on H1
+        providers because H1 has no concept of concurrent streams.
+        """
+        origin = Origin(b"https", b"example.com", 443)
+
+        conn = CapacityAwareHTTPConnection(
+            origin=origin,
+            http1=True,
+            http2=True,
+            max_concurrent_streams_cap=3,
+            retries=0,
+        )
+
+        # Mock _connect to return a stream WITHOUT h2 ALPN negotiation.
+        mock_stream = MagicMock()
+        mock_ssl_object = MagicMock()
+        mock_ssl_object.selected_alpn_protocol.return_value = "http/1.1"
+        mock_stream.get_extra_info.return_value = mock_ssl_object
+        conn._connect = AsyncMock(return_value=mock_stream)  # type: ignore[reportPrivateUsage]
+
+        mock_req = MagicMock()
+        mock_req.url.origin = origin
+        conn.can_handle_request = MagicMock(return_value=True)
+
+        with patch.object(
+            AsyncHTTP11Connection,
+            "handle_async_request",
+            new_callable=AsyncMock,
+            return_value=MagicMock(),
+        ):
+            await conn.handle_async_request(mock_req)
+
+        inner = conn._connection  # type: ignore[reportPrivateUsage]
+        assert isinstance(inner, AsyncHTTP11Connection)
+        # H1 connections have no _max_streams_cap attribute — cap is H2-only.
+        assert not hasattr(inner, "_max_streams_cap")

@@ -1,8 +1,4 @@
-# pool-health-logging
-
-Periodic INFO-level logging of HTTP connection pool health statistics via `CapacityAwareHttp2Pool.get_health_summary()`, aggregated across all cached clients by the `HttpClientFactory`, and driven by a configurable-interval background task in the gateway.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Pool exposes health summary method
 
@@ -36,23 +32,11 @@ a per-connection breakdown list.
 - **THEN** the returned dict contains key `connections` with a list of per-connection dicts
 - **AND** each dict contains `label` (str), `state` (str), `protocol` (str), `active_streams` (int), `max_streams` (int)
 
-### Requirement: Factory aggregates health summaries across all clients
-
-`HttpClientFactory` SHALL provide a `get_pool_health_summary()` method returning a mapping from cache key to pool health summary for all currently cached HTTP clients.
-
-#### Scenario: Health summaries for all cached clients
-
-- **WHEN** `get_pool_health_summary()` is called
-- **THEN** the returned `dict[str, dict]` contains one entry per key in `_clients`, each value being the result of `CapacityAwareHttp2Pool.get_health_summary()` for that client's pool
-
-#### Scenario: Empty cache returns empty dict
-
-- **WHEN** `get_pool_health_summary()` is called and no clients are cached
-- **THEN** an empty dict is returned
-
 ### Requirement: Gateway logs pool health periodically at INFO level
 
-The gateway SHALL run a background task that logs pool health summaries at a configurable interval when the gateway is active.
+The gateway SHALL run a background task that logs pool health summaries at a
+configurable interval when the gateway is active. The log line SHALL include
+per-connection details when connections exist.
 
 #### Scenario: Health log line format
 
@@ -68,9 +52,4 @@ The gateway SHALL run a background task that logs pool health summaries at a con
 #### Scenario: Health logging disabled when interval is zero
 
 - **WHEN** `pool_health_log_interval_sec` is set to `0`
-- **THEN** the background task is not started, and no health log lines are emitted
-
-#### Scenario: Health logging interval configurable
-
-- **WHEN** `pool_health_log_interval_sec` is not specified in config
-- **THEN** the default value `60` (seconds) is used
+- **THEN** the background task SHALL NOT execute

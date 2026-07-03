@@ -81,3 +81,26 @@ class TestCapacityAwareHTTPConnection:
             await conn.handle_async_request(mock_req)
 
         assert isinstance(conn._connection, AsyncHTTP11Connection)  # type: ignore[reportPrivateUsage]
+
+    # ------------------------------------------------------------------
+    # connection_label storage tests
+    # ------------------------------------------------------------------
+
+    def test_label_stored_on_connection(self) -> None:
+        """connection_label is stored as self._connection_label.
+
+        The ``connection_label`` argument passed to the constructor is
+        retained on the instance as ``_connection_label`` for later
+        identification in logs and health summaries.
+        """
+        origin = Origin(b"https", b"example.com", 443)
+
+        conn = CapacityAwareHTTPConnection(
+            origin=origin,
+            http1=True,
+            http2=True,
+            retries=0,
+            connection_label="test-conn-42",
+        )
+
+        assert conn._connection_label == "test-conn-42"  # type: ignore[reportPrivateUsage]

@@ -85,8 +85,9 @@ providers:
     enabled: true
 
     api_base_url: "https://generativelanguage.googleapis.com"
-    # Set to true to give this instance its own HTTP client pool (high-load instances)
-    dedicated_http_client: true
+    # Max concurrent HTTP/2 streams per TCP connection.
+    # Gemini handles high concurrency; override to 100.
+    max_concurrent_streams_per_connection: 100
 
     # Defined models for this provider (used by Keeper for health checks)
     default_model:
@@ -226,7 +227,8 @@ providers:
     enabled: true
 
     api_base_url: "https://api.deepseek.com"
-    dedicated_http_client: true
+    # DeepSeek supports moderate concurrency per connection.
+    max_concurrent_streams_per_connection: 10
 
     default_model:
       deepseek-chat:
@@ -250,7 +252,8 @@ providers:
     enabled: true
 
     api_base_url: "https://api.anthropic.com"
-    dedicated_http_client: true
+    # Anthropic handles high concurrency; override to 50.
+    max_concurrent_streams_per_connection: 50
 
     default_model:
       claude-sonnet-4-20250514:
@@ -380,7 +383,9 @@ providers:
     # Base URL for ALL DashScope API calls (both compatible-mode and native SDK).
     # The client's original request path is appended directly to this URL.
     api_base_url: "https://dashscope.aliyuncs.com"
-    dedicated_http_client: true
+    # Qwen/DashScope has a hidden internal concurrency limit (~8) despite
+    # advertising MAX_CONCURRENT_STREAMS=100. Cap at 5 to prevent cascading freezes.
+    max_concurrent_streams_per_connection: 5
 
     # Models used by the Keeper for health checks.
     # endpoint_suffix is the URL path appended to api_base_url for the test request.

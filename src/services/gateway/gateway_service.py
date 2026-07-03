@@ -428,15 +428,30 @@ async def _pool_health_log_loop(factory: HttpClientFactory, interval_sec: int) -
                     "streams: %d active / %d max_capacity | "
                     "queued: %d",
                     cache_key,
-                    summary.get("total_connections", 0),
-                    summary.get("active_connections", 0),
-                    summary.get("idle_connections", 0),
-                    summary.get("h2_connections", 0),
-                    summary.get("h1_connections", 0),
-                    summary.get("active_h2_streams", 0),
-                    summary.get("max_h2_stream_capacity", 0),
-                    summary.get("queued_requests", 0),
+                    _health_int(summary, "total_connections"),
+                    _health_int(summary, "active_connections"),
+                    _health_int(summary, "idle_connections"),
+                    _health_int(summary, "h2_connections"),
+                    _health_int(summary, "h1_connections"),
+                    _health_int(summary, "active_h2_streams"),
+                    _health_int(summary, "max_h2_stream_capacity"),
+                    _health_int(summary, "queued_requests"),
                 )
+                # Per-connection breakdown
+                raw_conns = summary.get("connections")
+                conn_list: list[dict[str, int | str]] = (
+                    raw_conns if isinstance(raw_conns, list) else []
+                )
+                for conn_info in conn_list:
+                    logger.info(
+                        "HTTP_POOL_CONN | %s | %s | %s | %s | streams: %s/%s",
+                        cache_key,
+                        conn_info.get("label", ""),
+                        conn_info.get("state", ""),
+                        conn_info.get("protocol", ""),
+                        conn_info.get("active_streams", 0),
+                        conn_info.get("max_streams", 0),
+                    )
         except asyncio.CancelledError:
             logger.info("Pool health log loop is shutting down.")
             break
@@ -444,6 +459,20 @@ async def _pool_health_log_loop(factory: HttpClientFactory, interval_sec: int) -
             logger.error(
                 "An error occurred in the pool health log loop.", exc_info=True
             )
+
+
+def _health_int(summary: dict[str, int | list[dict[str, int | str]]], key: str) -> int:
+    """Extract an int value from a health summary dict.
+
+    Args:
+        summary: A pool health summary dict with mixed int/list values.
+        key: The key to look up.
+
+    Returns:
+        The int value for ``key``, or ``0`` if not present or not an int.
+    """
+    val = summary.get(key, 0)
+    return val if isinstance(val, int) else 0
 
 
 def _get_token_from_headers(

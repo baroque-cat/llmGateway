@@ -56,6 +56,8 @@ class CapacityAwareHttp2Pool(AsyncConnectionPool):
         uds: str | None = None,
         network_backend: AsyncNetworkBackend | None = None,
         socket_options: typing.Iterable[SOCKET_OPTION] | None = None,
+        max_concurrent_streams_cap: int | None = None,
+        provider_name: str = "unknown",
     ) -> None:
         super().__init__(
             ssl_context=ssl_context,
@@ -70,6 +72,9 @@ class CapacityAwareHttp2Pool(AsyncConnectionPool):
             network_backend=network_backend,
             socket_options=socket_options,
         )
+        self._max_concurrent_streams_cap: int | None = max_concurrent_streams_cap
+        self._provider_name: str = provider_name
+        self._connection_ordinal: int = 0
 
     # ------------------------------------------------------------------
     # create_connection — wire on_capacity_update callback
@@ -86,6 +91,9 @@ class CapacityAwareHttp2Pool(AsyncConnectionPool):
         omitted — this project uses httpx-level proxies, not httpcore-level
         proxy connections.
         """
+        label = f"{self._provider_name}-conn-{self._connection_ordinal}"
+        self._connection_ordinal += 1
+        logger.info(f"Creating connection '{label}' for origin {origin}")
         return CapacityAwareHTTPConnection(
             origin=origin,
             ssl_context=self._ssl_context,
@@ -98,6 +106,8 @@ class CapacityAwareHttp2Pool(AsyncConnectionPool):
             network_backend=self._network_backend,
             socket_options=self._socket_options,
             on_capacity_update=self._connection_capacity_updated,
+            max_concurrent_streams_cap=self._max_concurrent_streams_cap,
+            connection_label=label,
         )
 
     # ------------------------------------------------------------------
@@ -131,6 +141,10 @@ class CapacityAwareHttp2Pool(AsyncConnectionPool):
             ):
                 self._connections.remove(connection)
                 if not connection.is_closed():
+                    label = getattr(connection, "_connection_label", "")
+                    logger.info(
+                        f"Closing connection '{label}' (cleanup: closed/expired/idle)"
+                    )
                     closing_connections.append(connection)
 
         # --- capacity-aware request assignment ---
@@ -175,6 +189,10 @@ class CapacityAwareHttp2Pool(AsyncConnectionPool):
             elif idle_connections:
                 connection = idle_connections[0]
                 self._connections.remove(connection)
+                label = getattr(connection, "_connection_label", "")
+                logger.info(
+                    f"Evicting idle connection '{label}' to make room for new connection"
+                )
                 closing_connections.append(connection)
                 connection = self.create_connection(origin)
                 self._connections.append(connection)
@@ -223,7 +241,9 @@ class CapacityAwareHttp2Pool(AsyncConnectionPool):
     # get_health_summary — pool health statistics
     # ------------------------------------------------------------------
 
-    def get_health_summary(self) -> dict[str, int]:
+    def get_health_summary(
+        self,
+    ) -> dict[str, int | list[dict[str, int | str]]]:
         """Return pool-level health statistics as a dict.
 
         Returns:
@@ -231,7 +251,10 @@ class CapacityAwareHttp2Pool(AsyncConnectionPool):
             ``active_connections``, ``idle_connections``,
             ``h2_connections``, ``h1_connections``,
             ``active_h2_streams``, ``max_h2_stream_capacity``,
-            and ``queued_requests`` — all non-negative integers.
+            ``queued_requests`` — all non-negative integers — and
+            ``connections`` — a list of per-connection dicts with
+            ``label``, ``state``, ``protocol``, ``active_streams``,
+            and ``max_streams``.
         """
         connections = self._connections
 
@@ -254,15 +277,41 @@ class CapacityAwareHttp2Pool(AsyncConnectionPool):
             if conn is not None and not r.is_queued():
                 streams_per_conn[conn] = streams_per_conn.get(conn, 0) + 1
 
+        # Per-connection details for the ``connections`` list.
+        connection_details: list[dict[str, int | str]] = []
+
         for conn in connections:
             # Protocol detection via the inner connection.
             inner = getattr(conn, "_connection", None)
             if isinstance(inner, FixedHTTP2Connection):
+                protocol = "h2"
                 h2_connections += 1
                 active_h2_streams += streams_per_conn.get(conn, 0)
                 max_h2_stream_capacity += self._max_concurrent_requests(conn)
             elif isinstance(inner, AsyncHTTP11Connection):
+                protocol = "h1"
                 h1_connections += 1
+            else:
+                protocol = "unknown"
+
+            # State detection.
+            if conn.is_closed():
+                state = "closed"
+            elif conn.is_idle():
+                state = "idle"
+            else:
+                state = "active"
+
+            label = getattr(conn, "_connection_label", "")
+            connection_details.append(
+                {
+                    "label": label,
+                    "state": state,
+                    "protocol": protocol,
+                    "active_streams": streams_per_conn.get(conn, 0),
+                    "max_streams": self._max_concurrent_requests(conn),
+                }
+            )
 
         queued_requests = sum(1 for r in self._requests if r.is_queued())
 
@@ -275,4 +324,5 @@ class CapacityAwareHttp2Pool(AsyncConnectionPool):
             "active_h2_streams": active_h2_streams,
             "max_h2_stream_capacity": max_h2_stream_capacity,
             "queued_requests": queued_requests,
+            "connections": connection_details,
         }

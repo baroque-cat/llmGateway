@@ -124,42 +124,65 @@ def test_minimal_config_gateway_defaults(mock_env):
     assert config.gateway.workers == 4
 
 
-# --- Dedicated HTTP Client Tests (G6: Section 7) ---
+# --- Max Concurrent Streams Tests ---
 
 
-def test_full_config_dedicated_http_client_in_yaml():
-    """IT-Y07-2: Raw example_full_config.yaml contains 'dedicated_http_client' field
-    for every provider (with a comment explaining its purpose)."""
+def test_full_config_max_concurrent_streams_in_yaml():
+    """IT-Y07-2: Raw example_full_config.yaml contains
+    'max_concurrent_streams_per_connection' field for every provider with
+    per-provider values: gemini=100, deepseek=10, anthropic=50, qwen=5."""
     yaml = YAML()
     with open("config/example_full_config.yaml", encoding="utf-8") as f:
         data = yaml.load(f)
 
+    expected_values = {
+        "gemini-production": 100,
+        "deepseek-main": 10,
+        "anthropic-production": 50,
+        "qwen-home": 5,
+    }
+
     providers_section = data["providers"]
     for provider_name, provider_data in providers_section.items():
-        assert "dedicated_http_client" in provider_data, (
+        assert "max_concurrent_streams_per_connection" in provider_data, (
             f"Provider '{provider_name}' in example_full_config.yaml "
-            f"does not contain 'dedicated_http_client' key. "
+            f"does not contain 'max_concurrent_streams_per_connection' key. "
             f"Available keys: {list(provider_data.keys())}"
         )
-        assert provider_data["dedicated_http_client"] is True, (
-            f"Provider '{provider_name}' has dedicated_http_client="
-            f"{provider_data['dedicated_http_client']}, expected True"
+        expected = expected_values[provider_name]
+        assert provider_data["max_concurrent_streams_per_connection"] == expected, (
+            f"Provider '{provider_name}' has "
+            f"max_concurrent_streams_per_connection="
+            f"{provider_data['max_concurrent_streams_per_connection']}, "
+            f"expected {expected}"
         )
 
 
-def test_full_config_dedicated_http_client_loaded(mock_env):
-    """IT-Y07-2: ConfigLoader.load() on example_full_config.yaml → every provider
-    has dedicated_http_client attribute."""
+def test_full_config_max_concurrent_streams_loaded(mock_env):
+    """IT-Y07-2: ConfigLoader.load() on example_full_config.yaml → every
+    provider has max_concurrent_streams_per_connection attribute with the
+    expected per-provider value."""
     loader = ConfigLoader(path="config/example_full_config.yaml")
     config = loader.load()
 
+    expected_values = {
+        "gemini-production": 100,
+        "deepseek-main": 10,
+        "anthropic-production": 50,
+        "qwen-home": 5,
+    }
+
     for provider_name, provider in config.providers.items():
-        assert hasattr(
-            provider, "dedicated_http_client"
-        ), f"Provider '{provider_name}' loaded object has no 'dedicated_http_client' attribute"
-        assert provider.dedicated_http_client is True, (
-            f"Provider '{provider_name}' has dedicated_http_client="
-            f"{provider.dedicated_http_client}, expected True"
+        assert hasattr(provider, "max_concurrent_streams_per_connection"), (
+            f"Provider '{provider_name}' loaded object has no "
+            f"'max_concurrent_streams_per_connection' attribute"
+        )
+        expected = expected_values[provider_name]
+        assert provider.max_concurrent_streams_per_connection == expected, (
+            f"Provider '{provider_name}' has "
+            f"max_concurrent_streams_per_connection="
+            f"{provider.max_concurrent_streams_per_connection}, "
+            f"expected {expected}"
         )
 
 

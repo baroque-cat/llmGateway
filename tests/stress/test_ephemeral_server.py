@@ -229,3 +229,186 @@ async def test_total_connection_count_cumulative() -> None:
             with contextlib.suppress(Exception):
                 await c.__aexit__(None, None, None)
         await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_internal_concurrency_none_processes_all_concurrently() -> None:
+    """When ``internal_concurrency`` is ``None``, no semaphore caps processing
+    and all requests run truly concurrently.
+
+    Sends 10 concurrent GET requests with a 500 ms response delay. If all
+    are processed in parallel, total wall-clock time is ~500 ms — not 5 s
+    which would indicate serial queueing.
+    """
+    server = EphemeralHttp2Server(
+        max_concurrent_streams=100,
+        response_delay_ms=500,
+    )
+    await server.start()
+    try:
+        timeout = httpx.Timeout(30.0)
+        async with httpx.AsyncClient(
+            http2=True, verify=False, timeout=timeout
+        ) as client:
+            start = time.monotonic()
+            tasks = [client.get(f"{server.url}/test") for _ in range(10)]
+            responses = await asyncio.gather(*tasks)
+            elapsed = time.monotonic() - start
+
+        assert all(r.status_code == 200 for r in responses)
+        assert elapsed < 1.5, f"Expected < 1.5 s (concurrent), got {elapsed:.3f} s"
+    finally:
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_internal_concurrency_three_limits_active_processing() -> None:
+    """An ``internal_concurrency=3`` semaphore serialises request processing
+    into batches of three.
+
+    With 10 requests at 1000 ms each and a semaphore of 3, processing
+    requires at least 4 batches (~4 s). The server still receives all 10
+    streams (``peak_concurrent_streams >= 10``) even though only 3 process
+    at once. After completion, ``concurrency_waiters`` returns to 0.
+    """
+    server = EphemeralHttp2Server(
+        max_concurrent_streams=100,
+        response_delay_ms=1000,
+        internal_concurrency=3,
+    )
+    await server.start()
+    try:
+        timeout = httpx.Timeout(30.0)
+        async with httpx.AsyncClient(
+            http2=True, verify=False, timeout=timeout
+        ) as client:
+            start = time.monotonic()
+            tasks = [client.get(f"{server.url}/test") for _ in range(10)]
+            responses = await asyncio.gather(*tasks)
+            elapsed = time.monotonic() - start
+
+        assert all(r.status_code == 200 for r in responses)
+        assert (
+            elapsed >= 3.0
+        ), f"Expected >= 3.0 s (semaphore-limited), got {elapsed:.3f} s"
+        assert server.stats["peak_concurrent_streams"] >= 10, (
+            f"Expected peak_concurrent_streams >= 10, "
+            f"got {server.stats['peak_concurrent_streams']}"
+        )
+        assert server.stats["concurrency_waiters"] == 0
+    finally:
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_internal_concurrency_preserves_advertised_max_streams() -> None:
+    """The internal concurrency semaphore does not affect the HTTP/2
+    ``SETTINGS_MAX_CONCURRENT_STREAMS`` advertised to the client.
+
+    With ``max_concurrent_streams=100`` and ``internal_concurrency=3``,
+    sending 10 concurrent requests (10 > 3 but < 100) should not trigger
+    ``httpx.LocalProtocolError`` — the client trusts the advertised
+    100-stream limit, and all 10 requests eventually succeed after internal
+    queueing.
+    """
+    server = EphemeralHttp2Server(
+        max_concurrent_streams=100,
+        response_delay_ms=200,
+        internal_concurrency=3,
+    )
+    await server.start()
+    try:
+        timeout = httpx.Timeout(30.0)
+        async with httpx.AsyncClient(
+            http2=True, verify=False, timeout=timeout
+        ) as client:
+            tasks = [client.get(f"{server.url}/test") for _ in range(10)]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        protocol_errors = [
+            r for r in results if isinstance(r, httpx.LocalProtocolError)
+        ]
+        assert (
+            not protocol_errors
+        ), f"Expected no LocalProtocolError, got: {protocol_errors}"
+        responses = [r for r in results if isinstance(r, httpx.Response)]
+        assert len(responses) == 10
+        assert all(r.status_code == 200 for r in responses)
+    finally:
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_concurrency_waiters_reflects_blocked_count() -> None:
+    """The ``concurrency_waiters`` metric tracks requests blocked on the
+    internal semaphore during active processing.
+
+    With 15 concurrent requests, ``internal_concurrency=3``, and a 2000 ms
+    response delay, 12 requests should be waiting (15 - 3 processing)
+    during the first response window. A background polling loop samples
+    the metric every 50 ms and records the peak observed value.
+    """
+    server = EphemeralHttp2Server(
+        max_concurrent_streams=100,
+        response_delay_ms=2000,
+        internal_concurrency=3,
+    )
+    await server.start()
+    try:
+        peak_waiters = 0
+        stop_polling = asyncio.Event()
+
+        async def _poll_waiters() -> None:
+            nonlocal peak_waiters
+            while not stop_polling.is_set():
+                peak_waiters = max(peak_waiters, server.stats["concurrency_waiters"])
+                await asyncio.sleep(0.05)
+
+        poll_task = asyncio.create_task(_poll_waiters())
+        try:
+            timeout = httpx.Timeout(30.0)
+            async with httpx.AsyncClient(
+                http2=True, verify=False, timeout=timeout
+            ) as client:
+                tasks = [client.get(f"{server.url}/test") for _ in range(15)]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+        finally:
+            stop_polling.set()
+            await poll_task
+
+        assert peak_waiters >= 11, f"Expected peak_waiters >= 11, got {peak_waiters}"
+        assert peak_waiters <= 12, f"Expected peak_waiters <= 12, got {peak_waiters}"
+        responses = [r for r in results if isinstance(r, httpx.Response)]
+        assert len(responses) == 15
+        assert all(r.status_code == 200 for r in responses)
+    finally:
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_concurrency_waiters_zero_after_batch_completes() -> None:
+    """After all requests complete, ``concurrency_waiters`` returns to zero,
+    confirming no leaked waiter counts.
+
+    Sends 15 concurrent requests with ``internal_concurrency=3`` and a 500 ms
+    response delay. Once all responses are received, the semaphore should
+    have no waiters.
+    """
+    server = EphemeralHttp2Server(
+        max_concurrent_streams=100,
+        response_delay_ms=500,
+        internal_concurrency=3,
+    )
+    await server.start()
+    try:
+        timeout = httpx.Timeout(30.0)
+        async with httpx.AsyncClient(
+            http2=True, verify=False, timeout=timeout
+        ) as client:
+            tasks = [client.get(f"{server.url}/test") for _ in range(15)]
+            responses = await asyncio.gather(*tasks)
+
+        assert all(r.status_code == 200 for r in responses)
+        assert server.stats["concurrency_waiters"] == 0
+    finally:
+        await server.stop()

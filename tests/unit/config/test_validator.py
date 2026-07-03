@@ -429,97 +429,126 @@ def test_ut_h13_new_format_yaml_with_start_batch_size_is_valid():
 
 
 # ==============================================================================
-# G2: ProviderConfig.dedicated_http_client — default, explicit, type validation,
-#     YAML parsing
+# G2: ProviderConfig.max_concurrent_streams_per_connection — default, custom,
+#     bounds validation, type validation, YAML parsing
 # ==============================================================================
 
 
-def test_g2_1_1_dedicated_http_client_default_is_false():
+def test_g2_max_concurrent_streams_default_via_yaml():
     """
-    G2-1.1: ProviderConfig.dedicated_http_client defaults to False when the
-    field is not explicitly provided.
+    G2: YAML config without max_concurrent_streams_per_connection loads
+    correctly and the provider's field defaults to 5.
     """
-    provider = ProviderConfig(provider_type="openai_like")
-    assert provider.dedicated_http_client is True
+    mock_yaml_content = """providers:
+  test_provider:
+    enabled: true
+    provider_type: "openai_like"
+    api_base_url: "https://api.test.com/v1"
+    access_control:
+      gateway_access_token: "test_token"
+"""
+
+    with (
+        patch("os.path.exists", return_value=True),
+        patch("builtins.open", mock_open(read_data=mock_yaml_content)),
+    ):
+        loader = ConfigLoader(path="dummy_path.yaml")
+        config = loader.load()
+
+        provider = config.providers["test_provider"]
+        assert provider.max_concurrent_streams_per_connection == 5
 
 
-def test_g2_1_2_dedicated_http_client_explicit_true():
+def test_g2_max_concurrent_streams_custom_via_yaml():
     """
-    G2-1.2: ProviderConfig.dedicated_http_client can be explicitly set to True.
+    G2: YAML config with a custom max_concurrent_streams_per_connection
+    loads correctly and the provider's field reflects the YAML value.
     """
-    provider = ProviderConfig(provider_type="openai_like", dedicated_http_client=True)
-    assert provider.dedicated_http_client is True
+    mock_yaml_content = """providers:
+  test_provider:
+    enabled: true
+    provider_type: "openai_like"
+    api_base_url: "https://api.test.com/v1"
+    access_control:
+      gateway_access_token: "test_token"
+    max_concurrent_streams_per_connection: 42
+"""
+
+    with (
+        patch("os.path.exists", return_value=True),
+        patch("builtins.open", mock_open(read_data=mock_yaml_content)),
+    ):
+        loader = ConfigLoader(path="dummy_path.yaml")
+        config = loader.load()
+
+        provider = config.providers["test_provider"]
+        assert provider.max_concurrent_streams_per_connection == 42
 
 
-def test_g2_1_3_dedicated_http_client_invalid_type_raises_validation_error():
+def test_g2_max_concurrent_streams_zero_rejected_via_yaml():
     """
-    G2-1.3: ProviderConfig rejects a non-bool value for dedicated_http_client.
+    G2: YAML config with max_concurrent_streams_per_connection: 0 causes
+    a ValidationError (ge=1) during config loading, which ConfigLoader
+    converts to SystemExit.
+    """
+    mock_yaml_content = """providers:
+  test_provider:
+    enabled: true
+    provider_type: "openai_like"
+    api_base_url: "https://api.test.com/v1"
+    access_control:
+      gateway_access_token: "test_token"
+    max_concurrent_streams_per_connection: 0
+"""
 
-    Passing a string like "yes" should raise ValidationError because
-    dedicated_http_client is typed as bool. However, Pydantic v2 in lax
-    (default) mode coerces certain string values ("yes", "no", "true",
-    "false", "1", "0") to bool. To reliably trigger a ValidationError,
-    we pass a type that Pydantic cannot coerce to bool (e.g., a list).
+    with (
+        patch("os.path.exists", return_value=True),
+        patch("builtins.open", mock_open(read_data=mock_yaml_content)),
+    ):
+        loader = ConfigLoader(path="dummy_path.yaml")
+        with pytest.raises(SystemExit):
+            loader.load()
+
+
+def test_g2_max_concurrent_streams_above_1000_rejected_via_yaml():
+    """
+    G2: YAML config with max_concurrent_streams_per_connection: 1001 causes
+    a ValidationError (le=1000) during config loading, which ConfigLoader
+    converts to SystemExit.
+    """
+    mock_yaml_content = """providers:
+  test_provider:
+    enabled: true
+    provider_type: "openai_like"
+    api_base_url: "https://api.test.com/v1"
+    access_control:
+      gateway_access_token: "test_token"
+    max_concurrent_streams_per_connection: 1001
+"""
+
+    with (
+        patch("os.path.exists", return_value=True),
+        patch("builtins.open", mock_open(read_data=mock_yaml_content)),
+    ):
+        loader = ConfigLoader(path="dummy_path.yaml")
+        with pytest.raises(SystemExit):
+            loader.load()
+
+
+def test_g2_max_concurrent_streams_invalid_type_rejected():
+    """
+    G2: ProviderConfig rejects a non-int value for
+    max_concurrent_streams_per_connection. Passing a list triggers
+    ValidationError because Pydantic cannot coerce it to int.
     """
     with pytest.raises(ValidationError) as exc_info:
         ProviderConfig(
             provider_type="openai_like",
-            dedicated_http_client=["yes"],
+            max_concurrent_streams_per_connection=["five"],
         )
 
     error_message = str(exc_info.value)
-    assert "dedicated_http_client" in error_message
-
-
-def test_g2_1_4_yaml_dedicated_http_client_true():
-    """
-    G2-1.4: YAML config with dedicated_http_client: true loads correctly
-    and the provider's dedicated_http_client field is True.
-    """
-    mock_yaml_content = """providers:
-  test_provider:
-    enabled: true
-    provider_type: "openai_like"
-    api_base_url: "https://api.test.com/v1"
-    access_control:
-      gateway_access_token: "test_token"
-    dedicated_http_client: true
-"""
-
-    with (
-        patch("os.path.exists", return_value=True),
-        patch("builtins.open", mock_open(read_data=mock_yaml_content)),
-    ):
-        loader = ConfigLoader(path="dummy_path.yaml")
-        config = loader.load()
-
-        provider = config.providers["test_provider"]
-        assert provider.dedicated_http_client is True
-
-
-def test_g2_1_5_yaml_dedicated_http_client_absent_defaults_to_false():
-    """
-    G2-1.5: YAML config without dedicated_http_client field loads correctly
-    and the provider's dedicated_http_client defaults to False.
-    """
-    mock_yaml_content = """providers:
-  test_provider:
-    enabled: true
-    provider_type: "openai_like"
-    api_base_url: "https://api.test.com/v1"
-    access_control:
-      gateway_access_token: "test_token"
-"""
-
-    with (
-        patch("os.path.exists", return_value=True),
-        patch("builtins.open", mock_open(read_data=mock_yaml_content)),
-    ):
-        loader = ConfigLoader(path="dummy_path.yaml")
-        config = loader.load()
-
-        provider = config.providers["test_provider"]
-        assert provider.dedicated_http_client is True
+    assert "max_concurrent_streams_per_connection" in error_message
 
 
 # ==============================================================================

@@ -9,7 +9,7 @@ Test IDs:
   UT-EV03 – Hardcoded constants (logging, pool, retry, keeper) remain
   UT-EV04 – No hardcoded operational values exist
   IT-Y06  – Default config key order and nested structure
-  IT-Y07-1 – dedicated_http_client defaults to False
+  IT-Y07-1 – max_concurrent_streams_per_connection defaults to 5
   IT-Y05  – Full config YAML key order (moved from integration)
 """
 
@@ -117,22 +117,23 @@ def test_default_config_keys_and_values():
     assert pool["max_size"] == 15
 
 
-def test_default_config_dedicated_http_client():
+def test_default_config_max_concurrent_streams_per_connection():
     """IT-Y07-1: get_default_config()['providers']['llm_provider_default'] contains
-    'dedicated_http_client' key with value False."""
+    'max_concurrent_streams_per_connection' key with value 5."""
     defaults = get_default_config()
 
     assert "providers" in defaults
     llm_default = defaults["providers"]["llm_provider_default"]
 
-    # Verify the dedicated_http_client key exists and is False
-    assert "dedicated_http_client" in llm_default, (
-        f"Key 'dedicated_http_client' not found in llm_provider_default. "
-        f"Available keys: {list(llm_default.keys())}"
+    # Verify the max_concurrent_streams_per_connection key exists and is 5
+    assert "max_concurrent_streams_per_connection" in llm_default, (
+        f"Key 'max_concurrent_streams_per_connection' not found in "
+        f"llm_provider_default. Available keys: {list(llm_default.keys())}"
     )
-    assert (
-        llm_default["dedicated_http_client"] is True
-    ), f"Expected dedicated_http_client=True, got {llm_default['dedicated_http_client']}"
+    assert llm_default["max_concurrent_streams_per_connection"] == 5, (
+        f"Expected max_concurrent_streams_per_connection=5, "
+        f"got {llm_default['max_concurrent_streams_per_connection']}"
+    )
 
 
 # --- Test moved from integration/test_config_examples.py ---
