@@ -62,4 +62,5 @@ local.json
 qa_report.md
 examples/*
 plan*
+problem*
 bug*

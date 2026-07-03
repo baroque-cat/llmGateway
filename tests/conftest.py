@@ -22,6 +22,12 @@ def _setup_default_env_vars() -> None:
         "KEEPER_METRICS_PORT": "9090",
         "LLM_PROVIDER_DEFAULT_TOKEN": "test_token",
         "METRICS_ACCESS_TOKEN": "test_metrics_token",
+        "METRICS_BACKEND": "",
+        "PROMETHEUS_MULTIPROC_DIR": "",
+        "GEMINI_PROD_TOKEN": "test_gemini_token",
+        "DEEPSEEK_TOKEN": "test_deepseek_token",
+        "ANTHROPIC_TOKEN": "test_anthropic_token",
+        "QWEN_HOME_TOKEN": "test_qwen_token",
     }
     for key, value in _defaults.items():
         os.environ.setdefault(key, value)
