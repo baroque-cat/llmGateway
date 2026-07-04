@@ -1,4 +1,4 @@
-.PHONY: lint typecheck test test-slow test-postgres test-all ci
+.PHONY: lint typecheck test test-slow test-postgres test-all ci test-gatekeeper test-boundary
 
 # ── Lint ──
 lint:
@@ -30,6 +30,14 @@ test:
 	@echo "=== G5: root-level tests (gatekeeper) ==="
 	-poetry run pytest tests/ --ignore=tests/unit --ignore=tests/integration --ignore=tests/security --ignore=tests/e2e --ignore=tests/stress --ignore=tests/batching -q --timeout=30 -m "not slow and not postgres"
 
+# ── Standalone gatekeeper target (G5 only, root-level tests) ──
+test-gatekeeper:
+	poetry run pytest tests/ --ignore=tests/unit --ignore=tests/integration --ignore=tests/security --ignore=tests/e2e --ignore=tests/stress --ignore=tests/batching -q --timeout=30 -m "not slow and not postgres"
+
+# ── Standalone boundary compliance check (single file, fast) ──
+test-boundary:
+	poetry run pytest tests/test_boundary_compliance.py -q --timeout=30
+
 # ── Stress tests (slow, real HTTP/2 server) ──
 test-slow:
 	@echo "=== G6: stress tests ==="
@@ -37,7 +45,7 @@ test-slow:
 
 # ── Postgres integration tests (require real DB) ──
 test-postgres:
-	poetry run pytest -v --run-postgres -m "postgres" || true
+	bash scripts/run-postgres-tests.sh
 
 # ── Full suite ──
 test-all: test test-slow

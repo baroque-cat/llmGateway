@@ -116,3 +116,84 @@ class TestHardcodeCheckerPatterns:
         # Verify is_excluded function exists and checks EXCLUDE_FILES
         assert "is_excluded()" in script or "is_excluded()" in script
         assert "EXCLUDE_FILES[@]" in script
+
+    def test_banned_regex_database_config_password(self) -> None:
+        """Verify BANNED_OTHER_REGEX contains a DatabaseConfig password pattern.
+
+        Reads the script source and checks that the ``BANNED_OTHER_REGEX`` array
+        contains a regex pattern for detecting non-canonical
+        ``DatabaseConfig(...password=...)`` constructor calls. The pattern uses
+        a negative lookahead ``(?!test_password)`` to permit the canonical value
+        ``test_password`` while flagging any other password as a violation.
+        """
+        script = _CHECKER_SCRIPT.read_text()
+
+        # Extract the BANNED_OTHER_REGEX section
+        section_start: int = script.index("BANNED_OTHER_REGEX=(")
+        section_end: int = script.index("\n)", section_start)
+        section: str = script[section_start:section_end]
+
+        # Verify DatabaseConfig pattern is present in the section
+        assert (
+            "DatabaseConfig" in section
+        ), "DatabaseConfig pattern not found in BANNED_OTHER_REGEX"
+
+        # Verify the pattern uses negative lookahead for the canonical password
+        assert (
+            "(?!test_password)" in section
+        ), "Negative lookahead for test_password not found in BANNED_OTHER_REGEX"
+
+        # Verify password= keyword is part of the pattern
+        assert (
+            "password=" in section
+        ), "password= keyword not found in BANNED_OTHER_REGEX"
+
+    def test_banned_regex_httpcore_version(self) -> None:
+        """Verify BANNED_OTHER_REGEX contains an httpcore version pattern.
+
+        Reads the script source and checks that the ``BANNED_OTHER_REGEX`` array
+        contains a regex pattern for detecting non-canonical httpcore versions.
+        The pattern enforces the canonical version ``1.0.9`` by matching
+        versions where the major, minor, or patch components differ from 1, 0,
+        and 9 respectively.
+        """
+        script = _CHECKER_SCRIPT.read_text()
+
+        # Extract the BANNED_OTHER_REGEX section
+        section_start: int = script.index("BANNED_OTHER_REGEX=(")
+        section_end: int = script.index("\n)", section_start)
+        section: str = script[section_start:section_end]
+
+        # Verify httpcore pattern is present in the section
+        assert "httpcore" in section, "httpcore pattern not found in BANNED_OTHER_REGEX"
+
+        # Verify the pattern enforces canonical version 1.0.9
+        assert "version" in section, "version keyword not found in BANNED_OTHER_REGEX"
+        assert (
+            "[^1]" in section
+        ), "Major version enforcement [^1] not found in BANNED_OTHER_REGEX"
+        assert (
+            "[^0]" in section
+        ), "Minor version enforcement [^0] not found in BANNED_OTHER_REGEX"
+        assert (
+            "[^9]" in section
+        ), "Patch version enforcement [^9] not found in BANNED_OTHER_REGEX"
+
+    def test_exclude_files_contains_test_postgres_policy(self) -> None:
+        """Verify EXCLUDE_FILES contains test_postgres_policy.py.
+
+        Reads the script source and checks that ``"test_postgres_policy.py"``
+        is present in the ``EXCLUDE_FILES`` array, ensuring the upcoming
+        postgres policy gatekeeper test is excluded from all pattern checks.
+        """
+        script = _CHECKER_SCRIPT.read_text()
+
+        # Extract the EXCLUDE_FILES section
+        section_start: int = script.index("EXCLUDE_FILES=(")
+        section_end: int = script.index("\n)", section_start)
+        section: str = script[section_start:section_end]
+
+        # Verify test_postgres_policy.py is excluded from scanning
+        assert (
+            '"test_postgres_policy.py"' in section
+        ), "test_postgres_policy.py not found in EXCLUDE_FILES"

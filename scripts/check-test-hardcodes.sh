@@ -87,6 +87,8 @@ BANNED_MODEL_NAMES=(
 BANNED_OTHER_REGEX=(
     'password="test_secret"'
     'PROMETHEUS_MULTIPROC_DIR='
+    $'DatabaseConfig\\(.*password="(?!test_password)"'
+    $'httpcore[^.]*version.*[^1][^.]*[^0][^.]*[^9]'
 )
 
 # ── EXCLUDE_FILES ──
@@ -126,6 +128,7 @@ EXCLUDE_FILES=(
     "test_layer_import_scan.py"
     "test_pre_commit_config.py"
     "test_metrics_fixture_dedup.py"
+    "test_postgres_policy.py"
     # Pre-existing violations: tests/unit/ (canonical mode — strict, no annotations)
     # These files use production URLs, wrong provider types, and/or obsolete model
     # names (especially "gpt-4" as a generic test fixture) for URL construction,
