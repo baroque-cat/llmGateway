@@ -98,14 +98,30 @@ def _session_synth_cleanup() -> None:  # pyright: ignore[reportUnusedFunction]
 # so the checker does not flag its own test infrastructure.
 _GATEKEEPER_TEST_FILES: list[str] = [
     "test_canonical_config.py",
+    "test_canonical_fixtures.py",
+    "test_constants.py",
     "test_hardcode_checker_modes.py",
     "test_hardcode_checker_patterns.py",
-    "test_checker_cache_fixtures.py",
+    "test_conftest_checker_cache.py",
     "test_project_structure.py",
+    "test_makefile_groups.py",
+    "test_canonical_integrity.py",
+    "test_secret_isolation.py",
+    "test_env_example.py",
+    "test_documentation_sync.py",
+    "test_testing_docs.py",
     "test_hardcode_checker_core.py",
     "test_hardcode_checker_production_urls.py",
     "test_boundary_compliance.py",
     "test_hardcode_checker_regression.py",
+    "test_docker_test_db.py",
+    "test_security.py",
+    "test_ci_pipeline.py",
+    "test_layer_import_scan.py",
+    "test_pre_commit_config.py",
+    "test_metrics_fixture_dedup.py",
+    "test_postgres_runner.py",
+    "test_test_infra_polish.py",
 ]
 
 

@@ -168,7 +168,7 @@ The gatekeeper script SHALL include a regex pattern that detects `DatabaseConfig
 #### Scenario: Non-canonical DB password in source is detected
 
 - **WHEN** the gatekeeper script scans test files in canonical mode
-- **THEN** the pattern `DatabaseConfig\(.*password="(?!test_password)"` SHALL be present in the `BANNED_OTHER_REGEX` array
+- **THEN** the pattern `DatabaseConfig\(.*password="(?!test_password")` SHALL be present in the `BANNED_OTHER_PCRE` array
 - **AND** any source line matching `DatabaseConfig(...password="not_test_password"...)` SHALL be flagged as a violation
 - **AND** any source line matching `DatabaseConfig(...password="test_password"...)` SHALL NOT be flagged (canonical value permitted)
 

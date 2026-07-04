@@ -345,3 +345,87 @@ def test_all_mode_composition() -> None:
     finally:
         Path(unit_tmp).unlink(missing_ok=True)
         Path(root_tmp).unlink(missing_ok=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# BANNED_OTHER_REGEX / BANNED_OTHER_PCRE TESTS
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+# String-concatenated to avoid self-triggering pattern detection
+# Must be on a single line — grep -P .* does NOT match across newlines
+_NON_CANONICAL_DB_PASSWORD: str = (
+    'DatabaseConfig(' + 'host="x", ' + 'password="not_test_password")'
+)
+
+_CANONICAL_DB_PASSWORD: str = (
+    'DatabaseConfig(' + 'host="x", ' + 'password="test_password")'
+)
+
+
+def test_canonical_detects_non_canonical_db_password() -> None:
+    """Canonical mode detects DatabaseConfig with non-canonical password.
+
+    Creates a temp ``.py`` file in ``tests/unit/`` containing a
+    ``DatabaseConfig(...password="not_test_password")`` call,
+    runs the checker in ``canonical`` mode, and asserts a non-zero exit
+    code with ``CANONICAL VIOLATION`` in stdout.
+    """
+    tmp_path = _make_temp_py(_UNIT_DIR, _NON_CANONICAL_DB_PASSWORD + "\n")
+    try:
+        result = _run_checker("canonical")
+        assert result.returncode != 0, (
+            "Canonical mode should exit non-zero for non-canonical DB password.\n"
+            f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+        )
+        assert "CANONICAL VIOLATION" in result.stdout, (
+            f"Expected CANONICAL VIOLATION in stdout.\n"
+            f"STDOUT:\n{result.stdout}"
+        )
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+
+
+def test_canonical_allows_canonical_db_password() -> None:
+    """Canonical mode allows DatabaseConfig with canonical password.
+
+    Creates a temp ``.py`` file in ``tests/unit/`` containing a
+    ``DatabaseConfig(...password="test_password")`` call (the canonical
+    value), runs the checker in ``canonical`` mode, and asserts exit 0 —
+    the negative lookahead ``(?!test_password)`` must NOT flag the
+    canonical password.
+    """
+    tmp_path = _make_temp_py(_UNIT_DIR, _CANONICAL_DB_PASSWORD + "\n")
+    try:
+        result = _run_checker("canonical")
+        assert result.returncode == 0, (
+            "Canonical mode should exit 0 for canonical DB password "
+            "(lookahead must allow test_password).\n"
+            f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+        )
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+
+
+def test_boundary_detects_non_canonical_db_password() -> None:
+    """Boundary mode detects DatabaseConfig with non-canonical password.
+
+    Creates a temp ``.py`` file in ``tests/integration/`` containing a
+    ``DatabaseConfig(...password="not_test_password")`` call without a
+    ``# boundary:`` annotation, runs the checker in ``boundary`` mode,
+    and asserts a non-zero exit code with ``BOUNDARY VIOLATION``.
+    """
+    tmp_path = _make_temp_py(_INTEGRATION_DIR, _NON_CANONICAL_DB_PASSWORD + "\n")
+    try:
+        result = _run_checker("boundary")
+        assert result.returncode != 0, (
+            "Boundary mode should exit non-zero for non-canonical DB password "
+            "without annotation.\n"
+            f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+        )
+        assert "BOUNDARY VIOLATION" in result.stdout, (
+            f"Expected BOUNDARY VIOLATION in stdout.\n"
+            f"STDOUT:\n{result.stdout}"
+        )
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)

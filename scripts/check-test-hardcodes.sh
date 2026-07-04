@@ -26,6 +26,12 @@
 
 set -euo pipefail
 
+# ── PCRE support check (required for BANNED_OTHER_PCRE patterns) ──
+if ! echo 'x' | grep -P 'x' >/dev/null 2>&1; then
+    printf '%s\n' "Error: grep -P (PCRE) support is required but not available." >&2
+    exit 1
+fi
+
 # ── Banned-pattern arrays ──
 
 # Production API URLs — always banned in ALL modes, even with # boundary:
@@ -83,12 +89,16 @@ BANNED_MODEL_NAMES=(
     '"gemini-1.5-pro"'
 )
 
-# Extended regex patterns
+# Extended regex patterns (ERE — compatible with grep -E and [[ =~ ]])
 BANNED_OTHER_REGEX=(
     'password="test_secret"'
     'PROMETHEUS_MULTIPROC_DIR='
-    $'DatabaseConfig\\(.*password="(?!test_password)"'
     $'httpcore[^.]*version.*[^1][^.]*[^0][^.]*[^9]'
+)
+
+# PCRE-only patterns (require grep -P; negative lookahead, etc.)
+BANNED_OTHER_PCRE=(
+    $'DatabaseConfig\\(.*password="(?!test_password")'
 )
 
 # ── EXCLUDE_FILES ──
@@ -107,7 +117,6 @@ EXCLUDE_FILES=(
     "test_constants.py"
     "test_hardcode_checker_modes.py"
     "test_hardcode_checker_patterns.py"
-    "test_checker_cache_fixtures.py"
     "test_conftest_checker_cache.py"
     "test_project_structure.py"
     "test_makefile_groups.py"
@@ -128,6 +137,8 @@ EXCLUDE_FILES=(
     "test_layer_import_scan.py"
     "test_pre_commit_config.py"
     "test_metrics_fixture_dedup.py"
+    "test_postgres_runner.py"
+    "test_test_infra_polish.py"
     "test_postgres_policy.py"
     # Pre-existing violations: tests/unit/ (canonical mode — strict, no annotations)
     # These files use production URLs, wrong provider types, and/or obsolete model
@@ -316,6 +327,20 @@ check_file_strict() {
         done < <(grep -aEn "$pattern" "$file" 2>/dev/null || true)
     done
 
+    # PCRE patterns (BANNED_OTHER_PCRE — requires grep -P)
+    local all_pcre=()
+    all_pcre+=("${BANNED_OTHER_PCRE[@]}")
+
+    for pattern in "${all_pcre[@]}"; do
+        local match
+        while IFS= read -r match; do
+            [[ -z "$match" ]] && continue
+            local line_num="${match%%:*}"
+            printf '%s VIOLATION: %s:%s: pattern %s\n' "$mode_name" "$file" "$line_num" "'$pattern'"
+            violations=1
+        done < <(grep -aPn "$pattern" "$file" 2>/dev/null || true)
+    done
+
     return $violations
 }
 
@@ -382,6 +407,24 @@ check_file_boundary() {
                 fi
             fi
         done
+    done
+
+    # Check PCRE patterns with boundary lookback (via grep -P)
+    local all_pcre=()
+    all_pcre+=("${BANNED_OTHER_PCRE[@]}")
+
+    for pattern in "${all_pcre[@]}"; do
+        local match
+        while IFS= read -r match; do
+            [[ -z "$match" ]] && continue
+            local line_num="${match%%:*}"
+            local idx=$((line_num - 1))
+            if ! has_boundary_annotation "$idx"; then
+                printf 'BOUNDARY VIOLATION: %s:%d: pattern %s without # boundary: annotation\n' \
+                    "$file" "$line_num" "'$pattern'"
+                violations=1
+            fi
+        done < <(grep -aPn "$pattern" "$file" 2>/dev/null || true)
     done
 
     return $violations

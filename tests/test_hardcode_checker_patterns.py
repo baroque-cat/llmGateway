@@ -28,7 +28,7 @@ _GATEKEEPER_TEST_FILES: list[str] = [
     "test_constants.py",
     "test_hardcode_checker_modes.py",
     "test_hardcode_checker_patterns.py",
-    "test_checker_cache_fixtures.py",
+    "test_conftest_checker_cache.py",
     "test_project_structure.py",
     "test_makefile_groups.py",
     "test_canonical_integrity.py",
@@ -36,6 +36,18 @@ _GATEKEEPER_TEST_FILES: list[str] = [
     "test_env_example.py",
     "test_documentation_sync.py",
     "test_testing_docs.py",
+    "test_hardcode_checker_core.py",
+    "test_hardcode_checker_production_urls.py",
+    "test_boundary_compliance.py",
+    "test_hardcode_checker_regression.py",
+    "test_docker_test_db.py",
+    "test_security.py",
+    "test_ci_pipeline.py",
+    "test_layer_import_scan.py",
+    "test_pre_commit_config.py",
+    "test_metrics_fixture_dedup.py",
+    "test_postgres_runner.py",
+    "test_test_infra_polish.py",
 ]
 
 
@@ -118,35 +130,35 @@ class TestHardcodeCheckerPatterns:
         assert "EXCLUDE_FILES[@]" in script
 
     def test_banned_regex_database_config_password(self) -> None:
-        """Verify BANNED_OTHER_REGEX contains a DatabaseConfig password pattern.
+        """Verify BANNED_OTHER_PCRE contains a DatabaseConfig password pattern.
 
-        Reads the script source and checks that the ``BANNED_OTHER_REGEX`` array
-        contains a regex pattern for detecting non-canonical
+        Reads the script source and checks that the ``BANNED_OTHER_PCRE`` array
+        contains a PCRE regex pattern for detecting non-canonical
         ``DatabaseConfig(...password=...)`` constructor calls. The pattern uses
         a negative lookahead ``(?!test_password)`` to permit the canonical value
         ``test_password`` while flagging any other password as a violation.
         """
         script = _CHECKER_SCRIPT.read_text()
 
-        # Extract the BANNED_OTHER_REGEX section
-        section_start: int = script.index("BANNED_OTHER_REGEX=(")
+        # Extract the BANNED_OTHER_PCRE section
+        section_start: int = script.index("BANNED_OTHER_PCRE=(")
         section_end: int = script.index("\n)", section_start)
         section: str = script[section_start:section_end]
 
         # Verify DatabaseConfig pattern is present in the section
         assert (
             "DatabaseConfig" in section
-        ), "DatabaseConfig pattern not found in BANNED_OTHER_REGEX"
+        ), "DatabaseConfig pattern not found in BANNED_OTHER_PCRE"
 
         # Verify the pattern uses negative lookahead for the canonical password
         assert (
-            "(?!test_password)" in section
-        ), "Negative lookahead for test_password not found in BANNED_OTHER_REGEX"
+            "(?!test_password" in section
+        ), "Negative lookahead for test_password not found in BANNED_OTHER_PCRE"
 
         # Verify password= keyword is part of the pattern
         assert (
             "password=" in section
-        ), "password= keyword not found in BANNED_OTHER_REGEX"
+        ), "password= keyword not found in BANNED_OTHER_PCRE"
 
     def test_banned_regex_httpcore_version(self) -> None:
         """Verify BANNED_OTHER_REGEX contains an httpcore version pattern.
@@ -193,7 +205,7 @@ class TestHardcodeCheckerPatterns:
         section_end: int = script.index("\n)", section_start)
         section: str = script[section_start:section_end]
 
-        # Verify test_postgres_policy.py is excluded from scanning
+        # Verify test_postgres_runner.py is excluded from scanning
         assert (
-            '"test_postgres_policy.py"' in section
-        ), "test_postgres_policy.py not found in EXCLUDE_FILES"
+            '"test_postgres_runner.py"' in section
+        ), "test_postgres_runner.py not found in EXCLUDE_FILES"
