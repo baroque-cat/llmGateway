@@ -7,18 +7,10 @@ import pytest
 
 from src.config import get_config, load_config
 from src.config.schemas import Config
+from tests._canonical import CanonicalConfig
 
-# Minimal env vars required after defaults.py now uses ${VAR} references
-_BASE_ENV: dict[str, str] = {
-    "DB_HOST": "localhost",
-    "DB_PORT": "5432",
-    "DB_USER": "test_user",
-    "DB_PASSWORD": "test_password",
-    "DB_NAME": "test_db",
-    "GATEWAY_HOST": "0.0.0.0",
-    "GATEWAY_PORT": "55300",
-    "GATEWAY_WORKERS": "4",
-}
+# Canonical env vars from .env.example + config/example_full_config.yaml
+_BASE_ENV: dict[str, str] = CanonicalConfig.from_example_files().to_env_dict()
 
 # ---------------------------------------------------------------------------
 # Fixtures

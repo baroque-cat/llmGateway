@@ -7,6 +7,7 @@ import pytest
 
 from src.config.defaults import get_default_config
 from src.config.loader import ConfigLoader
+from tests._canonical import CanonicalConfig
 
 # ---------------------------------------------------------------------------
 # UT-EV05: Missing DB_HOST produces clear error
@@ -49,15 +50,14 @@ def test_ut_ev07_missing_env_var_blocks_startup() -> None:
 # UT-EV08: GatewayConfig with env vars (positive)
 # ---------------------------------------------------------------------------
 
+# Full env vars with intentionally non-canonical DB values to verify that
+# _resolve_env_vars picks up actual env values (not hardcoded defaults).
 FULL_ENV: dict[str, str] = {
+    **CanonicalConfig.from_example_files().to_env_dict(),
     "DB_HOST": "database",
-    "DB_PORT": "5432",
     "DB_USER": "llm_gateway",
     "DB_PASSWORD": "secret",
     "DB_NAME": "llmgateway",
-    "GATEWAY_HOST": "0.0.0.0",
-    "GATEWAY_PORT": "55300",
-    "GATEWAY_WORKERS": "4",
     "LLM_PROVIDER_DEFAULT_TOKEN": "test_token",
 }
 
