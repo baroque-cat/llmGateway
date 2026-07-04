@@ -9,13 +9,12 @@ Tests:
 """
 
 import asyncio
-import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from src.core.interfaces import IMetricsCollector
-from src.metrics import get_collector, reset_collector
+from src.metrics import get_collector
 from src.metrics.backends.prometheus import PrometheusMetricsCollector
 from src.metrics.registry import (
     ADAPTIVE_BACKOFF_EVENTS,
@@ -33,18 +32,6 @@ from src.services.keeper import (
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
-
-
-@pytest.fixture(autouse=True)
-def _isolate_collector():
-    """Reset the collector singleton and clean env vars between tests."""
-    reset_collector()
-    for key in ("PROMETHEUS_MULTIPROC_DIR", "METRICS_BACKEND"):
-        os.environ.pop(key, None)
-    yield
-    reset_collector()
-    for key in ("PROMETHEUS_MULTIPROC_DIR", "METRICS_BACKEND"):
-        os.environ.pop(key, None)
 
 
 @pytest.fixture

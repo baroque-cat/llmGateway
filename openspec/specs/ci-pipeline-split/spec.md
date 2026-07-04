@@ -51,3 +51,14 @@ as the Makefile's process-isolation groups.
 - **THEN** each test job SHALL use `--timeout=30`
 - **AND** each test job SHALL use `-m "not slow and not postgres"`
 - **AND** G5 SHALL use `--ignore` flags matching the Makefile inversion pattern
+
+### Requirement: CI workflow runs on a nightly schedule
+
+The quality workflow SHALL include a scheduled trigger that runs all jobs
+nightly to catch regressions from dependency updates or external changes.
+
+#### Scenario: Nightly CI run at 03:00 UTC
+
+- **WHEN** `.github/workflows/quality.yml` is parsed
+- **THEN** the `on` section SHALL include `schedule: cron: '0 3 * * *'`
+- **AND** the scheduled run SHALL execute on the default branch (main)

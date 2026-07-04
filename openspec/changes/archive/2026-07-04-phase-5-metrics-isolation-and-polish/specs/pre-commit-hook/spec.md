@@ -1,45 +1,8 @@
-# pre-commit-hook
-
-## Purpose
-
-Pre-commit hook that blocks commits containing hardcoded test values by
-running the gatekeeper script (`check-test-hardcodes.sh`) authoritatively
-on all `tests/` files. Includes ruff check and format hooks covering
-the full project (`src/`, `tests/`, `main.py`).
-
-## Requirements
-
-### Requirement: Pre-commit hook blocks commits with hardcoded test values
-
-The project SHALL provide a `.pre-commit-config.yaml` file at the repository
-root with a `ban-test-hardcodes` hook that runs `check-test-hardcodes.sh` on
-all test files.
-
-#### Scenario: ban-test-hardcodes hook runs the gatekeeper script authoritatively
-
-- **WHEN** a developer attempts to commit a test file containing a banned pattern
-- **THEN** the `ban-test-hardcodes` pre-commit hook SHALL invoke `bash scripts/check-test-hardcodes.sh`
-- **AND** the hook SHALL block the commit if the script exits with non-zero return code
-- **AND** the hook SHALL scan all files matching `^tests/` (not just staged files, via `pass_filenames: false`)
-
-#### Scenario: ban-test-hardcodes hook is configured as a local hook
-
-- **WHEN** `.pre-commit-config.yaml` is read
-- **THEN** the `ban-test-hardcodes` hook SHALL be defined under the `local` repo
-- **AND** it SHALL use `language: system`
-- **AND** it SHALL have `entry: bash scripts/check-test-hardcodes.sh`
-
-#### Scenario: Ruff check and format hooks cover the full project
-
-- **WHEN** `.pre-commit-config.yaml` is read
-- **THEN** it SHALL contain `ruff` and `ruff-format` hooks
-- **AND** the ruff hooks SHALL target files matching `^(src|tests|main\.py)/`
+## ADDED Requirements
 
 ### Requirement: File hygiene hooks enforce repository cleanliness
 
-The project SHALL provide file-hygiene pre-commit hooks from
-`pre-commit/pre-commit-hooks` that enforce consistent formatting and prevent
-common mistakes.
+The project SHALL provide file-hygiene pre-commit hooks from `pre-commit/pre-commit-hooks` that enforce consistent formatting and prevent common mistakes.
 
 #### Scenario: Trailing whitespace is stripped
 
@@ -74,8 +37,7 @@ common mistakes.
 
 ### Requirement: Type checking runs in pre-commit for src/
 
-The project SHALL provide a `pyright` pre-commit hook that runs strict type
-checking on `src/` and `main.py` to catch type errors before reaching CI.
+The project SHALL provide a `pyright` pre-commit hook that runs strict type checking on `src/` and `main.py` to catch type errors before reaching CI.
 
 #### Scenario: Pyright runs on changed source files
 
@@ -86,8 +48,7 @@ checking on `src/` and `main.py` to catch type errors before reaching CI.
 
 ### Requirement: Shell scripts are linted with shellcheck
 
-The project SHALL provide a `shellcheck` pre-commit hook that lints shell
-scripts in the `scripts/` directory.
+The project SHALL provide a `shellcheck` pre-commit hook that lints shell scripts in the `scripts/` directory.
 
 #### Scenario: Shellcheck validates gatekeeper script
 

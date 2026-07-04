@@ -4,11 +4,29 @@
 # Run:      pre-commit run --all-files
 #
 # Hooks:
+#   File hygiene  — trailing whitespace, EOF, YAML/TOML/JSON validation, etc.
 #   ruff          — lint + auto-fix (src/, tests/, main.py)
 #   ruff-format   — format check (src/, tests/, main.py)
+#   shellcheck    — lint shell scripts in scripts/
+#   pyright       — strict type checking (src/, main.py only)
 #   ban-test-hardcodes — gatekeeper script, blocks commits with banned test values
 
 repos:
+  # ── File hygiene hooks ──
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: detect-private-key
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+  # ── Linting & formatting ──
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.11.0
     hooks:
@@ -18,8 +36,22 @@ repos:
       - id: ruff-format
         files: ^(src|tests|main\.py)/
 
+  # ── Shell script linting ──
+  - repo: https://github.com/koalaman/shellcheck-precommit
+    rev: v0.10.0
+    hooks:
+      - id: shellcheck
+        files: ^scripts/
+
+  # ── Local hooks ──
   - repo: local
     hooks:
+      - id: pyright
+        name: pyright (strict)
+        entry: poetry run pyright src/ main.py
+        language: system
+        files: ^src/|^main\.py$
+        pass_filenames: false
       - id: ban-test-hardcodes
         name: Ban hardcoded test values
         entry: bash scripts/check-test-hardcodes.sh

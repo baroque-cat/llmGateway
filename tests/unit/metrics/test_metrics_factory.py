@@ -9,30 +9,9 @@ and singleton reset on env var changes.
 import os
 import tempfile
 
-import pytest
-
-from src.metrics import get_collector, reset_collector
+from src.metrics import get_collector
 from src.metrics.backends.memory import MemoryMetricsCollector
 from src.metrics.backends.prometheus import PrometheusMetricsCollector
-
-# ---------------------------------------------------------------------------
-# Helpers — clean up env and singleton before/after each test
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture(autouse=True)
-def _clean_env_and_singleton():  # type: ignore[reportUnusedFunction]
-    """Reset the collector singleton and clean env vars before each test."""
-    reset_collector()
-    # Remove relevant env vars
-    os.environ.pop("METRICS_BACKEND", None)
-    os.environ.pop("PROMETHEUS_MULTIPROC_DIR", None)
-    yield
-    # Clean up after test
-    reset_collector()
-    os.environ.pop("METRICS_BACKEND", None)
-    os.environ.pop("PROMETHEUS_MULTIPROC_DIR", None)
-
 
 # ---------------------------------------------------------------------------
 # UT-FAC01 — get_collector() twice → same object (singleton)

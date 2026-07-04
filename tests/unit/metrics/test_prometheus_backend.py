@@ -8,7 +8,6 @@ model label removal.
 """
 
 import inspect
-import os
 import tempfile
 from unittest.mock import AsyncMock, MagicMock
 
@@ -26,25 +25,13 @@ from src.metrics.registry import (
 )
 
 # ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _make_unique_name(base: str) -> str:
-    """Append a counter to a base name to avoid Prometheus duplicate registration."""
-    _counter = getattr(_make_unique_name, "_c", 0) + 1
-    _make_unique_name._c = _counter  # type: ignore[attr-defined]
-    return f"{base}_{_counter}"
-
-
-# ---------------------------------------------------------------------------
 # UT-PB01 — Single-process gauge() registers in REGISTRY
 # ---------------------------------------------------------------------------
 
 
 def test_single_process_gauge_registers_in_registry() -> None:
     """UT-PB01: PrometheusMetricsCollector (single-process) → gauge() registers in REGISTRY."""
-    name = _make_unique_name("test_ut_pb01_gauge")
+    name = "test_ut_pb01_gauge"
     collector = PrometheusMetricsCollector()  # single-process → uses REGISTRY
 
     gauge = collector.gauge(name, "Test gauge", [])
@@ -62,7 +49,7 @@ def test_single_process_gauge_registers_in_registry() -> None:
 def test_generate_metrics_returns_body_and_content_type() -> None:
     """UT-PB02: generate_metrics() returns a tuple of (body, content_type)."""
     collector = PrometheusMetricsCollector()
-    name = _make_unique_name("test_ut_pb02_gauge")
+    name = "test_ut_pb02_gauge"
     gauge = collector.gauge(name, "Test gauge", [])
     gauge.set(1.0)
 
@@ -81,18 +68,11 @@ def test_generate_metrics_returns_body_and_content_type() -> None:
 def test_multiprocess_mode_aggregates() -> None:
     """UT-PB03: Multiprocess mode with PROMETHEUS_MULTIPROC_DIR → uses MultiProcessCollector."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        old_val = os.environ.pop("PROMETHEUS_MULTIPROC_DIR", None)
-
         collector = PrometheusMetricsCollector(multiprocess_dir=tmpdir)
 
         # Should have a private registry (not the global REGISTRY)
         assert collector._registry is not REGISTRY  # type: ignore[reportPrivateUsage]
         assert collector._multiprocess_dir == tmpdir  # type: ignore[reportPrivateUsage]
-
-        if old_val is not None:
-            os.environ["PROMETHEUS_MULTIPROC_DIR"] = old_val
-        else:
-            os.environ.pop("PROMETHEUS_MULTIPROC_DIR", None)
 
 
 # ---------------------------------------------------------------------------
@@ -103,18 +83,11 @@ def test_multiprocess_mode_aggregates() -> None:
 def test_multiprocess_gauge_creates_igauge() -> None:
     """UT-PB04: Multiprocess mode → gauge() returns an IGauge instance."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        old_val = os.environ.pop("PROMETHEUS_MULTIPROC_DIR", None)
-
         collector = PrometheusMetricsCollector(multiprocess_dir=tmpdir)
-        name = _make_unique_name("test_ut_pb04_gauge")
+        name = "test_ut_pb04_gauge"
         gauge = collector.gauge(name, "Test gauge", [])
 
         assert isinstance(gauge, IGauge)
-
-        if old_val is not None:
-            os.environ["PROMETHEUS_MULTIPROC_DIR"] = old_val
-        else:
-            os.environ.pop("PROMETHEUS_MULTIPROC_DIR", None)
 
 
 # ---------------------------------------------------------------------------
@@ -236,9 +209,9 @@ def test_gauge_registered_without_model_label() -> None:
 def test_no_model_transformation_code() -> None:
     """No __ALL_MODELS__ → \"shared\" transformation code remains in prometheus.py."""
     source = inspect.getsource(prometheus_module)
-    assert (
-        "__ALL_MODELS__" not in source
-    ), "prometheus.py still contains __ALL_MODELS__ transformation code"
+    assert "__ALL_MODELS__" not in source, (
+        "prometheus.py still contains __ALL_MODELS__ transformation code"
+    )
 
     # Verify the collect_from_db method has no transformation logic
     collect_source = inspect.getsource(PrometheusMetricsCollector.collect_from_db)

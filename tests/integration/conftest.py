@@ -1,5 +1,10 @@
-"""Shared helpers for integration tests."""
+"""Shared helpers for integration tests.
 
+Provides helper functions for gateway tests and the
+``_isolate_metrics_collector`` autouse fixture for metrics isolation.
+"""
+
+from collections.abc import Generator
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -13,6 +18,7 @@ from src.config.schemas import (
     RetryPolicyConfig,
 )
 from src.core.constants import DebugMode, StreamingMode
+from src.metrics import reset_collector
 
 
 def make_mock_request(
@@ -84,3 +90,21 @@ def inject_helpers(request):
     """Inject shared helper functions into the test module's namespace."""
     request.module.make_mock_request = make_mock_request
     request.module.create_mock_provider_config = create_mock_provider_config
+
+
+@pytest.fixture(autouse=True)
+def _isolate_metrics_collector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> Generator[None]:
+    """Reset the collector singleton and clean env vars before and after each test.
+
+    Uses ``monkeypatch.delenv()`` for pytest-native environment isolation
+    that auto-restores values after the test completes.
+    """
+    reset_collector()
+    monkeypatch.delenv("METRICS_BACKEND", raising=False)
+    monkeypatch.delenv("PROMETHEUS_MULTIPROC_DIR", raising=False)
+    yield
+    reset_collector()
+    monkeypatch.delenv("METRICS_BACKEND", raising=False)
+    monkeypatch.delenv("PROMETHEUS_MULTIPROC_DIR", raising=False)

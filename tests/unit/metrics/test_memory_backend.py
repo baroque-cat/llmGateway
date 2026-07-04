@@ -17,7 +17,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from src.core.interfaces import IGauge
-from src.metrics import get_collector, reset_collector
+from src.metrics import get_collector
 from src.metrics.backends.memory import MemoryMetricsCollector
 from src.metrics.registry import KEY_STATUS_TOTAL
 
@@ -131,18 +131,6 @@ async def test_collect_from_db_no_op() -> None:
 
 
 # --- Test moved from integration/test_keeper_metrics_endpoint.py ---
-
-
-@pytest.fixture(autouse=True)
-def _isolate_collector_for_memory_backend():
-    """Reset the collector singleton and clean env vars between tests."""
-    reset_collector()
-    for key in ("PROMETHEUS_MULTIPROC_DIR", "METRICS_BACKEND"):
-        os.environ.pop(key, None)
-    yield
-    reset_collector()
-    for key in ("PROMETHEUS_MULTIPROC_DIR", "METRICS_BACKEND"):
-        os.environ.pop(key, None)
 
 
 def test_keeper_metrics_with_memory_collector():

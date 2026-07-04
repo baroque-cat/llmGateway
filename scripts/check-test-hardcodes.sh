@@ -119,6 +119,13 @@ EXCLUDE_FILES=(
     "test_boundary_compliance.py"
     "test_hardcode_checker_regression.py"
     "test_docker_test_db.py"
+    # Phase 5 gatekeeper test files (self-exclusion — they contain banned
+    # patterns as test data for assertion construction)
+    "test_security.py"
+    "test_ci_pipeline.py"
+    "test_layer_import_scan.py"
+    "test_pre_commit_config.py"
+    "test_metrics_fixture_dedup.py"
     # Pre-existing violations: tests/unit/ (canonical mode — strict, no annotations)
     # These files use production URLs, wrong provider types, and/or obsolete model
     # names (especially "gpt-4" as a generic test fixture) for URL construction,

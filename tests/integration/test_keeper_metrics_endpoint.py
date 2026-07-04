@@ -10,13 +10,10 @@ Tests:
   IT-KM05: No auth required (internal network)
 """
 
-import os
-
 import pytest
 from prometheus_client import Gauge, make_asgi_app
 from prometheus_client.core import CollectorRegistry
 
-from src.metrics import reset_collector
 from src.metrics.registry import (
     ADAPTIVE_BATCH_SIZE,
     DB_DEAD_TUPLES,
@@ -44,19 +41,6 @@ def keeper_metrics_app(fresh_registry):
     """
     app = make_asgi_app(registry=fresh_registry)
     return app
-
-
-@pytest.fixture(autouse=True)
-def _isolate_collector():
-    """Reset the collector singleton and clean env vars between tests."""
-    reset_collector()
-
-    for key in ("PROMETHEUS_MULTIPROC_DIR", "METRICS_BACKEND"):
-        os.environ.pop(key, None)
-    yield
-    reset_collector()
-    for key in ("PROMETHEUS_MULTIPROC_DIR", "METRICS_BACKEND"):
-        os.environ.pop(key, None)
 
 
 # ---------------------------------------------------------------------------
