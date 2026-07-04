@@ -1,0 +1,28 @@
+# Pre-commit hooks for llmGateway.
+#
+# Install:  pre-commit install
+# Run:      pre-commit run --all-files
+#
+# Hooks:
+#   ruff          — lint + auto-fix (src/, tests/, main.py)
+#   ruff-format   — format check (src/, tests/, main.py)
+#   ban-test-hardcodes — gatekeeper script, blocks commits with banned test values
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.11.0
+    hooks:
+      - id: ruff
+        args: [check, --fix]
+        files: ^(src|tests|main\.py)/
+      - id: ruff-format
+        files: ^(src|tests|main\.py)/
+
+  - repo: local
+    hooks:
+      - id: ban-test-hardcodes
+        name: Ban hardcoded test values
+        entry: bash scripts/check-test-hardcodes.sh
+        language: system
+        files: ^tests/
+        pass_filenames: false

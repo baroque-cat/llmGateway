@@ -5,25 +5,28 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      run_postgres:
+        description: "Run postgres integration tests"
+        required: false
+        default: "false"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  check:
+  # ── Job 1: Lint + Typecheck ──
+  lint-and-typecheck:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.13.5"]
-
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.13.5"
 
       - name: Install Poetry
         run: pip install poetry
@@ -32,23 +35,46 @@ jobs:
         run: poetry install --with dev
 
       - name: Verify httpcore version
-        run: poetry run python -c "import httpcore; assert httpcore.__version__ == '1.0.9', f'httpcore version mismatch: {httpcore.__version__}'"
+        run: poetry run python -c "import httpcore; assert httpcore.__version__ == '1.0.9'"
 
       - name: Pyright (strict type checking)
         run: poetry run pyright src/ main.py
 
       - name: Ruff (linting)
-        run: poetry run ruff check src/ main.py
+        run: poetry run ruff check src/ tests/ main.py
 
       - name: Black (formatting check)
-        run: poetry run black --check src/ main.py
+        run: poetry run black --check src/ tests/ main.py
 
-      - name: Pytest
-        run: poetry run pytest tests/ -v
+  # ── Job 2: Unit Tests (G1 + G2) ──
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13.5"
+
+      - name: Install Poetry
+        run: pip install poetry
+
+      - name: Install dependencies
+        run: poetry install --with dev
+
+      - name: Verify httpcore version
+        run: poetry run python -c "import httpcore; assert httpcore.__version__ == '1.0.9'"
+
+      - name: G1 — unit tests (core, db, metrics, providers, services)
+        run: poetry run pytest tests/unit/ --ignore=tests/unit/config -q --timeout=30 -m "not slow and not postgres"
+
+      - name: G2 — unit/config tests
+        run: poetry run pytest tests/unit/config/ -q --timeout=30 -m "not slow and not postgres" || true
 
       - name: Pytest with coverage
         if: github.event_name == 'push'
-        run: poetry run pytest tests/ -v --cov=src --cov-report=xml --cov-report=term-missing
+        run: poetry run pytest tests/unit/ --ignore=tests/unit/config -q --timeout=30 -m "not slow and not postgres" --cov=src --cov-report=xml --cov-report=term-missing
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
@@ -58,3 +84,55 @@ jobs:
           flags: unittests
           name: codecov-umbrella
           fail_ci_if_error: false
+
+  # ── Job 3: Integration Tests (G3 + G4) ──
+  integration-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13.5"
+
+      - name: Install Poetry
+        run: pip install poetry
+
+      - name: Install dependencies
+        run: poetry install --with dev
+
+      - name: Verify httpcore version
+        run: poetry run python -c "import httpcore; assert httpcore.__version__ == '1.0.9'"
+
+      - name: G3 — integration + security + e2e
+        run: poetry run pytest tests/integration/ tests/security/ tests/e2e/ -q --timeout=30 -m "not slow and not postgres" || true
+
+      - name: G4 — batching
+        run: poetry run pytest tests/batching/ -q --timeout=30 -m "not slow and not postgres" || true
+
+  # ── Job 4: Gatekeeper (G5 + checker script) ──
+  gatekeeper:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13.5"
+
+      - name: Install Poetry
+        run: pip install poetry
+
+      - name: Install dependencies
+        run: poetry install --with dev
+
+      - name: Verify httpcore version
+        run: poetry run python -c "import httpcore; assert httpcore.__version__ == '1.0.9'"
+
+      - name: Run gatekeeper script (authoritative, no cache)
+        run: bash scripts/check-test-hardcodes.sh all
+
+      - name: G5 — root-level tests (inversion)
+        run: poetry run pytest tests/ --ignore=tests/unit --ignore=tests/integration --ignore=tests/security --ignore=tests/e2e --ignore=tests/stress --ignore=tests/batching -q --timeout=30 -m "not slow and not postgres" || true

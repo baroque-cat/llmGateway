@@ -8,7 +8,7 @@ behaviour and the rejection of the removed ``models`` field.
 import pytest
 from pydantic import ValidationError
 
-from src.config.schemas import Config, ModelInfo, ProviderConfig
+from src.config.schemas import Config, ModelInfo
 
 
 class TestDefaultModelDict:

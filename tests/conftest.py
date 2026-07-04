@@ -123,7 +123,7 @@ _CHECKER_SCAN_DIRS: list[Path] = [
     Path("tests"),
 ]
 
-_SUMMARY_LINE: str = "\nAll test hardcode checks passed\n"
+_SUMMARY_LINE: str = "\nAll test hardcode checks passed\n\n"
 
 type _CheckerCache = types.MappingProxyType[str, CheckerResult]
 

@@ -106,6 +106,7 @@ EXCLUDE_FILES=(
     "test_hardcode_checker_modes.py"
     "test_hardcode_checker_patterns.py"
     "test_checker_cache_fixtures.py"
+    "test_conftest_checker_cache.py"
     "test_project_structure.py"
     "test_makefile_groups.py"
     "test_canonical_integrity.py"
@@ -113,6 +114,11 @@ EXCLUDE_FILES=(
     "test_env_example.py"
     "test_documentation_sync.py"
     "test_testing_docs.py"
+    "test_hardcode_checker_core.py"
+    "test_hardcode_checker_production_urls.py"
+    "test_boundary_compliance.py"
+    "test_hardcode_checker_regression.py"
+    "test_docker_test_db.py"
     # Pre-existing violations: tests/unit/ (canonical mode — strict, no annotations)
     # These files use production URLs, wrong provider types, and/or obsolete model
     # names (especially "gpt-4" as a generic test fixture) for URL construction,

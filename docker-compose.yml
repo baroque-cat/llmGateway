@@ -74,6 +74,27 @@ services:
       - no-new-privileges:true
     # Keeper exposes internal /metrics on port 9090 (not mapped externally)
 
+  # ── Test database (for --run-postgres integration tests) ──
+  # Separate service on port 5433 to avoid conflicts with production database.
+  # Uses test-safe credentials matching CanonicalConfig.
+  test-database:
+    image: postgres:18-alpine
+    container_name: llmgateway_test_db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=test_user
+      - POSTGRES_PASSWORD=test_password
+      - POSTGRES_DB=test_db
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test_user -d test_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - llmgateway_net
+
 volumes:
   pg_data:
 

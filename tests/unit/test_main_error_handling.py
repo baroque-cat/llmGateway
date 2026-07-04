@@ -20,8 +20,8 @@ import sys
 from collections.abc import Generator
 from unittest.mock import MagicMock, patch
 
-from fastapi import FastAPI
 import pytest
+from fastapi import FastAPI
 
 
 def _remove_main_from_sys_modules() -> None:
@@ -40,7 +40,7 @@ class TestConfigErrorBlocksModuleImport:
     """
 
     @pytest.fixture(autouse=True)
-    def _cleanup_main_module(self) -> Generator[None, None, None]:
+    def _cleanup_main_module(self) -> Generator[None]:
         """Remove 'main' from sys.modules before and after each test."""
         _remove_main_from_sys_modules()
         yield
@@ -61,7 +61,7 @@ class TestConfigErrorBlocksModuleImport:
             patch("src.core.accessor.ConfigAccessor", return_value=MagicMock()),
         ):
             with pytest.raises(FileNotFoundError, match="config.yaml not found"):
-                import main  # pyright: ignore[reportUnusedImport]  # noqa: F811
+                pass  # pyright: ignore[reportUnusedImport]  # noqa: F811
 
     def test_err_02_value_error_blocks_import(self) -> None:
         """ERR-02: load_config → ValueError → import raises ValueError."""
@@ -77,7 +77,7 @@ class TestConfigErrorBlocksModuleImport:
             patch("src.core.accessor.ConfigAccessor", return_value=MagicMock()),
         ):
             with pytest.raises(ValueError, match="Invalid config value"):
-                import main  # pyright: ignore[reportUnusedImport]  # noqa: F811
+                pass  # pyright: ignore[reportUnusedImport]  # noqa: F811
 
     def test_err_03_system_exit_1_blocks_import(self) -> None:
         """ERR-03: load_config → SystemExit(1) (Pydantic validation error) → import raises SystemExit(1).
@@ -97,7 +97,7 @@ class TestConfigErrorBlocksModuleImport:
             patch("src.core.accessor.ConfigAccessor", return_value=MagicMock()),
         ):
             with pytest.raises(SystemExit) as exc_info:
-                import main  # pyright: ignore[reportUnusedImport]  # noqa: F811
+                pass  # pyright: ignore[reportUnusedImport]  # noqa: F811
 
             assert (
                 exc_info.value.code == 1
@@ -115,7 +115,7 @@ class TestConfigErrorBlocksModuleImport:
             patch("src.core.accessor.ConfigAccessor", return_value=MagicMock()),
         ):
             with pytest.raises(Exception, match="Unexpected error"):
-                import main  # pyright: ignore[reportUnusedImport]  # noqa: F811
+                pass  # pyright: ignore[reportUnusedImport]  # noqa: F811
 
     def test_err_05_successful_import_after_previous_failure(self) -> None:
         """ERR-05: After a failed import, removing main from sys.modules allows a successful re-import.

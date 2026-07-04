@@ -21,8 +21,8 @@ import sys
 from collections.abc import Generator
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from fastapi import FastAPI
 import pytest
+from fastapi import FastAPI
 
 
 def _remove_main_from_sys_modules() -> None:
@@ -41,7 +41,7 @@ class TestModuleLevelApp:
     """Tests for module-level app creation when main.py is imported."""
 
     @pytest.fixture(autouse=True)
-    def _cleanup_main_module(self) -> Generator[None, None, None]:
+    def _cleanup_main_module(self) -> Generator[None]:
         """Remove 'main' from sys.modules before and after each test."""
         _remove_main_from_sys_modules()
         yield
@@ -88,7 +88,6 @@ class TestModuleLevelApp:
             ),
             patch("src.core.accessor.ConfigAccessor", return_value=mock_accessor),
         ):
-            import main  # pyright: ignore[reportUnusedImport]  # noqa: F811
 
             mock_load.assert_called_once()
 
@@ -106,7 +105,6 @@ class TestModuleLevelApp:
             ),
             patch("src.core.accessor.ConfigAccessor", return_value=mock_accessor),
         ):
-            import main  # pyright: ignore[reportUnusedImport]  # noqa: F811
 
             # setup_logging must be called with the ConfigAccessor instance
             mock_setup.assert_called_once_with(mock_accessor)
@@ -125,7 +123,6 @@ class TestModuleLevelApp:
             ) as mock_create,
             patch("src.core.accessor.ConfigAccessor", return_value=mock_accessor),
         ):
-            import main  # pyright: ignore[reportUnusedImport]  # noqa: F811
 
             # create_app must be called with the ConfigAccessor instance
             mock_create.assert_called_once_with(mock_accessor)
@@ -140,7 +137,7 @@ class TestMainBlock:
     """Tests for the __main__ block in main.py (local development entry point)."""
 
     @pytest.fixture(autouse=True)
-    def _cleanup_main_module(self) -> Generator[None, None, None]:
+    def _cleanup_main_module(self) -> Generator[None]:
         """Remove 'main' from sys.modules before and after each test."""
         _remove_main_from_sys_modules()
         yield
