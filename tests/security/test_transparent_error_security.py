@@ -15,7 +15,7 @@ import httpx
 import pytest
 
 from src.core.constants import ErrorReason
-from src.core.models import CheckResult
+from src.core.models import CheckResult, RequestDetails
 from src.services.gateway.response_forwarder import (
     _HOP_BY_HOP_HEADERS,
     UpstreamAttempt,
@@ -584,9 +584,7 @@ class TestSignatureContractEnforcement:
 
             async def parse_request_details(
                 self, path: str, content: bytes
-            ) -> "RequestDetails":
-                from src.core.models import RequestDetails
-
+            ) -> RequestDetails:
                 return RequestDetails(model_name="test-model")
 
             def _get_headers(self, token: str) -> dict[str, str] | None:

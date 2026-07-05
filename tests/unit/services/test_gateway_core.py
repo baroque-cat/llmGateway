@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 import httpx
 import pytest
 from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from starlette.responses import StreamingResponse
 
@@ -460,8 +461,8 @@ class TestPoolHealthLogLoop:
         """Health log emits the aggregate HTTP_POOL_HEALTH summary line plus
         one HTTP_POOL_CONN line per connection with label/state/protocol/streams.
 
-        Verifies the new per-connection breakdown format introduced by the
-        h2-per-provider-stream-cap change.
+        Spec scenario: Health log line format — verifies the per-connection
+        breakdown format introduced by the h2-per-provider-stream-cap change.
         """
         mock_factory = MagicMock()
         mock_factory.get_pool_health_summary.return_value = {
@@ -539,7 +540,8 @@ class TestPoolHealthLogLoop:
     async def test_health_logging_respects_interval(self):
         """Background task sleeps for the configured interval between iterations.
 
-        Each ``asyncio.sleep`` call must use the interval value passed to
+        Spec scenario: Health logging respects configured interval — each
+        ``asyncio.sleep`` call must use the interval value passed to
         ``_pool_health_log_loop``.
         """
         mock_factory = MagicMock()
@@ -583,8 +585,10 @@ class TestPoolHealthLogLoop:
         """When pool_health_log_interval_sec is 0, no health task is started
         and no health log lines are emitted.
 
-        The lifespan startup code guards task creation with ``if interval > 0``,
-        so a zero interval must skip ``_pool_health_log_loop`` entirely.
+        Spec scenario: Health logging disabled when interval is zero — the
+        lifespan startup code guards task creation with
+        ``isinstance(interval, int) and interval > 0``, so a zero interval
+        must skip ``_pool_health_log_loop`` entirely.
         """
         accessor = MagicMock()
         accessor.get_enabled_providers = Mock(return_value={})
@@ -604,6 +608,10 @@ class TestPoolHealthLogLoop:
                 new=AsyncMock(),
             ),
             patch(
+                "src.services.gateway.gateway_service.database.close_db_pool",
+                new=AsyncMock(),
+            ),
+            patch(
                 "src.services.gateway.gateway_service.DatabaseManager"
             ) as mock_dm_cls,
             patch(
@@ -620,7 +628,7 @@ class TestPoolHealthLogLoop:
             mock_gc_cls.return_value.populate_caches = AsyncMock()
 
             # Set pool_health_log_interval_sec to 0 on the factory instance
-            # to avoid the pre-existing MagicMock > int TypeError in lifespan.
+            # to verify that a zero interval disables the health log loop.
             mock_factory_instance = MagicMock()
             mock_factory_instance._pool_health_log_interval_sec = 0
             mock_factory_instance.close_all = AsyncMock()
@@ -628,19 +636,176 @@ class TestPoolHealthLogLoop:
 
             app = create_app(accessor)
 
-            # Trigger the lifespan (startup + shutdown) via ASGI transport
-            transport = httpx.ASGITransport(app=app)
-            async with httpx.AsyncClient(transport=transport, base_url="http://test"):
-                # Lifespan has started — check that no health task was created
-                assert not hasattr(
-                    app.state, "pool_health_task"
-                ), "pool_health_task should NOT be set when interval is 0"
+            # Trigger the lifespan (startup + shutdown) via TestClient
+            with TestClient(app):
+                pass
 
-        # After full lifespan (shutdown included), verify no health log lines
+            # After full lifespan (shutdown included), verify no health task
+            assert not hasattr(
+                app.state, "pool_health_task"
+            ), "pool_health_task should NOT be set when interval is 0"
+
+        # Verify no health log lines were emitted
         health_logs = [r for r in caplog.records if "HTTP_POOL_HEALTH" in r.message]
         assert (
             len(health_logs) == 0
         ), f"Expected 0 HTTP_POOL_HEALTH log lines, got {len(health_logs)}"
+
+    @pytest.mark.asyncio
+    async def test_health_logging_disabled_when_attribute_inaccessible(self, caplog):
+        """When the factory's _pool_health_log_interval_sec attribute is
+        inaccessible (e.g. a bare MagicMock without explicit attribute),
+        the health task is NOT started and no TypeError is raised.
+
+        Spec scenario: Health logging disabled when interval attribute is
+        inaccessible. Primary regression test for P0-A fix: ``getattr`` with
+        fallback returns a MagicMock (not 0), but ``isinstance(interval, int)``
+        guards against non-integer types.
+        """
+        accessor = MagicMock()
+        accessor.get_enabled_providers = Mock(return_value={})
+        accessor.get_database_dsn = Mock(
+            return_value="postgresql://test:test@localhost/test"
+        )
+        accessor.get_pool_config = Mock()
+        accessor.get_pool_config.return_value.min_size = 2
+        accessor.get_pool_config.return_value.max_size = 5
+        accessor.get_metrics_config = Mock()
+        accessor.get_metrics_config.return_value.enabled = False
+        accessor.get_metrics_config.return_value.access_token = None
+
+        with (
+            patch(
+                "src.services.gateway.gateway_service.database.init_db_pool",
+                new=AsyncMock(),
+            ),
+            patch(
+                "src.services.gateway.gateway_service.database.close_db_pool",
+                new=AsyncMock(),
+            ),
+            patch(
+                "src.services.gateway.gateway_service.DatabaseManager"
+            ) as mock_dm_cls,
+            patch(
+                "src.services.gateway.gateway_service.HttpClientFactory",
+            ) as mock_hcf_cls,
+            patch("src.services.gateway.gateway_service.GatewayCache") as mock_gc_cls,
+            patch(
+                "src.services.gateway.gateway_service._cache_refresh_loop",
+                new=AsyncMock(),
+            ),
+            caplog.at_level(logging.INFO),
+        ):
+            mock_dm_cls.return_value.wait_for_schema_ready = AsyncMock()
+            mock_gc_cls.return_value.populate_caches = AsyncMock()
+
+            # Bare MagicMock — _pool_health_log_interval_sec is NOT set;
+            # getattr returns a MagicMock, isinstance(int) is False, loop skipped.
+            mock_factory_instance = MagicMock()
+            mock_factory_instance.close_all = AsyncMock()
+            mock_hcf_cls.return_value = mock_factory_instance
+
+            app = create_app(accessor)
+
+            # Trigger the lifespan (startup + shutdown) via TestClient
+            with TestClient(app):
+                pass
+
+            assert not hasattr(app.state, "pool_health_task"), (
+                "pool_health_task should NOT be set when " "attribute is inaccessible"
+            )
+
+        health_logs = [r for r in caplog.records if "HTTP_POOL_HEALTH" in r.message]
+        assert (
+            len(health_logs) == 0
+        ), f"Expected 0 HTTP_POOL_HEALTH log lines, got {len(health_logs)}"
+
+    @pytest.mark.asyncio
+    async def test_real_factory_starts_health_loop(self):
+        """When HttpClientFactory has _pool_health_log_interval_sec=60 (a real
+        positive int), the health logging background task IS started.
+
+        Spec scenario: Real HttpClientFactory starts health loop normally.
+        """
+        accessor = MagicMock()
+        accessor.get_enabled_providers = Mock(return_value={})
+        accessor.get_database_dsn = Mock(
+            return_value="postgresql://test:test@localhost/test"
+        )
+        accessor.get_pool_config = Mock()
+        accessor.get_pool_config.return_value.min_size = 2
+        accessor.get_pool_config.return_value.max_size = 5
+        accessor.get_metrics_config = Mock()
+        accessor.get_metrics_config.return_value.enabled = False
+        accessor.get_metrics_config.return_value.access_token = None
+
+        with (
+            patch(
+                "src.services.gateway.gateway_service.database.init_db_pool",
+                new=AsyncMock(),
+            ),
+            patch(
+                "src.services.gateway.gateway_service.database.close_db_pool",
+                new=AsyncMock(),
+            ),
+            patch(
+                "src.services.gateway.gateway_service.DatabaseManager"
+            ) as mock_dm_cls,
+            patch(
+                "src.services.gateway.gateway_service.HttpClientFactory",
+            ) as mock_hcf_cls,
+            patch("src.services.gateway.gateway_service.GatewayCache") as mock_gc_cls,
+            patch(
+                "src.services.gateway.gateway_service._cache_refresh_loop",
+                new=AsyncMock(),
+            ),
+            patch(
+                "src.services.gateway.gateway_service._pool_health_log_loop",
+                new=AsyncMock(),
+            ),
+        ):
+            mock_dm_cls.return_value.wait_for_schema_ready = AsyncMock()
+            mock_gc_cls.return_value.populate_caches = AsyncMock()
+
+            # Real int value — isinstance passes, interval > 0, health task started.
+            mock_factory_instance = MagicMock()
+            mock_factory_instance._pool_health_log_interval_sec = 60
+            mock_factory_instance.close_all = AsyncMock()
+            mock_hcf_cls.return_value = mock_factory_instance
+
+            app = create_app(accessor)
+
+            # Trigger the lifespan (startup + shutdown) via TestClient
+            with TestClient(app):
+                pass
+
+            # After lifespan, verify the health task was created
+            assert hasattr(
+                app.state, "pool_health_task"
+            ), "pool_health_task should be set when interval is 60"
+            assert app.state.pool_health_task is not None
+
+    def test_mocked_factory_falls_back_gracefully(self):
+        """A bare MagicMock's auto-created attribute is caught by isinstance guard.
+
+        Spec scenario: Mocked HttpClientFactory falls back gracefully.
+        ``getattr(MagicMock(), "_pool_health_log_interval_sec", 0)`` returns
+        a MagicMock (not 0), but ``isinstance(ret, int)`` is False, so the
+        ``and`` short-circuits to False and the health loop is skipped.
+        """
+        factory = MagicMock()
+        interval = getattr(factory, "_pool_health_log_interval_sec", 0)
+
+        # MagicMock auto-creates the attribute, so getattr does NOT return 0
+        assert not isinstance(
+            interval, int
+        ), "MagicMock auto-attribute should not be an int"
+        assert isinstance(
+            interval, MagicMock
+        ), "getattr on MagicMock should return a MagicMock, not the fallback 0"
+
+        # The isinstance guard prevents the health loop from starting
+        assert not (isinstance(interval, int) and interval > 0)
 
 
 # ---------------------------------------------------------------------------

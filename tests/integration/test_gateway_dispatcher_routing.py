@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from src.config.schemas import ModelInfo
 from src.core.constants import DebugMode, StreamingMode
+from tests.integration._helpers import create_mock_provider_config
 
 
 @pytest.fixture

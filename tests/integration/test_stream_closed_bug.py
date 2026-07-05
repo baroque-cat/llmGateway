@@ -40,6 +40,7 @@ from src.services.gateway.response_forwarder import (
     UpstreamAttempt,
     forward_error_to_client,
 )
+from tests.integration._helpers import make_mock_request
 
 
 def create_provider_config(

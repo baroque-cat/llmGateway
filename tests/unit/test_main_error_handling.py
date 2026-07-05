@@ -59,9 +59,9 @@ class TestConfigErrorBlocksModuleImport:
                 return_value=MagicMock(spec=FastAPI),
             ),
             patch("src.core.accessor.ConfigAccessor", return_value=MagicMock()),
+            pytest.raises(FileNotFoundError, match="config.yaml not found"),
         ):
-            with pytest.raises(FileNotFoundError, match="config.yaml not found"):
-                import main  # noqa: F811, F401
+            import main  # noqa: F811, F401
 
     def test_err_02_value_error_blocks_import(self) -> None:
         """ERR-02: load_config → ValueError → import raises ValueError."""
@@ -75,9 +75,9 @@ class TestConfigErrorBlocksModuleImport:
                 return_value=MagicMock(spec=FastAPI),
             ),
             patch("src.core.accessor.ConfigAccessor", return_value=MagicMock()),
+            pytest.raises(ValueError, match="Invalid config value"),
         ):
-            with pytest.raises(ValueError, match="Invalid config value"):
-                import main  # noqa: F811, F401
+            import main  # noqa: F811, F401
 
     def test_err_03_system_exit_1_blocks_import(self) -> None:
         """ERR-03: load_config → SystemExit(1) (Pydantic validation error) → import raises SystemExit(1).
@@ -113,9 +113,9 @@ class TestConfigErrorBlocksModuleImport:
                 return_value=MagicMock(spec=FastAPI),
             ),
             patch("src.core.accessor.ConfigAccessor", return_value=MagicMock()),
+            pytest.raises(Exception, match="Unexpected error"),
         ):
-            with pytest.raises(Exception, match="Unexpected error"):
-                import main  # noqa: F811, F401
+            import main  # noqa: F811, F401
 
     def test_err_05_successful_import_after_previous_failure(self) -> None:
         """ERR-05: After a failed import, removing main from sys.modules allows a successful re-import.
@@ -132,9 +132,9 @@ class TestConfigErrorBlocksModuleImport:
                 return_value=MagicMock(spec=FastAPI),
             ),
             patch("src.core.accessor.ConfigAccessor", return_value=MagicMock()),
+            pytest.raises(FileNotFoundError),
         ):
-            with pytest.raises(FileNotFoundError):
-                import main  # noqa: F811
+            import main  # noqa: F811
 
         # main should NOT be in sys.modules after a failed import
         assert (

@@ -54,6 +54,7 @@ from src.config.schemas import (
 )
 from src.core.constants import ErrorReason
 from src.core.models import CheckResult
+from tests.integration._helpers import make_mock_request
 
 
 def create_provider_config_with_catch_all_rule() -> ProviderConfig:

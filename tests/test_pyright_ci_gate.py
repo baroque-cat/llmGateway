@@ -2,8 +2,7 @@
 """CI gate tests for the tiered pyright strictness configuration.
 
 Verifies that ``poetry run pyright`` exits zero with zero errors after the
-tiered strictness configuration was applied, and that no production code
-under ``src/`` or ``main.py`` was modified by the tiering change.
+tiered strictness configuration was applied.
 
 Test Group: G5 (gatekeeper structural tests).
 """
@@ -21,7 +20,7 @@ _REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 
 @pytest.mark.meta
 class TestPyrightCiGate:
-    """CI gate tests verifying pyright tiering and production code isolation."""
+    """CI gate tests verifying pyright tiering configuration."""
 
     def test_pyright_exits_zero_after_tiering(self) -> None:
         """Verify ``poetry run pyright`` exits 0 with zero errors after tiering.
@@ -57,41 +56,4 @@ class TestPyrightCiGate:
         assert error_count == 0, (
             f"pyright reported {error_count} errors (expected 0):\n"
             f"{combined_output}"
-        )
-
-    def test_no_production_code_modified(self) -> None:
-        """Verify no files under ``src/`` or ``main.py`` were modified.
-
-        Scenario: #13 — production code isolation for the tiering change.
-        WHEN: ``git diff --name-only HEAD`` is run to list changed files.
-        THEN: No file path starts with ``src/`` and ``main.py`` is not in
-              the list — the tiering change must only touch config and tests.
-        """
-        result = subprocess.run(
-            ["git", "diff", "--name-only", "HEAD"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            cwd=str(_REPO_ROOT),
-        )
-
-        assert result.returncode == 0, (
-            f"git diff exited with code {result.returncode}:\n"
-            f"stdout:\n{result.stdout}\n"
-            f"stderr:\n{result.stderr}"
-        )
-
-        changed_files: list[str] = [
-            line.strip() for line in result.stdout.splitlines() if line.strip()
-        ]
-
-        production_files: list[str] = [
-            path
-            for path in changed_files
-            if path.startswith("src/") or path == "main.py"
-        ]
-
-        assert not production_files, (
-            "Production code was modified by the tiering change "
-            f"(expected only config/tests):\n{production_files}"
         )

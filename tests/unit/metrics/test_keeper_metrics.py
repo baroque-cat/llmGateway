@@ -106,11 +106,13 @@ class TestKeeperDBMetricsLoop:
         mock_collector = MagicMock(spec=IMetricsCollector)
         mock_collector.collect_from_db = AsyncMock()
 
-        with patch("src.services.keeper.get_collector", return_value=mock_collector):
-            # Cancel after first sleep to simulate one iteration
-            with patch("asyncio.sleep", side_effect=asyncio.CancelledError):
-                with pytest.raises(asyncio.CancelledError):
-                    await _collect_db_metrics_loop(mock_db_manager, interval_sec=30)
+        # Cancel after first sleep to simulate one iteration
+        with (
+            patch("src.services.keeper.get_collector", return_value=mock_collector),
+            patch("asyncio.sleep", side_effect=asyncio.CancelledError),
+            pytest.raises(asyncio.CancelledError),
+        ):
+            await _collect_db_metrics_loop(mock_db_manager, interval_sec=30)
 
         mock_collector.collect_from_db.assert_called_once_with(mock_db_manager)
 
@@ -128,10 +130,12 @@ class TestKeeperDBMetricsLoop:
             if iteration >= 2:
                 raise asyncio.CancelledError()
 
-        with patch("src.services.keeper.get_collector", return_value=mock_collector):
-            with patch("asyncio.sleep", side_effect=mock_sleep):
-                with pytest.raises(asyncio.CancelledError):
-                    await _collect_db_metrics_loop(mock_db_manager, interval_sec=30)
+        with (
+            patch("src.services.keeper.get_collector", return_value=mock_collector),
+            patch("asyncio.sleep", side_effect=mock_sleep),
+            pytest.raises(asyncio.CancelledError),
+        ):
+            await _collect_db_metrics_loop(mock_db_manager, interval_sec=30)
 
         # collect_from_db was called at least once despite the error
         assert mock_collector.collect_from_db.call_count >= 1
@@ -142,10 +146,12 @@ class TestKeeperDBMetricsLoop:
         mock_collector = MagicMock(spec=IMetricsCollector)
         mock_collector.collect_from_db = AsyncMock()
 
-        with patch("src.services.keeper.get_collector", return_value=mock_collector):
-            with patch("asyncio.sleep", side_effect=asyncio.CancelledError):
-                with pytest.raises(asyncio.CancelledError):
-                    await _collect_db_metrics_loop(mock_db_manager, interval_sec=30)
+        with (
+            patch("src.services.keeper.get_collector", return_value=mock_collector),
+            patch("asyncio.sleep", side_effect=asyncio.CancelledError),
+            pytest.raises(asyncio.CancelledError),
+        ):
+            await _collect_db_metrics_loop(mock_db_manager, interval_sec=30)
 
         # Only one collect_from_db call (before the sleep that cancelled)
         mock_collector.collect_from_db.assert_called_once_with(mock_db_manager)

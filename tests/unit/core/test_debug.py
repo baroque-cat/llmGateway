@@ -12,4 +12,4 @@ def test_debug_mode_constants():
 
     # Verify HEADERS_ONLY does NOT exist (removed in refactor)
     with pytest.raises(AttributeError):
-        DebugMode.HEADERS_ONLY
+        _ = DebugMode.HEADERS_ONLY

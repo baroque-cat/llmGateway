@@ -331,7 +331,7 @@ class TestAnthropicProvider:
         ) as mock_refine:
             mock_refine.return_value = ErrorReason.INVALID_KEY
 
-            result = await provider.check(
+            await provider.check(
                 mock_client, "test_token", model="claude-3-opus-20240229"
             )
 

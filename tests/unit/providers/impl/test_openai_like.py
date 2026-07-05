@@ -311,7 +311,7 @@ class TestOpenAILikeErrorParsing:
         ) as mock_refine:
             mock_refine.return_value = ErrorReason.INVALID_KEY
 
-            result = await provider.check(mock_client, "test_token", model="gpt-4")
+            await provider.check(mock_client, "test_token", model="gpt-4")
 
             # Verify _refine_error_reason was called
             mock_refine.assert_called_once()

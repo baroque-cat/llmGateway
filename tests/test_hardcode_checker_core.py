@@ -355,11 +355,11 @@ def test_all_mode_composition() -> None:
 # String-concatenated to avoid self-triggering pattern detection
 # Must be on a single line — grep -P .* does NOT match across newlines
 _NON_CANONICAL_DB_PASSWORD: str = (
-    'DatabaseConfig(' + 'host="x", ' + 'password="not_test_password")'
+    "DatabaseConfig(" + 'host="x", ' + 'password="not_test_password")'
 )
 
 _CANONICAL_DB_PASSWORD: str = (
-    'DatabaseConfig(' + 'host="x", ' + 'password="test_password")'
+    "DatabaseConfig(" + 'host="x", ' + 'password="test_password")'
 )
 
 
@@ -379,8 +379,7 @@ def test_canonical_detects_non_canonical_db_password() -> None:
             f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
         )
         assert "CANONICAL VIOLATION" in result.stdout, (
-            f"Expected CANONICAL VIOLATION in stdout.\n"
-            f"STDOUT:\n{result.stdout}"
+            f"Expected CANONICAL VIOLATION in stdout.\n" f"STDOUT:\n{result.stdout}"
         )
     finally:
         Path(tmp_path).unlink(missing_ok=True)
@@ -424,8 +423,7 @@ def test_boundary_detects_non_canonical_db_password() -> None:
             f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
         )
         assert "BOUNDARY VIOLATION" in result.stdout, (
-            f"Expected BOUNDARY VIOLATION in stdout.\n"
-            f"STDOUT:\n{result.stdout}"
+            f"Expected BOUNDARY VIOLATION in stdout.\n" f"STDOUT:\n{result.stdout}"
         )
     finally:
         Path(tmp_path).unlink(missing_ok=True)

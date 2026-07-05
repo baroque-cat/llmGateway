@@ -929,9 +929,13 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
             app.state.cache_refresh_task = task
 
             # Launch pool health logging background task.
+            # Use getattr with a fallback so the lifespan is resilient to
+            # HttpClientFactory substitution (e.g. test mocks). A bare
+            # MagicMock auto-creates any attribute, so an isinstance guard is
+            # required to ensure only real integers enable the health loop.
             factory = app.state.http_client_factory
-            interval = factory._pool_health_log_interval_sec
-            if interval > 0:
+            interval = getattr(factory, "_pool_health_log_interval_sec", 0)
+            if isinstance(interval, int) and interval > 0:
                 health_task = asyncio.create_task(
                     _pool_health_log_loop(factory, interval)
                 )

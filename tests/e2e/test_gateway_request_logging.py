@@ -145,7 +145,7 @@ async def test_gateway_request_logging():
             # The response should be streaming; we need to read it
             assert response.status_code == 200
             # Consume the response body to trigger streaming completion
-            response.content
+            _ = response.content
 
         # Verify that the GATEWAY_ACCESS log was emitted
         mock_logger.info.assert_called()

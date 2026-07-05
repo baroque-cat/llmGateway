@@ -11,6 +11,7 @@ from starlette.responses import StreamingResponse
 from src.config.schemas import ModelInfo
 from src.core.constants import ALL_MODELS_MARKER, ErrorReason, StreamingMode
 from src.core.models import CheckResult, RequestDetails
+from tests.integration._helpers import create_mock_provider_config
 
 
 @pytest.mark.asyncio

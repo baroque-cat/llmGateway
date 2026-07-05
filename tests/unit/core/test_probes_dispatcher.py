@@ -6,6 +6,7 @@ Covers the new "fire-and-forget" task management with timeout and cleanup.
 """
 
 import asyncio
+import contextlib
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -139,10 +140,8 @@ async def test_concurrency_skipping_provider_already_active(probe, mock_dependen
 
     # Clean up the long-running task
     mock_task.cancel()
-    try:
+    with contextlib.suppress(asyncio.CancelledError):
         await mock_task
-    except asyncio.CancelledError:
-        pass
 
 
 # ----------------------------------------------------------------------
@@ -217,21 +216,23 @@ async def test_timeout_handling_task_exceeds_timeout(probe, mock_dependencies):
     mock_accessor.get_health_policy.return_value = policy
 
     # Patch asyncio.wait_for to raise TimeoutError, simulating a timeout
-    with patch(
-        "src.core.probes.asyncio.wait_for",
-        side_effect=TimeoutError("simulated timeout"),
+    # Patch logger.error to capture timeout log
+    with (
+        patch(
+            "src.core.probes.asyncio.wait_for",
+            side_effect=TimeoutError("simulated timeout"),
+        ),
+        patch("src.core.probes.logger.error") as mock_error,
     ):
-        # Patch logger.error to capture timeout log
-        with patch("src.core.probes.logger.error") as mock_error:
-            await probe.run_cycle()
+        await probe.run_cycle()
 
-            # Give time for the wrapper's finally block to execute
-            await asyncio.sleep(0.01)
+        # Give time for the wrapper's finally block to execute
+        await asyncio.sleep(0.01)
 
-            # Verify that timeout error was logged
-            mock_error.assert_called_once_with(
-                f"Provider '{provider_name}' task timed out after 130 seconds. Task was cancelled."
-            )
+        # Verify that timeout error was logged
+        mock_error.assert_called_once_with(
+            f"Provider '{provider_name}' task timed out after 130 seconds. Task was cancelled."
+        )
 
     # Verify that active_tasks is cleaned up
     assert provider_name not in probe.active_tasks
@@ -316,10 +317,8 @@ async def test_multiple_providers_mixed_dispatch_and_skipping(probe, mock_depend
 
     # Clean up long-running task
     mock_task.cancel()
-    try:
+    with contextlib.suppress(asyncio.CancelledError):
         await mock_task
-    except asyncio.CancelledError:
-        pass
 
     # Verify that new provider task cleaned up
     assert new_provider not in probe.active_tasks

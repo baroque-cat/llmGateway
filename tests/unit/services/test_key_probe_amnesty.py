@@ -398,9 +398,11 @@ async def test_ut_g05_update_status_all_attempts_exhausted(
     }
     result = CheckResult.fail(ErrorReason.INVALID_KEY, "Invalid key")
 
-    with patch("asyncio.sleep", new_callable=AsyncMock):
-        with pytest.raises(InterfaceError):
-            await probe._update_resource_status(resource, result)
+    with (
+        patch("asyncio.sleep", new_callable=AsyncMock),
+        pytest.raises(InterfaceError),
+    ):
+        await probe._update_resource_status(resource, result)
 
     # Called 3 times (max_attempts=3)
     assert mock_db.keys.update_status.call_count == 3

@@ -54,9 +54,9 @@ class TestTestInfraPolish:
         Verifies that ``tests/unit/metrics/test_keeper_metrics.py`` exists as
         a regular file after the relocation.
         """
-        assert _METRICS_KEEPER_METRICS.is_file(), (
-            f"Expected {_METRICS_KEEPER_METRICS} to exist as a file"
-        )
+        assert (
+            _METRICS_KEEPER_METRICS.is_file()
+        ), f"Expected {_METRICS_KEEPER_METRICS} to exist as a file"
 
     def test_keeper_metrics_file_not_in_services_dir(self) -> None:
         """Relocation: ``test_keeper_metrics.py`` is gone from the services directory.
@@ -64,9 +64,9 @@ class TestTestInfraPolish:
         Verifies that ``tests/unit/services/test_keeper_metrics.py`` does NOT
         exist, confirming the file was moved rather than copied.
         """
-        assert not _SERVICES_KEEPER_METRICS.exists(), (
-            f"Expected {_SERVICES_KEEPER_METRICS} to NOT exist (file was moved)"
-        )
+        assert (
+            not _SERVICES_KEEPER_METRICS.exists()
+        ), f"Expected {_SERVICES_KEEPER_METRICS} to NOT exist (file was moved)"
 
     def test_mock_run_keeper_fixture_in_unit_conftest(self) -> None:
         """Fixture accessibility: ``mock_run_keeper_dependencies`` in unit conftest.
@@ -78,8 +78,7 @@ class TestTestInfraPolish:
         """
         conftest = _UNIT_CONFTEST.read_text()
         assert "def mock_run_keeper_dependencies" in conftest, (
-            "mock_run_keeper_dependencies fixture not defined in "
-            f"{_UNIT_CONFTEST}"
+            "mock_run_keeper_dependencies fixture not defined in " f"{_UNIT_CONFTEST}"
         )
 
     def test_makefile_has_test_gatekeeper_target(self) -> None:
@@ -90,9 +89,9 @@ class TestTestInfraPolish:
         tests while ignoring all subdirectories.
         """
         makefile = _MAKEFILE.read_text()
-        assert "test-gatekeeper:" in makefile, (
-            "test-gatekeeper target not found in Makefile"
-        )
+        assert (
+            "test-gatekeeper:" in makefile
+        ), "test-gatekeeper target not found in Makefile"
         assert _GATEKEEPER_COMMAND in makefile, (
             f"test-gatekeeper target does not run expected command: "
             f"{_GATEKEEPER_COMMAND}"
@@ -106,9 +105,9 @@ class TestTestInfraPolish:
         ``tests/test_boundary_compliance.py``.
         """
         makefile = _MAKEFILE.read_text()
-        assert "test-boundary:" in makefile, (
-            "test-boundary target not found in Makefile"
-        )
+        assert (
+            "test-boundary:" in makefile
+        ), "test-boundary target not found in Makefile"
         assert _BOUNDARY_COMMAND in makefile, (
             f"test-boundary target does not run expected command: "
             f"{_BOUNDARY_COMMAND}"
@@ -120,9 +119,9 @@ class TestTestInfraPolish:
         Verifies that the ``tests/integration/db/`` directory exists as a
         scaffold for future PostgreSQL integration tests.
         """
-        assert _INTEGRATION_DB_DIR.is_dir(), (
-            f"Expected directory {_INTEGRATION_DB_DIR} to exist"
-        )
+        assert (
+            _INTEGRATION_DB_DIR.is_dir()
+        ), f"Expected directory {_INTEGRATION_DB_DIR} to exist"
 
     def test_integration_db_has_init_file(self) -> None:
         """DB scaffold: ``tests/integration/db/__init__.py`` exists.
@@ -130,6 +129,6 @@ class TestTestInfraPolish:
         Verifies that the ``tests/integration/db/`` directory contains an
         ``__init__.py`` file (may be empty) marking it as a Python package.
         """
-        assert _INTEGRATION_DB_INIT.is_file(), (
-            f"Expected {_INTEGRATION_DB_INIT} to exist as a file"
-        )
+        assert (
+            _INTEGRATION_DB_INIT.is_file()
+        ), f"Expected {_INTEGRATION_DB_INIT} to exist as a file"

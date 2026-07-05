@@ -259,7 +259,7 @@ class TestForwardBufferedBody:
         self, mock_upstream_response
     ):
         """aread() called, then aclose() in finally block."""
-        result = await forward_buffered_body(mock_upstream_response)
+        await forward_buffered_body(mock_upstream_response)
 
         mock_upstream_response.aread.assert_called_once()
         mock_upstream_response.aclose.assert_called_once()
@@ -401,7 +401,7 @@ class TestForwardErrorToClient:
         closed by aread() in _send_proxy_request)."""
         pre_read = b"pre-read error body"
 
-        result = await forward_error_to_client(
+        await forward_error_to_client(
             mock_upstream_response, mock_check_result_fail, body_bytes=pre_read
         )
 

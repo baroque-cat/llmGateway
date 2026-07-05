@@ -19,6 +19,7 @@ from src.config.schemas import (
 )
 from src.core.constants import ALL_MODELS_MARKER, ErrorReason
 from src.core.models import CheckResult
+from tests.integration._helpers import make_mock_request
 
 # Capture original sleep to avoid recursion
 original_sleep = asyncio.sleep

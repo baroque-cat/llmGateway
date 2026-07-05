@@ -100,9 +100,11 @@ class TestUTE03:
         exc3 = _make_retryable_exc()
         operation = AsyncMock(side_effect=[exc1, exc2, exc3])
 
-        with patch("src.core.retry.asyncio.sleep", new_callable=AsyncMock):
-            with pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError):
-                await retrier.execute(operation)
+        with (
+            patch("src.core.retry.asyncio.sleep", new_callable=AsyncMock),
+            pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError),
+        ):
+            await retrier.execute(operation)
 
         assert operation.call_count == 3
 
@@ -208,9 +210,9 @@ class TestUTE07:
         with (
             patch("src.core.retry.random.uniform", uniform_mock),
             patch("src.core.retry.asyncio.sleep", sleep_mock),
+            pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError),
         ):
-            with pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError):
-                await retrier.execute(operation)
+            await retrier.execute(operation)
 
         # attempt 1 fails → delay = 1.0 * 2^0 * 1.2 = 1.2
         # attempt 2 fails → delay = 1.0 * 2^1 * 1.2 = 2.4
@@ -596,9 +598,11 @@ class TestSEC07:
         exc = _make_retryable_exc()
         operation = AsyncMock(side_effect=[exc, "ok"])
 
-        with patch("src.core.retry.asyncio.sleep", new_callable=AsyncMock):
-            with caplog.at_level(logging.DEBUG, logger="src.core.retry"):
-                result = await retrier.execute(operation)
+        with (
+            patch("src.core.retry.asyncio.sleep", new_callable=AsyncMock),
+            caplog.at_level(logging.DEBUG, logger="src.core.retry"),
+        ):
+            result = await retrier.execute(operation)
 
         assert result == "ok"
         warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]
@@ -616,10 +620,12 @@ class TestSEC07:
         exc = _make_retryable_exc()
         operation = AsyncMock(side_effect=[exc, exc])
 
-        with patch("src.core.retry.asyncio.sleep", new_callable=AsyncMock):
-            with caplog.at_level(logging.DEBUG, logger="src.core.retry"):
-                with pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError):
-                    await retrier.execute(operation)
+        with (
+            patch("src.core.retry.asyncio.sleep", new_callable=AsyncMock),
+            caplog.at_level(logging.DEBUG, logger="src.core.retry"),
+            pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError),
+        ):
+            await retrier.execute(operation)
 
         error_records = [r for r in caplog.records if r.levelno == logging.ERROR]
         assert len(error_records) >= 1
@@ -632,9 +638,11 @@ class TestSEC07:
         exc = RuntimeError("non-retryable")
         operation = AsyncMock(side_effect=exc)
 
-        with caplog.at_level(logging.DEBUG, logger="src.core.retry"):
-            with pytest.raises(RuntimeError):
-                await retrier.execute(operation)
+        with (
+            caplog.at_level(logging.DEBUG, logger="src.core.retry"),
+            pytest.raises(RuntimeError),
+        ):
+            await retrier.execute(operation)
 
         error_records = [r for r in caplog.records if r.levelno == logging.ERROR]
         assert len(error_records) >= 1

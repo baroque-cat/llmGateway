@@ -116,9 +116,11 @@ def test_write_atomic_ndjson_temp_file_cleanup_on_error(
     before_tmp_files = set(tmp_path.glob("*.tmp"))
 
     # Force json.dumps to raise an exception
-    with patch("src.core.atomic_io.json.dumps", side_effect=ValueError("forced")):
-        with pytest.raises(ValueError, match="forced"):
-            write_atomic_ndjson(str(target), [{"should_fail": True}])
+    with (
+        patch("src.core.atomic_io.json.dumps", side_effect=ValueError("forced")),
+        pytest.raises(ValueError, match="forced"),
+    ):
+        write_atomic_ndjson(str(target), [{"should_fail": True}])
 
     # Target file must still have original content
     assert target.read_text(encoding="utf-8") == original_content

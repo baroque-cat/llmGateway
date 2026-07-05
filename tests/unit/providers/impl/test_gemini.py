@@ -243,7 +243,7 @@ class TestGeminiErrorParsing:
         ) as mock_refine:
             mock_refine.return_value = ErrorReason.NO_QUOTA
 
-            result = await provider.check(mock_client, "test_token", model="gemini-pro")
+            await provider.check(mock_client, "test_token", model="gemini-pro")
 
             # Verify _refine_error_reason was called
             mock_refine.assert_called_once()

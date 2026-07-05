@@ -385,7 +385,12 @@ class TestHttpClientConfigPoolHealthLogInterval:
     """Test pool_health_log_interval_sec field — default, custom, and 0=disabled."""
 
     def test_ut_hc25_default_value(self):
-        """UT-HC25: HttpClientConfig() → pool_health_log_interval_sec defaults to 60."""
+        """UT-HC25: HttpClientConfig() → pool_health_log_interval_sec defaults to 60.
+
+        Spec scenario: Health logging interval configurable — when
+        ``pool_health_log_interval_sec`` is not specified in config, the
+        default value 60 (seconds) is used.
+        """
         config = HttpClientConfig()
         assert config.pool_health_log_interval_sec == 60
 

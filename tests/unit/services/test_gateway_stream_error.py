@@ -157,13 +157,13 @@ class TestStreamReadErrorProtection:
         """Find all .aiter_bytes() calls in the AST."""
         calls: list[ast.Call] = []
         for node in ast.walk(tree):
-            if isinstance(node, ast.Call):
-                # node.func may be an ast.Attribute (.aiter_bytes)
-                if (
-                    isinstance(node.func, ast.Attribute)
-                    and node.func.attr == "aiter_bytes"
-                ):
-                    calls.append(node)
+            # node.func may be an ast.Attribute (.aiter_bytes)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "aiter_bytes"
+            ):
+                calls.append(node)
         return calls
 
     def _is_inside_try_except_read_error(
@@ -195,19 +195,17 @@ class TestStreamReadErrorProtection:
             return False
 
         # Direct match: httpx.ReadError
-        if isinstance(handler.type, ast.Attribute):
-            if (
-                isinstance(handler.type.value, ast.Name)
-                and handler.type.value.id == "httpx"
-                and handler.type.attr == "ReadError"
-            ):
-                return True
-
-        # Name match: ReadError (if imported directly)
-        if isinstance(handler.type, ast.Name) and handler.type.id == "ReadError":
+        if isinstance(handler.type, ast.Attribute) and (
+            isinstance(handler.type.value, ast.Name)
+            and handler.type.value.id == "httpx"
+            and handler.type.attr == "ReadError"
+        ):
             return True
 
-        return False
+        # Name match: ReadError (if imported directly)
+        return bool(
+            isinstance(handler.type, ast.Name) and handler.type.id == "ReadError"
+        )
 
     # --- The actual tests ---
 
@@ -274,10 +272,12 @@ class TestStreamReadErrorProtection:
         # Find the __anext__ method
         anext_method = None
         for item in stream_monitor_class.body:
-            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                if item.name == "__anext__":
-                    anext_method = item
-                    break
+            if (
+                isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and item.name == "__anext__"
+            ):
+                anext_method = item
+                break
 
         assert (
             anext_method is not None
@@ -313,10 +313,12 @@ class TestStreamReadErrorProtection:
 
         anext_method = None
         for item in stream_monitor_class.body:
-            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                if item.name == "__anext__":
-                    anext_method = item
-                    break
+            if (
+                isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and item.name == "__anext__"
+            ):
+                anext_method = item
+                break
 
         # Find the except httpx.ReadError handler in __anext__
         read_error_handler = None
@@ -341,12 +343,16 @@ class TestStreamReadErrorProtection:
                     if isinstance(node.exc.func, ast.Name):
                         if node.exc.func.id == "GatewayStreamError":
                             has_gateway_stream_error_raise = True
-                    elif isinstance(node.exc.func, ast.Attribute):
-                        if node.exc.func.attr == "GatewayStreamError":
-                            has_gateway_stream_error_raise = True
-                elif isinstance(node.exc, ast.Name):
-                    if node.exc.id == "GatewayStreamError":
+                    elif (
+                        isinstance(node.exc.func, ast.Attribute)
+                        and node.exc.func.attr == "GatewayStreamError"
+                    ):
                         has_gateway_stream_error_raise = True
+                elif (
+                    isinstance(node.exc, ast.Name)
+                    and node.exc.id == "GatewayStreamError"
+                ):
+                    has_gateway_stream_error_raise = True
 
         assert has_gateway_stream_error_raise, (
             "except httpx.ReadError handler in __anext__ does not "

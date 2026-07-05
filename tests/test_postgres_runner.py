@@ -61,41 +61,39 @@ class TestPostgresRunner:
         suppressed = [
             line
             for line in lines
-            if "down -v" in line
-            and "2>/dev/null" in line
-            and "|| true" in line
+            if "down -v" in line and "2>/dev/null" in line and "|| true" in line
         ]
-        assert len(suppressed) >= 1, (
-            "Pre-teardown must run 'down -v' with 2>/dev/null and || true"
-        )
+        assert (
+            len(suppressed) >= 1
+        ), "Pre-teardown must run 'down -v' with 2>/dev/null and || true"
 
     def test_uses_up_dash_dash_wait_test_database(self) -> None:
         """Container start uses ``up -d --wait test-database``."""
         script = _RUNNER_SCRIPT.read_text()
 
-        assert "up -d --wait test-database" in script, (
-            "Missing 'up -d --wait test-database' command"
-        )
+        assert (
+            "up -d --wait test-database" in script
+        ), "Missing 'up -d --wait test-database' command"
         assert "--wait" in script, "Missing --wait readiness flag"
 
     def test_no_sleep_used_for_readiness(self) -> None:
         """Script must not use ``sleep`` for container readiness."""
         script = _RUNNER_SCRIPT.read_text()
 
-        assert "sleep" not in script, (
-            "sleep must not be used for readiness; use --wait instead"
-        )
+        assert (
+            "sleep" not in script
+        ), "sleep must not be used for readiness; use --wait instead"
 
     def test_targets_test_database_not_database_service(self) -> None:
         """Up command targets ``test-database``, not production ``database``."""
         script = _RUNNER_SCRIPT.read_text()
 
-        assert "up -d --wait test-database" in script, (
-            "Must target test-database service"
-        )
-        assert "up -d --wait database" not in script, (
-            "Must not target production database service directly"
-        )
+        assert (
+            "up -d --wait test-database" in script
+        ), "Must target test-database service"
+        assert (
+            "up -d --wait database" not in script
+        ), "Must not target production database service directly"
 
     def test_run_group_handles_exit_code_5_as_non_failure(self) -> None:
         """run_group treats pytest exit 5 (no tests collected) as non-failure."""
@@ -109,18 +107,14 @@ class TestPostgresRunner:
         exit5_block: list[str] = []
         for i in range(rc5_idx + 1, len(lines)):
             stripped = lines[i].strip()
-            if (
-                stripped == "else"
-                or stripped == "fi"
-                or stripped.startswith("elif")
-            ):
+            if stripped == "else" or stripped == "fi" or stripped.startswith("elif"):
                 break
             exit5_block.append(lines[i])
 
         exit5_text = "\n".join(exit5_block)
-        assert "EXIT_CODE=1" not in exit5_text, (
-            "Exit-code-5 branch must not set EXIT_CODE=1"
-        )
+        assert (
+            "EXIT_CODE=1" not in exit5_text
+        ), "Exit-code-5 branch must not set EXIT_CODE=1"
 
     def test_run_group_handles_exit_code_nonzero_as_failure(self) -> None:
         """run_group treats non-zero (non-5) exit codes as failures."""
@@ -154,18 +148,18 @@ class TestPostgresRunner:
         lines = script.splitlines()
 
         down_v_lines = [line for line in lines if "down -v" in line]
-        assert len(down_v_lines) >= 2, (
-            "Expected at least two down -v lines (pre and post teardown)"
-        )
+        assert (
+            len(down_v_lines) >= 2
+        ), "Expected at least two down -v lines (pre and post teardown)"
 
         bare_lines = [
             line
             for line in down_v_lines
             if "2>/dev/null" not in line and "|| true" not in line
         ]
-        assert len(bare_lines) >= 1, (
-            "Post-teardown down -v must not have error suppression"
-        )
+        assert (
+            len(bare_lines) >= 1
+        ), "Post-teardown down -v must not have error suppression"
 
     def test_teardown_ordering_pre_down_before_up_before_test_before_post_down(
         self,
@@ -192,28 +186,26 @@ class TestPostgresRunner:
 
         assert pre_down < up_wait, "Pre-teardown must come before up --wait"
         assert up_wait < run_group_call, "up --wait must come before run_group"
-        assert run_group_call < post_down, (
-            "run_group must come before post-teardown"
-        )
+        assert run_group_call < post_down, "run_group must come before post-teardown"
 
     def test_uses_v2_compose_syntax_not_v1(self) -> None:
         """Script uses v2 ``docker compose``/``podman compose``, not v1 hyphen."""
         script = _RUNNER_SCRIPT.read_text()
 
-        assert "docker compose" in script or "podman compose" in script, (
-            "Missing v2 compose syntax (space-separated)"
-        )
-        assert "docker-compose" not in script, (
-            "Must not use v1 docker-compose (hyphenated) syntax"
-        )
+        assert (
+            "docker compose" in script or "podman compose" in script
+        ), "Missing v2 compose syntax (space-separated)"
+        assert (
+            "docker-compose" not in script
+        ), "Must not use v1 docker-compose (hyphenated) syntax"
 
     def test_makefile_test_postgres_delegates_to_script(self) -> None:
         """Makefile test-postgres target delegates to the lifecycle script."""
         makefile = _MAKEFILE.read_text()
 
-        assert "bash scripts/run-postgres-tests.sh" in makefile, (
-            "test-postgres must run bash scripts/run-postgres-tests.sh"
-        )
-        assert "poetry run pytest --run-postgres" not in makefile, (
-            "test-postgres must not run pytest --run-postgres inline"
-        )
+        assert (
+            "bash scripts/run-postgres-tests.sh" in makefile
+        ), "test-postgres must run bash scripts/run-postgres-tests.sh"
+        assert (
+            "poetry run pytest --run-postgres" not in makefile
+        ), "test-postgres must not run pytest --run-postgres inline"

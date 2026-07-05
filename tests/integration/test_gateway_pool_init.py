@@ -64,7 +64,7 @@ async def test_gateway_pool_init_custom_params():
         patch(
             "src.services.gateway.gateway_service._cache_refresh_loop",
             new_callable=AsyncMock,
-        ) as mock_refresh_loop,
+        ),
     ):
         # Configure DatabaseManager mock
         mock_dm_instance = MagicMock()

@@ -130,7 +130,10 @@ async def test_ic01_while_loop_replaces_for_loop():
     probe._check_resource = AsyncMock(side_effect=mock_check)
     probe._update_resource_status = AsyncMock()
 
-    await probe._process_provider_batch("test_provider", resources)
+    # Mock asyncio.sleep inside probes to avoid cumulative ~100s delay
+    # (5 batches × ~20-28s each) exceeding the 30s pytest timeout.
+    with patch("src.core.probes.asyncio.sleep", new_callable=AsyncMock):
+        await probe._process_provider_batch("test_provider", resources)
 
     # All 100 resources were checked
     assert len(checked_resources) == 100
@@ -181,10 +184,6 @@ async def test_ic02_batch_size_changes_between_batches():
     # So second batch is resources[30:70] = 35 resources (only 35 left)
     # Actually we need enough resources so the second batch is clearly different
     resources = _make_resources(75)  # 30 + 40 + 5
-
-    batch_sizes_seen: list[int] = []
-
-    original_check = probe._check_resource
 
     async def tracking_check(res: dict[str, Any]) -> CheckResult:
         return CheckResult.success()
@@ -286,15 +285,11 @@ async def test_ic05_filtering_gather_results_isinstance_checkresult():
     resources = _make_resources(10)
 
     # Mix of success and exception results
-    call_count = 0
 
     async def mixed_check(res: dict[str, Any]) -> CheckResult:
         return CheckResult.success()
 
     # Make _check_and_update_resource return None for some resources
-    original_method = probe._check_and_update_resource
-
-    results_from_method: list[CheckResult | None] = []
 
     async def patched_check_and_update(res: dict[str, Any]) -> CheckResult | None:
         idx = res["key_id"]
@@ -540,7 +535,7 @@ async def test_ic09_mixed_results_in_one_batch():
         delay_step_sec=2.0,
     )
     policy = _default_policy(adaptive=adaptive)
-    probe = _make_probe(policy=policy)
+    _make_probe(policy=policy)
 
     controller = AdaptiveBatchController(
         params=adaptive.to_params(),
@@ -609,7 +604,9 @@ async def test_ic11_adaptive_batching_absent_uses_default_factory():
     resources = _make_resources(30)
     probe._check_and_update_resource = AsyncMock(return_value=CheckResult.success())
 
-    await probe._process_provider_batch("test_provider", resources)
+    # Mock asyncio.sleep inside probes to avoid cumulative delay exceeding timeout.
+    with patch("src.core.probes.asyncio.sleep", new_callable=AsyncMock):
+        await probe._process_provider_batch("test_provider", resources)
 
     controller = probe._batch_controllers["test_provider"]
     assert controller is not None

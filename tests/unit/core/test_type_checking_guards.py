@@ -29,9 +29,10 @@ def _has_type_checking_guard(module_name: str, guarded_import: str) -> bool:
         test = node.test
         if isinstance(test, ast.Name) and test.id == "TYPE_CHECKING":
             for child in node.body:
-                if isinstance(child, ast.ImportFrom):
-                    if guarded_import in (child.module or ""):
-                        return True
+                if isinstance(child, ast.ImportFrom) and guarded_import in (
+                    child.module or ""
+                ):
+                    return True
     return False
 
 
@@ -71,14 +72,13 @@ def test_interfaces_no_runtime_db_import() -> None:
         # would appear as a top-level ImportFrom without a guard.
         tree = ast.parse(source)
         for node in ast.iter_child_nodes(tree):
-            if isinstance(node, ast.ImportFrom):
-                if "src.db" in (node.module or ""):
-                    for alias in node.names:
-                        if alias.name == "DatabaseManager":
-                            pytest.fail(
-                                "interfaces.py has a top-level (runtime) "
-                                "import of DatabaseManager from src.db"
-                            )
+            if isinstance(node, ast.ImportFrom) and "src.db" in (node.module or ""):
+                for alias in node.names:
+                    if alias.name == "DatabaseManager":
+                        pytest.fail(
+                            "interfaces.py has a top-level (runtime) "
+                            "import of DatabaseManager from src.db"
+                        )
     else:
         import src.core.interfaces  # noqa: F401
 
@@ -97,14 +97,13 @@ def test_probes_no_runtime_db_import() -> None:
     source = _module_source_text("src.core.probes")
     tree = ast.parse(source)
     for node in ast.iter_child_nodes(tree):
-        if isinstance(node, ast.ImportFrom):
-            if "src.db" in (node.module or ""):
-                for alias in node.names:
-                    if alias.name == "DatabaseManager":
-                        pytest.fail(
-                            "probes.py has a top-level (runtime) "
-                            "import of DatabaseManager from src.db"
-                        )
+        if isinstance(node, ast.ImportFrom) and "src.db" in (node.module or ""):
+            for alias in node.names:
+                if alias.name == "DatabaseManager":
+                    pytest.fail(
+                        "probes.py has a top-level (runtime) "
+                        "import of DatabaseManager from src.db"
+                    )
 
 
 # ---------------------------------------------------------------------------

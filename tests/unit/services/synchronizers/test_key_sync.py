@@ -6,6 +6,7 @@ Unit tests for key synchronization functionality.
 
 import builtins
 import logging
+import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -424,7 +425,6 @@ def test_read_keys_files_opened_read_only(tmp_path):
     d = tmp_path / "keys"
     d.mkdir()
     (d / "keys.txt").write_text("key1", encoding="utf-8")
-    real_open = builtins.open
     open_calls = []
     original_open = builtins.open
 
@@ -458,8 +458,6 @@ if __name__ == "__main__":
 # ---------------------------------------------------------------------------
 # Merged from test_key_sync_cleanup.py
 # ---------------------------------------------------------------------------
-
-import os
 
 
 def test_read_keys_from_directory_returns_file_map_with_mtime(tmp_path):
@@ -581,18 +579,18 @@ async def test_cleanup_keeps_modified_file(tmp_path, caplog):
     desired_state = {"provider_a": provider_state}
     provider_id_map = {"provider_a": 1}
 
-    with caplog.at_level(logging.WARNING, logger="src.services.synchronizers.key_sync"):
-        with (
-            patch("src.services.synchronizers.key_sync.os.rename") as mock_rename,
-            patch("src.services.synchronizers.key_sync.os.unlink") as mock_unlink,
-        ):
-            await syncer.apply_state(provider_id_map, desired_state)
+    with (
+        caplog.at_level(logging.WARNING, logger="src.services.synchronizers.key_sync"),
+        patch("src.services.synchronizers.key_sync.os.rename") as mock_rename,
+        patch("src.services.synchronizers.key_sync.os.unlink") as mock_unlink,
+    ):
+        await syncer.apply_state(provider_id_map, desired_state)
 
-            # File should NOT be renamed/unlinked
-            mock_rename.assert_not_called()
-            mock_unlink.assert_not_called()
-            # Warning should be logged about modified file
-            assert "modified since read" in caplog.text
+        # File should NOT be renamed/unlinked
+        mock_rename.assert_not_called()
+        mock_unlink.assert_not_called()
+        # Warning should be logged about modified file
+        assert "modified since read" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -609,16 +607,16 @@ async def test_cleanup_skips_already_deleted_file_gracefully(caplog):
     desired_state = {"provider_a": provider_state}
     provider_id_map = {"provider_a": 1}
 
-    with caplog.at_level(logging.DEBUG, logger="src.services.synchronizers.key_sync"):
-        with (
-            patch("src.services.synchronizers.key_sync.os.rename") as mock_rename,
-            patch("src.services.synchronizers.key_sync.os.unlink") as mock_unlink,
-        ):
-            await syncer.apply_state(provider_id_map, desired_state)
+    with (
+        caplog.at_level(logging.DEBUG, logger="src.services.synchronizers.key_sync"),
+        patch("src.services.synchronizers.key_sync.os.rename") as mock_rename,
+        patch("src.services.synchronizers.key_sync.os.unlink") as mock_unlink,
+    ):
+        await syncer.apply_state(provider_id_map, desired_state)
 
-            mock_rename.assert_not_called()
-            mock_unlink.assert_not_called()
-            assert "already gone" in caplog.text.lower()
+        mock_rename.assert_not_called()
+        mock_unlink.assert_not_called()
+        assert "already gone" in caplog.text.lower()
 
 
 @pytest.mark.asyncio
@@ -747,7 +745,7 @@ async def test_cleanup_trash_path_format(tmp_path):
         patch(
             "src.services.synchronizers.key_sync._time.time",
             return_value=float(fake_timestamp),
-        ) as mock_time,
+        ),
         patch("src.services.synchronizers.key_sync.uuid4") as mock_uuid,
         patch("src.services.synchronizers.key_sync.os.rename") as mock_rename,
         patch("src.services.synchronizers.key_sync.os.unlink"),

@@ -191,15 +191,25 @@ def checker_result(
 
 @pytest.fixture(scope="session", autouse=True)
 def _cleanup_stale_temp_files() -> None:  # pyright: ignore[reportUnusedFunction]
-    """Remove stale temp files from crashed sessions."""
+    """Remove stale temp files from crashed sessions.
+
+    Cleans both ``tmp*.py`` (generic temp files) and ``_gate_synth_*.py``
+    (gatekeeper synthetic-violation files) from all scan directories.
+    The ``_gate_synth_`` prefix is used by Tier 2 tests in
+    ``test_hardcode_checker_core.py``, ``test_hardcode_checker_production_urls.py``,
+    and ``test_boundary_compliance.py``.  If a previous session crashed
+    mid-test, these files persist and contaminate the checker cache
+    (``_cached_checker_results``), causing Tier 1 tests to fail.
+    """
     try:
         for scan_dir_rel in _CHECKER_SCAN_DIRS:
             full_dir = _REPO_ROOT / scan_dir_rel
             if not full_dir.is_dir():
                 continue
-            for stale in full_dir.rglob("tmp*.py"):
-                if stale.is_file():
-                    stale.unlink(missing_ok=True)
+            for pattern in ("tmp*.py", "_gate_synth_*.py"):
+                for stale in full_dir.rglob(pattern):
+                    if stale.is_file():
+                        stale.unlink(missing_ok=True)
     except OSError:
         pass
 

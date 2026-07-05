@@ -209,9 +209,9 @@ def test_gauge_registered_without_model_label() -> None:
 def test_no_model_transformation_code() -> None:
     """No __ALL_MODELS__ → \"shared\" transformation code remains in prometheus.py."""
     source = inspect.getsource(prometheus_module)
-    assert "__ALL_MODELS__" not in source, (
-        "prometheus.py still contains __ALL_MODELS__ transformation code"
-    )
+    assert (
+        "__ALL_MODELS__" not in source
+    ), "prometheus.py still contains __ALL_MODELS__ transformation code"
 
     # Verify the collect_from_db method has no transformation logic
     collect_source = inspect.getsource(PrometheusMetricsCollector.collect_from_db)

@@ -25,6 +25,7 @@ from src.config.schemas import (
 from src.core.constants import ErrorReason
 from src.core.models import CheckResult
 from src.providers import get_provider
+from tests.integration._helpers import make_mock_request
 
 # ---------------------------------------------------------------------------
 # Helpers

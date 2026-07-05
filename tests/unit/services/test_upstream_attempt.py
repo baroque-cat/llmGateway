@@ -83,7 +83,7 @@ class TestUpstreamAttemptFrozenDataclass:
 
     def test_frozen_flag_is_true(self) -> None:
         """The dataclass __dataclass_params__.frozen must be True."""
-        params = dataclasses.fields(UpstreamAttempt)
+        dataclasses.fields(UpstreamAttempt)
         # Verify the class itself is frozen
         assert UpstreamAttempt.__dataclass_params__.frozen is True
 
@@ -243,7 +243,7 @@ class TestForwardErrorDelegatesToResponseForwarder:
             "src.services.gateway.response_forwarder.forward_error_to_client",
             new=AsyncMock(return_value=MagicMock(spec=httpx.Response)),
         ) as mock_forward:
-            result = await attempt.forward_error()
+            await attempt.forward_error()
 
             mock_forward.assert_awaited_once_with(mock_response, cr, body)
 
@@ -260,6 +260,6 @@ class TestForwardErrorDelegatesToResponseForwarder:
             "src.services.gateway.response_forwarder.discard_response",
             new=AsyncMock(return_value=None),
         ) as mock_discard:
-            result = await attempt.discard()
+            await attempt.discard()
 
             mock_discard.assert_awaited_once_with(mock_response, None)

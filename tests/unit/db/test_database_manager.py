@@ -18,7 +18,7 @@ async def test_wait_for_schema_ready_success():
     """
     Test that wait_for_schema_ready returns immediately when the table exists.
     """
-    mock_accessor = MagicMock()
+    MagicMock()
     mock_pool = MagicMock()
     mock_conn = MagicMock()
     mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
@@ -40,7 +40,7 @@ async def test_wait_for_schema_ready_retries_on_undefined_table_error():
     Test that wait_for_schema_ready retries when UndefinedTableError is raised,
     and eventually succeeds.
     """
-    mock_accessor = MagicMock()
+    MagicMock()
     mock_pool = MagicMock()
     mock_conn = MagicMock()
     mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
@@ -70,7 +70,7 @@ async def test_wait_for_schema_ready_timeout():
     """
     Test that wait_for_schema_ready raises TimeoutError after the specified timeout.
     """
-    mock_accessor = MagicMock()
+    MagicMock()
     mock_pool = MagicMock()
     mock_conn = MagicMock()
     mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
@@ -83,17 +83,19 @@ async def test_wait_for_schema_ready_timeout():
     with patch("src.db.database.get_pool", return_value=mock_pool):
         manager = DatabaseManager()
         # Should raise TimeoutError
-        with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
-            # Use a short timeout to speed up test
-            with pytest.raises(
+        # Use a short timeout to speed up test
+        with (
+            patch("asyncio.sleep", new_callable=AsyncMock),
+            pytest.raises(
                 TimeoutError, match="Database schema not ready after 0.1 seconds."
-            ):
-                # TODO: timeout=0.1 violates type contract (wait_for_schema_ready expects int).
-                # Either fix src/db/database.py to accept float, or use int here.
-                await manager.wait_for_schema_ready(timeout=0.1)
-            # Should have slept a few times (but timeout short, may not sleep)
-            # We'll just ensure sleep was called at least once (since retry interval is 2 seconds,
-            # but timeout is 0.1 seconds, may not sleep). Let's not assert.
+            ),
+        ):
+            # TODO: timeout=0.1 violates type contract (wait_for_schema_ready expects int).
+            # Either fix src/db/database.py to accept float, or use int here.
+            await manager.wait_for_schema_ready(timeout=0.1)
+        # Should have slept a few times (but timeout short, may not sleep)
+        # We'll just ensure sleep was called at least once (since retry interval is 2 seconds,
+        # but timeout is 0.1 seconds, may not sleep). Let's not assert.
 
 
 @pytest.mark.asyncio
@@ -102,7 +104,7 @@ async def test_wait_for_schema_ready_other_exception_retries():
     Test that wait_for_schema_ready retries on other exceptions (e.g., connection errors)
     and eventually succeeds.
     """
-    mock_accessor = MagicMock()
+    MagicMock()
     mock_pool = MagicMock()
     mock_conn = MagicMock()
     mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
@@ -124,7 +126,7 @@ async def test_wait_for_schema_ready_logging():
     """
     Test that appropriate log messages are emitted.
     """
-    mock_accessor = MagicMock()
+    MagicMock()
     mock_pool = MagicMock()
     mock_conn = MagicMock()
     mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
