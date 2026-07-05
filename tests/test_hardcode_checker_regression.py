@@ -122,6 +122,7 @@ _GATEKEEPER_TEST_FILES: list[str] = [
     "test_metrics_fixture_dedup.py",
     "test_postgres_runner.py",
     "test_test_infra_polish.py",
+    "test_postgres_policy.py",
 ]
 
 

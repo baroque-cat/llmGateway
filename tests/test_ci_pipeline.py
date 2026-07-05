@@ -19,6 +19,7 @@ _REQUIRED_JOBS: list[str] = [
     "unit-tests",
     "integration-tests",
     "gatekeeper",
+    "postgres-integration",
 ]
 
 _TEST_JOBS: list[str] = ["unit-tests", "integration-tests", "gatekeeper"]
@@ -165,14 +166,15 @@ def _find_step_index_with_run(
 # ── Tests ──
 
 
-def test_all_four_required_jobs_present() -> None:
-    """Verify the workflow defines exactly the 4 required jobs (Coverage #11).
+def test_all_five_required_jobs_present() -> None:
+    """Verify the workflow defines exactly the 5 required jobs (Coverage #11).
 
     Checks:
         - ``lint-and-typecheck``
         - ``unit-tests``
         - ``integration-tests``
         - ``gatekeeper``
+        - ``postgres-integration``
     """
     workflow = _load_ci_workflow()
     jobs = _get_jobs(workflow)
@@ -182,7 +184,7 @@ def test_all_four_required_jobs_present() -> None:
 
 
 def test_all_jobs_run_in_parallel_no_needs() -> None:
-    """Verify all 4 jobs run in parallel with no ``needs`` dependency (Coverage #12).
+    """Verify all 5 jobs run in parallel with no ``needs`` dependency (Coverage #12).
 
     Checks:
         - No job has a ``needs`` key.

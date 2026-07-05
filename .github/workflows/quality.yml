@@ -138,3 +138,31 @@ jobs:
 
       - name: G5 — root-level tests (inversion)
         run: poetry run pytest tests/ --ignore=tests/unit --ignore=tests/integration --ignore=tests/security --ignore=tests/e2e --ignore=tests/stress --ignore=tests/batching -q --timeout=30 -m "not slow and not postgres" || true
+
+  # ── Job 5: PostgreSQL Integration (scheduled/manual only) ──
+  postgres-integration:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13.5"
+
+      - name: Install Poetry
+        run: pip install poetry
+
+      - name: Install dependencies
+        run: poetry install --with dev
+
+      - name: Start test database
+        run: docker compose up -d --wait test-database
+
+      - name: Run postgres integration tests
+        run: bash scripts/run-postgres-tests.sh
+
+      - name: Teardown test database
+        if: always()
+        run: docker compose down -v
