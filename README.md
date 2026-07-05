@@ -10,7 +10,20 @@ API gateway for managing LLM provider keys — health monitoring, request routin
 The system consists of two independent components:
 
 1. **Keeper** — background service for health checks, key synchronization, database maintenance, and key export.
-2. **Conductor** (API Gateway) — real-time request routing with key selection, retry policies, and debug modes.
+2. **Conductor** (API Gateway) — real-time request routing with key selection, retry policies, streaming, and debug modes.
+
+## Technology Stack
+
+| Component | Version |
+| --- | --- |
+| Python | ≥3.13.5 |
+| FastAPI | ≥0.120 |
+| PostgreSQL | 18 (Alpine) |
+| Pydantic | v2 |
+| asyncpg | ≥0.30 (raw, no ORM) |
+| httpx | ≥0.28 (HTTP/2) |
+| pytest | ≥9.0 |
+| Package manager | Poetry (dev), uv (Docker) |
 
 ## Quick Start
 
@@ -23,7 +36,7 @@ cp .env.example .env
 docker-compose up --build -d
 ```
 
-Starts three services: PostgreSQL, Conductor (gateway), Keeper.
+Starts three services: PostgreSQL 18, Conductor (gateway on port 55300), Keeper.
 
 ### From source
 
@@ -58,92 +71,139 @@ Example configs: `config/example_full_config.yaml`, `config/example_minimal_conf
 ## Directory Structure
 
 ```
-llmGateway
-├── .github
-│   └── workflows
-│       └── quality.yml           # CI: pyright, ruff, black, pytest, coverage
-├── config
-│   ├── example_full_config.yaml  # all available options
-│   └── example_minimal_config.yaml  # quick-start template
-├── docs
-│   ├── DEBUG_MODE.md             # debug modes: disabled, no_content, full_body
-│   └── ERRORS.md                 # error reason catalog
-├── src
-│   ├── config                    # configuration: schema, loader, defaults, logging
-│   │   ├── __init__.py           # public API: load_config(), get_config()
-│   │   ├── defaults.py           # global default values
-│   │   ├── error_formatter.py    # pretty-prints Pydantic validation errors
-│   │   ├── loader.py             # YAML loader with env-var resolution + deep merge
-│   │   ├── logging_config.py     # setup_logging(), ComponentNameFilter
-│   │   └── schemas.py            # Pydantic v2 models — config source of truth
-│   ├── core                      # abstractions, contracts, pure functions
+llmGateway/
+├── .github/
+│   └── workflows/
+│       └── quality.yml              # CI: pyright → ruff → black → pytest → codecov
+├── config/
+│   ├── example_full_config.yaml     # All available options with inline docs
+│   └── example_minimal_config.yaml  # Quick-start template
+├── data/                            # Key files per provider (.txt / .ndjson)
+├── docs/
+│   ├── CONFIG_SYSTEM.md             # Configuration subsystem architecture
+│   ├── ERRORS.md                    # ErrorReason classification catalog
+│   ├── ERROR_PARSING.md             # Regex-based error reclassification
+│   ├── DEBUG_MODE.md                # Debug modes: disabled, no_content, full_body
+│   ├── HTTP2_STRESS_TESTS.md        # HTTP/2 stress test design
+│   ├── THROUGHPUT_BOTTLENECK_PROBLEM.md
+│   └── CASCADING_FREEZE_EVIDENCE.md
+├── examples/
+├── openspec/                        # Specification documents
+├── scripts/
+├── src/
+│   ├── config/                      # Configuration subsystem
+│   │   ├── __init__.py              # load_config(), get_config() (singleton)
+│   │   ├── schemas.py               # Pydantic v2 config model hierarchy
+│   │   ├── loader.py                # YAML loader + two-pass ${ENV_VAR} resolution
+│   │   ├── defaults.py              # Three-tier default values
+│   │   ├── error_formatter.py       # Human-readable validation error formatting
+│   │   └── logging_config.py        # setup_logging(), httpx trace handler
+│   ├── core/                        # Domain logic & abstractions (the "kernel")
+│   │   ├── constants.py             # Enums: ErrorReason, Status, DebugMode, ProviderType
+│   │   ├── interfaces.py            # ABCs: IProvider, IResourceSyncer, IResourceProbe, IMetricsCollector
+│   │   ├── models.py                # DTOs: CheckResult, RequestDetails, DatabaseTableHealth
+│   │   ├── accessor.py              # ConfigAccessor — typed read-only config facade
+│   │   ├── probes.py                # IResourceProbe template + AdaptiveBatchController dispatch
+│   │   ├── retry.py                 # AsyncRetrier with exponential backoff + jitter
+│   │   ├── http_client_factory.py   # Long-lived httpx.AsyncClient per provider
+│   │   ├── policy_utils.py          # compute_next_check_time()
+│   │   ├── atomic_io.py             # Atomic NDJSON file writes
+│   │   ├── exception_handler.py     # @handle_exceptions decorator
 │   │   ├── batching/
-│   │   │   ├── __init__.py       # re-exports AdaptiveBatchController
-│   │   │   └── adaptive.py       # self-tuning batch controller (3-priority algorithm)
-│   │   ├── accessor.py           # ConfigAccessor — typed read-only config facade
-│   │   ├── atomic_io.py          # atomic NDJSON file writes
-│   │   ├── constants.py          # enums: ErrorReason, Status, DebugMode, ProviderType
-│   │   ├── exception_handler.py  # @handle_exceptions decorator (sync + async)
-│   │   ├── http_client_factory.py  # long-lived httpx.AsyncClient per provider
-│   │   ├── interfaces.py         # ABCs: IProvider, IResourceSyncer, IResourceProbe
-│   │   ├── models.py             # CheckResult, DatabaseTableHealth, StatusSummary
-│   │   ├── policy_utils.py       # compute_next_check_time(), should_vacuum()
-│   │   ├── probes.py             # probe dispatch and adaptive batch scheduling
-│   │   └── retry.py              # AsyncRetrier for transient DB errors
-│   ├── db
-│   │   └── database.py           # PostgreSQL: connection pool, repos, migrations
-│   ├── metrics                   # Prometheus / in-memory metrics collection
-│   │   ├── backends/
-│   │   │   ├── __init__.py       # backend re-exports
-│   │   │   ├── memory.py         # MemoryMetricsCollector (testing / dev)
-│   │   │   └── prometheus.py     # PrometheusMetricsCollector (production)
-│   │   ├── __init__.py           # get_collector(), reset_collector()
-│   │   ├── auth.py               # metrics endpoint access control
-│   │   ├── contracts.py          # GaugeSpec, MetricValue dataclasses
-│   │   └── registry.py           # metric name constants (KEY_STATUS_TOTAL, etc.)
-│   ├── providers                 # LLM provider adapters
-│   │   ├── __init__.py           # provider factory + registry
-│   │   ├── base.py               # AIBaseProvider — shared proxy + error parsing logic
+│   │   │   └── adaptive.py          # Self-tuning batch controller (3-priority algorithm)
+│   │   └── http2/                   # Custom HTTP/2 transport
+│   │       ├── transport.py         # CapacityAwareHttp2Transport
+│   │       ├── connection.py        # Connection lifecycle
+│   │       ├── pool.py              # Connection pool
+│   │       └── semaphore.py         # Stream concurrency control
+│   ├── db/
+│   │   └── database.py              # PostgreSQL: connection pool, schema, repositories, DatabaseManager
+│   ├── metrics/                     # Observability
+│   │   ├── __init__.py              # get_collector(), reset_collector() (singleton)
+│   │   ├── registry.py              # Metric name constants
+│   │   ├── contracts.py             # GaugeSpec, MetricValue dataclasses
+│   │   ├── auth.py                  # Bearer-token validation for /metrics endpoint
+│   │   └── backends/
+│   │       ├── prometheus.py        # PrometheusMetricsCollector (production)
+│   │       └── memory.py            # MemoryMetricsCollector (testing)
+│   ├── providers/                   # LLM adapters (Strategy + Template Method)
+│   │   ├── __init__.py              # get_provider() factory + _PROVIDER_CLASSES registry
+│   │   ├── base.py                  # AIBaseProvider — shared proxy + error parsing pipeline
 │   │   └── impl/
-│   │       ├── openai_like.py    # OpenAI-compatible API (OpenAI, DeepSeek, Groq...)
-│   │       ├── anthropic.py      # Anthropic (Claude) API
-│   │       ├── gemini.py         # Google Gemini provider entry point
-│   │       └── gemini_base.py    # Gemini shared check/error-mapping implementation
-│   └── services                  # application services
-│       ├── gateway/              # Conductor — FastAPI API Gateway
-│       │   ├── __init__.py       # gateway package
-│       │   ├── gateway_service.py  # routing, retry, streaming, debug modes
-│       │   ├── gateway_cache.py    # in-memory key pool + auth token cache
-│       │   ├── response_forwarder.py  # upstream response forwarding
-│       │   └── sanitize_content.py    # debug-mode content redaction
-│       ├── synchronizers/
-│       │   ├── __init__.py       # synchronizer re-exports
-│       │   └── key_sync.py       # NDJSON key files → PostgreSQL sync
-│       ├── db_maintainer.py      # conditional VACUUM ANALYZE + dead-tuple metrics
-│       ├── inventory_exporter.py # periodic key snapshot + status inventory (NDJSON)
-│       ├── keeper.py             # Keeper entry point: APScheduler + health cycles
-│       ├── key_probe.py          # per-key API health probing (adaptive batching)
-│       └── key_purger.py         # stopped key cleanup + provider deletion
-├── tests
-│   ├── e2e/                      # end-to-end gateway logging tests
-│   ├── integration/              # cross-component integration tests (22 files)
-│   ├── security/                 # security tests (logging, error forwarding, auth)
-│   ├── test_batching/            # adaptive batching unit + integration tests
-│   └── unit/                     # unit tests mirroring src/ structure
-│       ├── config/               # config schema validation tests
-│       ├── core/                 # core interfaces, models, retry tests
-│       ├── db/                   # database manager + repository tests
-│       ├── metrics/              # metrics backends + auth tests
-│       ├── providers/            # provider adapter tests
-│       │   └── impl/             # per-provider implementation tests
-│       ├── services/             # service-level unit tests
-│       │   └── synchronizers/    # key sync unit tests
-│       └── typing/               # PEP 695 type alias checks
-├── main.py                       # CLI entry point: gateway | keeper
+│   │       ├── openai_like.py       # OpenAI-compatible APIs
+│   │       ├── anthropic.py         # Anthropic (Claude) API
+│   │       ├── gemini.py            # Google Gemini provider
+│   │       └── gemini_base.py       # Gemini shared check/error-mapping
+│   └── services/                    # Application orchestration
+│       ├── gateway/                 # Conductor — FastAPI API Gateway
+│       │   ├── gateway_service.py   # Routing, retry, streaming, debug modes
+│       │   ├── gateway_cache.py     # In-memory key pool + auth token cache
+│       │   ├── response_forwarder.py  # Upstream response lifecycle
+│       │   └── sanitize_content.py  # Debug-mode content redaction
+│       ├── synchronizers/           # DB sync (Two-Phase Read + Apply)
+│       │   └── key_sync.py          # KeySyncer: NDJSON files → PostgreSQL
+│       ├── keeper.py                # Keeper entry point: APScheduler + health cycles
+│       ├── key_probe.py             # Per-key health probing
+│       ├── key_purger.py            # Stopped key cleanup
+│       ├── db_maintainer.py         # Conditional VACUUM ANALYZE
+│       └── inventory_exporter.py    # NDJSON snapshot + status inventory export
+├── tests/                           # ~200 test files
+│   ├── _canonical.py                # CanonicalConfig — single source of config truth
+│   ├── _constants.py                # Shared mock token constants
+│   ├── conftest.py                  # Global fixtures (env setup, gatekeeper cache)
+│   ├── test_*.py                    # Root-level gatekeeper tests (G5, ~30 files)
+│   ├── unit/                        # Unit tests (G1 + G2), mirrors src/ structure
+│   │   └── {config,core,db,metrics,providers,services}/
+│   ├── integration/                 # Integration tests (G3)
+│   ├── security/                    # Security tests (G3)
+│   ├── e2e/                         # End-to-end tests (G3)
+│   ├── batching/                    # Adaptive batching tests (G4)
+│   └── stress/                      # Stress tests (G6, @pytest.mark.slow)
+├── main.py                          # CLI entry point: gateway | keeper
+├── AGENTS.md                        # Code paradigm & development guidelines
+├── TESTING.md                       # Testing documentation index
+├── TESTING-GUIDE.md                 # How to write tests (Golden Rule, CanonicalConfig)
+├── TESTING-RUN.md                   # How to run tests (Makefile targets, groups G1–G6)
+├── TESTING-GATEKEEPER.md            # Zero-hardcodes enforcement architecture
 ├── Dockerfile
 ├── docker-compose.yml
-├── pyproject.toml                # deps + ruff/black/pytest config
-├── poetry.lock                   # locked dependency versions
-├── poetry.toml                   # poetry settings (package-mode = false)
-└── pyrightconfig.json            # strict type-checking configuration
+├── pyproject.toml                   # Dependencies + ruff/black/pytest config
+├── pyrightconfig.json               # Type checking: basic global, strict on core/ + config/
+├── poetry.lock
+├── poetry.toml
+├── Makefile
+└── .env.example
 ```
+
+## Testing
+
+> See [TESTING.md](TESTING.md) for the full testing documentation index.
+
+Quick reference:
+
+```bash
+make test         # G1–G5 (~3 s)
+make test-slow    # G6 stress tests
+make test-all     # G1–G6
+make ci           # lint + typecheck + test
+```
+
+Quality gates: pyright → ruff → black → pytest → gatekeeper (see `.github/workflows/quality.yml`).
+
+## Development Guidelines
+
+Code paradigm, conventions, and architecture patterns are documented in [AGENTS.md](AGENTS.md).
+
+## Documentation
+
+| Document | Topic |
+| --- | --- |
+| [AGENTS.md](AGENTS.md) | Code paradigm, naming conventions, error handling, quality gates |
+| [TESTING.md](TESTING.md) | Testing index and quick start |
+| [TESTING-GUIDE.md](TESTING-GUIDE.md) | Golden Rule, CanonicalConfig, anti-patterns |
+| [TESTING-RUN.md](TESTING-RUN.md) | Makefile targets, process-isolation groups, timeout policy |
+| [TESTING-GATEKEEPER.md](TESTING-GATEKEEPER.md) | Zero-hardcodes enforcement architecture |
+| [docs/CONFIG_SYSTEM.md](docs/CONFIG_SYSTEM.md) | Configuration subsystem architecture |
+| [docs/ERRORS.md](docs/ERRORS.md) | ErrorReason classification |
+| [docs/ERROR_PARSING.md](docs/ERROR_PARSING.md) | Error parsing rules |
+| [docs/DEBUG_MODE.md](docs/DEBUG_MODE.md) | Gateway debug modes |

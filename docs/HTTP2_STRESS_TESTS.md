@@ -168,9 +168,9 @@ method — a single atomic operation with no race window.
 
 `FixedHTTP2Connection` overrides:
 - `is_available()` — adds `len(self._events) < self.max_concurrent_requests()`
-- `_receive_remote_settings_change()` — fires `on_capacity_update` callback on SETTINGS changes
-- `max_concurrent_requests()` — returns `_max_streams` (or `1` pre-init)
-- `handle_async_request()` — uses `acquire_nowait()` instead of blocking `acquire()`
+- `_receive_remote_settings_change()` — fires `on_capacity_update` callback on SETTINGS changes; applies `_max_streams_cap` (the per-provider `max_concurrent_streams_per_connection` cap) if set
+- `max_concurrent_requests()` — returns `_max_streams` (capped by `_max_streams_cap`, or `1` pre-init)
+- `handle_async_request()` — uses `acquire_nowait()` instead of blocking `acquire()`; applies `_max_streams_cap` to the initial `NonBlockingSemaphore` size
 
 #### Layer 3: Connection wrapper (`connection.py`)
 
@@ -232,7 +232,7 @@ The ephemeral server supports:
 
 ### 4.3 Stress Regression Tests
 
-**`tests/stress/`** — 11 tests with real network stack:
+**`tests/stress/`** — 16 tests (including cascading freeze and throughput bottleneck) with real network stack:
 
 #### Connection Growth (`test_connection_growth.py`)
 
@@ -265,6 +265,9 @@ server delay 10 s, `max_connections=3`, pool timeout 5 s.
 | `test_multi_client.py` | Two independent `httpx.AsyncClient` instances maintain separate pools |
 | `test_ephemeral_server.py` | 8 tests: server startup, single request, clean shutdown, response delay, concurrent metrics, peak streams, connection counting |
 | `test_metrics_collector.py` | MetricsCollector: trace events, error classification |
+| `test_cascading_freeze.py` | 3 tests reproducing the production cascading-freeze anomaly: abrupt freeze at concurrency threshold, cascading backlog, read-timeout silence with drip-feed (see [CASCADING_FREEZE_EVIDENCE.md](CASCADING_FREEZE_EVIDENCE.md)) |
+| `test_cap_prevents_freeze.py` | 2 tests proving the `max_concurrent_streams_per_connection` cap (default 5) prevents the freeze: cap forces multiple connections, all requests complete without timeout |
+| `test_throughput_bottleneck.py` | 2 active tests + 1 skipped: proves the hidden upstream bottleneck exists (20 requests → bimodal latency), proves multiple connections do NOT mitigate a server-side `internal_concurrency` limit (see [THROUGHPUT_BOTTLENECK_PROBLEM.md](THROUGHPUT_BOTTLENECK_PROBLEM.md)) |
 
 ### 4.4 Production Load Tests
 
@@ -326,9 +329,12 @@ Retry logic in production will not cascade.
 | Unit tests (`tests/unit/core/http2/`) | 27 | ✅ All pass |
 | Factory tests (`test_http_client_factory.py`) | 29 | ✅ All pass |
 | Integration tests (`tests/integration/`) | 127 | ✅ All pass |
-| Stress regression (`tests/stress/`) | 11 | ✅ All pass |
+| Stress regression (`tests/stress/`) | 16 | ✅ All pass |
 | Production load (`test_production_load.py`) | 3 | ✅ All pass |
-| **Total** | **197** | **All pass** |
+| Cascading freeze (`test_cascading_freeze.py`) | 3 | ✅ All pass |
+| Cap prevention (`test_cap_prevents_freeze.py`) | 2 | ✅ All pass |
+| Throughput bottleneck (`test_throughput_bottleneck.py`) | 2 active + 1 skipped | ✅ Active pass |
+| **Total** | **209** | **All active pass** |
 
 **Key result:** 0 protocol errors across 850 production-load requests
 (500 concurrent + 50 recovery + 150×3 retry bursts). The production
@@ -346,23 +352,27 @@ src/core/http2/
 │   └─ acquire_nowait() → atomic non-blocking slot acquire
 │
 ├── h2_connection.py      # FixedHTTP2Connection(AsyncHTTP2Connection)
+│   ├─ __init__()           → accept _max_streams_cap (per-provider cap)
 │   ├─ _response_closed()   → sync h2 state on cancellation
 │   ├─ _receive_events()    → track server-closed streams
-│   ├─ _receive_remote_settings_change() → fire capacity callback
+│   ├─ _receive_remote_settings_change() → fire capacity callback; apply cap
 │   ├─ is_available()       → check H2 stream capacity
-│   ├─ max_concurrent_requests() → expose stream limit
-│   └─ handle_async_request() → non-blocking acquire_nowait()
+│   ├─ max_concurrent_requests() → expose capped stream limit
+│   └─ handle_async_request() → non-blocking acquire_nowait(); apply cap
 │        (copied from httpcore 1.0.9; documented reason)
 │
 ├── connection.py         # CapacityAwareHTTPConnection(AsyncHTTPConnection)
+│   ├─ __init__()           → accept and forward _max_streams_cap
 │   ├─ handle_async_request() → creates FixedHTTP2Connection for H2
 │   └─ max_concurrent_requests() → delegates to inner connection
 │
 ├── pool.py               # CapacityAwareHttp2Pool(AsyncConnectionPool)
-│   ├─ create_connection()  → wires on_capacity_update callback
+│   ├─ __init__()           → accept max_concurrent_streams_cap param
+│   ├─ create_connection()  → wires on_capacity_update callback and cap
 │   ├─ _assign_requests_to_connections() → connection_request_count tracking
 │   ├─ _connection_capacity_updated() → reassign on capacity change
-│   └─ _max_concurrent_requests() → query connection capacity
+│   ├─ _max_concurrent_requests() → query connection capacity
+│   └─ get_health_summary() → pool health statistics for logging
 │
 ├── transport.py          # CapacityAwareHttp2Transport(httpx.AsyncHTTPTransport)
 │   └─ Wraps pool as pluggable httpx transport
@@ -376,9 +386,18 @@ src/core/http2/
 src/core/http_client_factory.py
   │
   └─ get_client_for_provider()
-       ├─ transport = CapacityAwareHttp2Transport(...)
+       ├─ max_concurrent_streams_cap = provider_config.max_concurrent_streams_per_connection
+       ├─ transport = CapacityAwareHttp2Transport(
+       │      max_concurrent_streams_cap=max_concurrent_streams_cap, ...)
        └─ client = httpx.AsyncClient(transport=transport, ...)
 ```
+
+**Per-provider stream cap:** `ProviderConfig.max_concurrent_streams_per_connection`
+(default `5`, configurable per provider in YAML).  This cap prevents cascading
+freezes caused by providers that advertise a high `SETTINGS_MAX_CONCURRENT_STREAMS`
+but have a hidden internal concurrency limit.  See
+[CASCADING_FREEZE_EVIDENCE.md](CASCADING_FREEZE_EVIDENCE.md) and
+[THROUGHPUT_BOTTLENECK_PROBLEM.md](THROUGHPUT_BOTTLENECK_PROBLEM.md).
 
 **No global side effects.** The transport is created and injected
 exactly where httpx clients are created. No module-level calls,
@@ -399,6 +418,12 @@ Remove the `src/core/http2/` package and the transport creation in
 2. The project migrates away from HTTP/2 (`http2: false` in
    `http_client` config) for all providers.
 
+**Note:** The `max_concurrent_streams_per_connection` cap (default `5`)
+on `ProviderConfig` is a project-level mitigation for hidden upstream
+concurrency limits and will remain valuable even after httpcore fixes
+#1022/#1088 — it addresses a separate architectural limitation (the
+pool trusting server-advertised `SETTINGS_MAX_CONCURRENT_STREAMS`).
+
 The CI version check on `httpcore==1.0.9` serves as a reminder to
 re-evaluate the fix package after dependency upgrades.
 
@@ -410,4 +435,6 @@ re-evaluate the fix package after dependency upgrades.
 | --- | --- |
 | [encode/httpcore#1022](https://github.com/encode/httpcore/issues/1022) | Upstream Bug #1 — stream desync (open, unfixed as of Jun 2026) |
 | [encode/httpcore#1088](https://github.com/encode/httpcore/pull/1088) | Upstream PR for Bug #2 — connection growth (open, unfixed as of Jun 2026) |
+| [CASCADING_FREEZE_EVIDENCE.md](CASCADING_FREEZE_EVIDENCE.md) | Cascading freeze: root cause analysis, reproducible test evidence, and the `max_concurrent_streams_per_connection` cap fix |
+| [THROUGHPUT_BOTTLENECK_PROBLEM.md](THROUGHPUT_BOTTLENECK_PROBLEM.md) | Throughput bottleneck: why the pool trusts advertised capacity, and diagnostic tests proving the hidden upstream limit |
 | [httpx HTTP/2 docs](https://www.python-httpx.org/http2/) | HTTP/2 is described as "less robust than HTTP/1.1" |

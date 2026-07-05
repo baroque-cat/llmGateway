@@ -118,8 +118,15 @@ new_max_streams = min(
 
 The value `100` originates from the `h2` library default
 (`h2/connection.py:356`) and is re-asserted by httpcore
-(`httpcore/_async/http2.py:204`). It is **not** hardcoded in our code, and
-there is **no configuration option** to override it.
+(`httpcore/_async/http2.py:204`).
+
+**Deployed fix:** The `max_concurrent_streams_per_connection` config
+option (default `5`) on `ProviderConfig` overrides the advertised value
+via `_max_streams_cap` in `FixedHTTP2Connection`.  When the cap is set,
+`max_concurrent_requests()` returns `min(advertised, local, cap)` rather
+than trusting the server-advertised value.  This caps the number of
+streams per connection, forcing the pool to open new TCP connections
+when the cap is reached.
 
 **Consequence:** When the server advertises `MAX_CONCURRENT_STREAMS=100`
 (which is the h2 library default), the pool believes a single connection
@@ -448,7 +455,7 @@ the agent appears completely frozen.
 | `test_abrupt_freeze_at_concurrency_threshold` | ~4s | PASSED | 3 fast + 3 slow, `peak_connections==1` |
 | `test_cascading_backlog_after_initial_batch` | ~7s | PASSED | 3 done after 2.5s, new batch delayed, `peak_connections==1` |
 | `test_read_timeout_silence_with_drip_feed` | ~10s | PASSED | 0 timeouts despite `read_timeout=3s` < `delay=5s` |
-| **Regression:** `test_ephemeral_server.py` (13 tests) | ~19s | 13/13 PASSED | No regressions from server modifications |
+| **Regression:** `test_ephemeral_server.py` (8 tests) | ~19s | 8/8 PASSED | No regressions from server modifications |
 
 All quality gates pass:
 - `black --check`: clean
@@ -532,23 +539,51 @@ cascading-freeze anomaly:
    without a restart. (Test 2 proves this with a second batch sent
    mid-flight.)
 
-The fix for Bug 1 is to add a configurable cap on
-`max_concurrent_streams_per_connection` that overrides the
-server-advertised value. When the cap is set (e.g., 5), the pool will
-open a new connection after 5 streams instead of piling all streams onto
-one. This ensures each connection has a small number of streams, keeping
-the server's internal queue short and the read timeout effective.
+### Deployed Fix: `max_concurrent_streams_per_connection` Cap
 
-The fix for Bug 2 would require per-stream deadline tracking in the H2
-connection layer — a more invasive change to httpcore's architecture that
-is out of scope for the immediate fix. The cap on
-`max_concurrent_streams_per_connection` mitigates Bug 2 indirectly: with
-fewer streams per connection, the chance of head-of-line blocking
-starvation is greatly reduced.
+The fix for Bug 1 was implemented as a configurable
+`max_concurrent_streams_per_connection` cap on `ProviderConfig`
+(default `5`, range 1–1000).  The cap is applied in
+`FixedHTTP2Connection` via `_max_streams_cap`:
+
+- In `_receive_remote_settings_change()` — caps the negotiated
+  `SETTINGS_MAX_CONCURRENT_STREAMS` value.
+- In `handle_async_request()` — caps the initial `NonBlockingSemaphore`
+  size during connection init.
+
+When the cap is set (e.g., 5), `max_concurrent_requests()` returns at
+most 5, the pool opens a new TCP connection after 5 streams instead of
+piling all streams onto one, and the capacity gate
+`connection_request_count[conn] < _max_concurrent_requests(conn)` in
+`_assign_requests_to_connections()` triggers connection growth at 5
+streams rather than 100.
+
+The cap is validated by `tests/stress/test_cap_prevents_freeze.py`:
+
+| Test | What it proves |
+| --- | --- |
+| `test_cap_forces_second_connection` | cap=5 + 6 requests → ≥2 connections opened |
+| `test_all_requests_complete_with_cap` | cap=5 + 12 requests vs `internal_concurrency=8` → all succeed, no cascading freeze |
+
+The cap also mitigates Bug 2 indirectly: with fewer streams per
+connection (≤5 rather than ≤100), the chance of head-of-line blocking
+starvation is greatly reduced.  The cap is a project-level mitigation
+that would remain valuable even after upstream httpcore fixes #1022
+and #1088, because it addresses a separate architectural limitation
+(the pool inherently trusts server-advertised
+`SETTINGS_MAX_CONCURRENT_STREAMS`).
+
+The full fix for Bug 2 would require per-stream deadline tracking in
+the H2 connection layer — a more invasive change to httpcore's
+architecture that is not implemented in this project.
 
 ### Related Documents
 
 - `docs/HTTP2_STRESS_TESTS.md` — HTTP/2 fixes (stream desync, connection
   growth) and the original stress test suite.
 - `docs/THROUGHPUT_BOTTLENECK_PROBLEM.md` — Detailed production problem
-  analysis with architecture diagrams.
+  analysis with architecture diagrams and diagnostic tests.
+- `tests/stress/test_cap_prevents_freeze.py` — Tests proving the deployed
+  `max_concurrent_streams_per_connection` cap prevents the cascading freeze.
+- `tests/stress/test_throughput_bottleneck.py` — Diagnostic tests for the
+  hidden upstream concurrency bottleneck.

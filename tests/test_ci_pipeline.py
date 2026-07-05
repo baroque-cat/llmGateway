@@ -19,10 +19,13 @@ _REQUIRED_JOBS: list[str] = [
     "unit-tests",
     "integration-tests",
     "gatekeeper",
+    "stress-tests",
     "postgres-integration",
 ]
 
 _TEST_JOBS: list[str] = ["unit-tests", "integration-tests", "gatekeeper"]
+
+_STRESS_JOBS: list[str] = ["stress-tests"]
 
 
 def _load_ci_workflow() -> dict[str, Any]:
@@ -166,14 +169,15 @@ def _find_step_index_with_run(
 # ── Tests ──
 
 
-def test_all_five_required_jobs_present() -> None:
-    """Verify the workflow defines exactly the 5 required jobs (Coverage #11).
+def test_all_required_jobs_present() -> None:
+    """Verify the workflow defines exactly the 6 required jobs (Coverage #11).
 
     Checks:
         - ``lint-and-typecheck``
         - ``unit-tests``
         - ``integration-tests``
         - ``gatekeeper``
+        - ``stress-tests``
         - ``postgres-integration``
     """
     workflow = _load_ci_workflow()
@@ -184,7 +188,7 @@ def test_all_five_required_jobs_present() -> None:
 
 
 def test_all_jobs_run_in_parallel_no_needs() -> None:
-    """Verify all 5 jobs run in parallel with no ``needs`` dependency (Coverage #12).
+    """Verify all 6 jobs run in parallel with no ``needs`` dependency (Coverage #12).
 
     Checks:
         - No job has a ``needs`` key.
@@ -273,14 +277,17 @@ def test_gatekeeper_job_runs_checker_before_g5_tests() -> None:
 
 
 def test_all_test_jobs_use_correct_timeout_and_markers() -> None:
-    """Verify all test jobs use ``--timeout=30`` and the slow/postgres markers (Coverage #16).
+    """Verify all test jobs use correct timeouts and markers (Coverage #16).
 
     Checks:
-        - Every pytest step in ``unit-tests``, ``integration-tests``,
-          ``gatekeeper`` contains ``--timeout=30``.
-        - Every pytest step contains ``not slow and not postgres``.
+        - Regular test jobs (unit, integration, gatekeeper) use ``--timeout=30``
+          and ``not slow and not postgres``.
+        - Stress test job uses appropriate per-group timeouts and positive ``slow``
+          marker (no ``not`` prefix — intentionally selects slow tests).
     """
     workflow = _load_ci_workflow()
+
+    # Regular test jobs: uniform timeout + "not slow and not postgres" marker.
     for job_name in _TEST_JOBS:
         steps = _get_job_steps(workflow, job_name)
         pytest_steps: list[dict[str, Any]] = [
@@ -299,6 +306,30 @@ def test_all_test_jobs_use_correct_timeout_and_markers() -> None:
             assert "not slow and not postgres" in cmd, (
                 f"Job '{job_name}' pytest command should include "
                 f"'not slow and not postgres' marker: {cmd}"
+            )
+
+    # Stress test job: per-group timeouts + positive slow marker.
+    for job_name in _STRESS_JOBS:
+        steps = _get_job_steps(workflow, job_name)
+        pytest_steps = [
+            step
+            for step in steps
+            if isinstance(step.get("run"), str) and "pytest" in cast("str", step["run"])
+        ]
+        assert (
+            len(pytest_steps) > 0
+        ), f"Job '{job_name}' should have at least one pytest step"
+        for step in pytest_steps:
+            cmd = cast("str", step["run"])
+            assert "--timeout=" in cmd, (
+                f"Job '{job_name}' pytest command should include a --timeout: {cmd}"
+            )
+            assert "-m slow" in cmd, (
+                f"Job '{job_name}' pytest command should use "
+                f"positive '-m slow' marker (selects slow tests): {cmd}"
+            )
+            assert "not slow" not in cmd, (
+                f"Job '{job_name}' should NOT exclude slow tests: {cmd}"
             )
 
 

@@ -29,6 +29,19 @@ context: |
   Config schema root: Config (DatabaseConfig, LoggingConfig, KeeperConfig, MetricsConfig, GatewayConfig, dict of ProviderConfig)
   Docker: astral/uv:python3.13-trixie-slim base, CMD uvicorn main:app --host 0.0.0.0 --port 55300
   CI: GitHub Actions quality.yml — pyright strict, ruff check, black --check, pytest --cov=src, codecov push
+  Code style: Python 3.13+ features (X | None not Optional[X]), no bare generics (dict[str, int] not dict), from __future__ import annotations for forward refs
+  Naming: Variables/functions/methods: snake_case. Classes: PascalCase. Abstract classes/interfaces: I prefix (IProvider, IResourceSyncer, IMetricsCollector). Enums: PascalCase + @unique. Constants: UPPER_CASE. Private members: _ prefix. Test files: test_<snake_case>.py. Test classes: class Test<Thing>:. Test functions: test_<snake_case>
+  Imports: Absolute only from src.* (never relative from .module). Order: stdlib → third-party → src.* (enforced by ruff TID + isort). TYPE_CHECKING guard to avoid runtime circular imports in core/interfaces.py
+  Documentation: Google-style docstrings required on all public modules, classes, functions. Sections: one-line summary, Args:, Returns:, Raises:, Fields: (dataclasses). Sphinx cross-refs: `` :class:`~path.ClassName` ``
+  Type checking: pyright typeCheckingMode basic globally, strict only on src/core and src/config. Python 3.13, Linux platform. src/core/http2/ excluded from type checking. reportMissingTypeStubs: false
+  Formatting: Black + ruff format, line length 88, double quotes, 4-space indentation, trailing commas respected
+  Linting: ruff rules E, F, W, I, B, C4, SIM, TID, UP, YTT. Ignored: E501 (line too long, delegated to formatter). Ruff acts as isort (known-first-party = ["src"])
+  Testing: pytest ≥9.0 with pytest-asyncio (strict mode, no auto-detection). All async tests use @pytest.mark.asyncio decorator. asyncio_default_fixture_loop_scope = session. pytest-cov for coverage (no fail-under threshold). pytest-timeout = 30s. pytest-random-order. Flags: --strict-markers --strict-config
+  Mocking: unittest.mock only (MagicMock, AsyncMock, patch). pytest-mock (mocker fixture) is intentionally absent. Fixtures in conftest.py or inline; factory fixtures return callables
+  Test structure: tests/conftest.py CanonicalConfig session fixture (single source of truth parsed from .env.example + YAML). Custom markers: slow, postgres, meta. Test groups: unit/ (G1/G2), integration/ (G3), e2e/, security/, test_batching/ (G4), gatekeeper structural tests (G5), stress/ (G6 slow)
+  HTTP/2: Custom CapacityAwareHttp2Transport in src/core/http2/ with connection pool and semaphore-based stream concurrency control. max_concurrent_streams_per_connection defaults to 5
+  Database: Connection pool sizing validated at config load — worst_case = (gateway.workers + 1) × pool.max_size must stay under 97 (PostgreSQL 100 − 3 superuser reserve). AsyncRetrier with exponential backoff + jitter for transient pg errors
+  Dataclasses: @dataclass(frozen=True) for immutable DTOs (RequestDetails, AdaptiveBatchingParams, KeyExportSnapshot, DatabaseTableHealth). Mutable dataclasses where mutation needed (CheckResult). TypedDict for structured dict shapes (KeyToCheck, AvailableKey, ValidKeyForCaching)
   We value backwards compatibility for all public provider interfaces (IProvider, IResourceSyncer, IResourceProbe)
 
 rules:
@@ -53,6 +66,10 @@ rules:
     - Every database schema change MUST have scenarios for migration, rollback, and data integrity
     - Every new metric MUST have scenarios for emission and label correctness
     - Include concurrency scenarios for shared-state components (gateway cache, connection pool)
+    - Test functions must be async def with @pytest.mark.asyncio decorator. Use AsyncMock for async dependencies, unittest.mock only
+    - Test files named test_<snake_case>.py, classes class Test<Thing>:, functions test_<snake_case>
+    - Use CanonicalConfig session fixture for config values (never hardcode provider names, URLs, or tokens)
+    - Tag scenarios requiring real network with @pytest.mark.slow, live PostgreSQL with @pytest.mark.postgres
 
   design:
     - Document database schema changes explicitly (table DDL, column types, constraints, indexes)
@@ -65,6 +82,10 @@ rules:
     - Describe async flow: coroutine chains, lock acquisition order, potential deadlocks
     - Document metrics additions: metric name, type (gauge/counter/histogram), labels
     - Include rollout strategy (can old and new code coexist? data migration needed?)
+    - New core/ abstractions must use TYPE_CHECKING guards when referencing db/ or services/ types to prevent runtime circular imports
+    - If adding files to src/core/http2/, note they are excluded from pyright type checking
+    - Use @dataclass(frozen=True) for immutable DTOs, mutable dataclass only when mutation is required
+    - Document expected test fixture setup: any new CanonicalConfig fields, conftest additions
 
   tasks:
     - Group database migration tasks under a separate heading
@@ -81,3 +102,7 @@ rules:
     - Tasks MUST use absolute imports (src.*), never relative imports
     - Tasks MUST follow type-strict conventions: all functions annotated, no bare generics
     - Include docstring task: verify Google-style docstrings on all new public entities
+    - Run tests with: poetry run pytest --strict-markers --strict-config -m "not slow and not postgres" (add --run-postgres for DB tests)
+    - New test fixtures must derive values from CanonicalConfig; never hardcode provider names, tokens, or URLs in tests
+    - For async code, always use @pytest.mark.asyncio on test functions and AsyncMock for async dependencies
+    - Use unittest.mock exclusively (MagicMock, AsyncMock, patch); do NOT introduce pytest-mock or mocker fixture

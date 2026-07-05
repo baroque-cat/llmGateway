@@ -181,13 +181,18 @@ The pool logic is **correct** for what it knows. The bug is not in the routing �
 
 ## Why the existing stress tests miss this
 
-The current stress test suite (`tests/stress/`) tests two scenarios:
+The stress test suite (`tests/stress/`) tests two scenarios
+that are now augmented by additional tests:
 
 1. **Connection growth** (`test_connection_growth.py`) — proves the pool opens new connections when H2 streams ARE exhausted at the semaphore level. The server's `max_concurrent_streams` matches its real capacity.
 
 2. **Pool saturation** (`test_pool_saturation.py`) — proves `PoolTimeout` is raised when all connections are at stream capacity.
 
-In both cases, the server's **advertised** and **real** capacity are the same. There is no test where the server advertises 100 but processes 8 — the exact production scenario.
+3. **Cascading freeze** (`test_cascading_freeze.py`) — added to reproduce the exact production scenario: server advertises 100 but processes 3—8 internally. Three tests prove abrupt freeze at threshold, cascading backlog, and read-timeout silence with drip-feed.
+
+4. **Cap-based fix** (`test_cap_prevents_freeze.py`) — added to validate the deployed `max_concurrent_streams_per_connection` cap (default 5). Two tests prove the cap forces multiple connections and prevents the cascading freeze.
+
+5. **Throughput bottleneck diagnostics** (`test_throughput_bottleneck.py`) — added to diagnose the hidden upstream bottleneck. See [below](#what-the-diagnostic-tests-prove).
 
 ---
 
@@ -196,22 +201,34 @@ In both cases, the server's **advertised** and **real** capacity are the same. T
 | Aspect | Detail |
 |---|---|
 | **Failure mode** | All streams on a connection freeze simultaneously at ~8 concurrent requests |
-| **Visible capacity** | `max_capacity: 100` (from local h2 config, possibly overridden by proxy/LLM SETTINGS) |
+| **Visible capacity** | `max_capacity: 100` without cap → pool trusts advertised 100. With `max_concurrent_streams_per_connection=5`: `max_capacity: 5` in `HTTP_POOL_HEALTH` logs. |
 | **Real capacity** | Estimated 8-10 (hidden upstream bottleneck) |
-| **Pool behavior** | Correctly trusts `max_concurrent_requests() = 100` — no reason to open more connections |
+| **Pool behavior** | Without cap: trusts `max_concurrent_requests() = 100` — no reason to open more connections. With cap: opens new connection after 5 streams, distributing load. |
 | **Gateway behavior** | No wall-clock timeout in default streaming mode; per-chunk read timeout = 120s |
 | **Cascade** | Timeouts → key retries → new streams on same connection → more timeouts → key penalization → rotation through all keys |
-| **Mitigation** | Service restart — closes all connections, cycle repeats |
-| **Detectability** | Not visible in standard metrics; `max_capacity: 100` looks healthy |
+| **Mitigation** | `max_concurrent_streams_per_connection` cap (default 5) limits streams per connection, forcing pool to open new connections before hidden limit is reached. Service restart is a fallback. |
+| **Detectability** | Not visible in standard metrics; `max_capacity: 100` looks healthy. With the cap (default 5), `max_capacity: 5` is visible in `HTTP_POOL_HEALTH` logs. |
 
 ---
 
-## What the diagnostic tests will prove
+## What the diagnostic tests prove
 
-The proposed tests (`h2-throughput-bottleneck-tests`) model exactly this scenario:
+The tests in `tests/stress/test_throughput_bottleneck.py` model the exact
+production scenario with `internal_concurrency` (a hidden server-side
+limit) lower than `max_concurrent_streams` (the advertised SETTINGS value):
 
-- **Test A** proves the bottleneck: with `internal_concurrency=8` and `max_concurrent_streams=100`, 20 requests on 1 transport → 1 connection, bimodal latency, all succeed but some take 3× longer.
+- **Test A** (`test_single_connection_bottleneck`) proves the bottleneck:
+  `internal_concurrency=8`, `max_concurrent_streams=100`, 20 requests on
+  1 transport → `peak_connections == 1`, bimodal latency (≥8 fast, ≥5
+  slow), all succeed but take 3× longer for queued requests.
 
-- **Test B** proves the fix direction: distributing requests across 3 transports → 3 connections, uniform latency, proves the bottleneck is per-connection.
+- **Test B** (`test_multi_connection_mitigation`) proves that distributing
+  requests across **3 transports** (3 connections) does **not** fully
+  mitigate the problem — `internal_concurrency` is a server-side/shared
+  limit.  Latency is bounded but not uniform (3 batches:
+  8@~5s, 8@~10s, 5@~15s).  All 21 requests still succeed.
 
-- **Test C** reproduces the production cascade: `internal_concurrency=3`, 60s delay, 120s timeout → some requests timeout, concurrency_waiters > 0, 1 connection used.
+- **Test C** (`test_production_timeout_cascade`) is **skipped**
+  (`pytest.skip`): it attempted to reproduce the 600-second timeout
+  cascade (`internal_concurrency=3`, 120s timeout) but had unreliable
+  timing dependencies and needs to be rewritten.

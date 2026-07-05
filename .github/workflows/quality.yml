@@ -13,6 +13,10 @@ on:
         description: "Run postgres integration tests"
         required: false
         default: "false"
+      run_stress:
+        description: "Run stress tests (G6, real HTTP/2)"
+        required: false
+        default: "false"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -139,9 +143,42 @@ jobs:
       - name: G5 — root-level tests (inversion)
         run: poetry run pytest tests/ --ignore=tests/unit --ignore=tests/integration --ignore=tests/security --ignore=tests/e2e --ignore=tests/stress --ignore=tests/batching -q --timeout=30 -m "not slow and not postgres" || true
 
-  # ── Job 5: PostgreSQL Integration (scheduled/manual only) ──
+  # ── Job 5: Stress Tests (G6 — scheduled/manual only) ──
+  # Split into 3 sub-steps matching the Makefile's G6a/G6b/G6c grouping.
+  # Only runs on schedule or when explicitly requested via workflow_dispatch.
+  stress-tests:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.run_stress == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13.5"
+
+      - name: Install Poetry
+        run: pip install poetry
+
+      - name: Install dependencies
+        run: poetry install --with dev
+
+      - name: Verify httpcore version
+        run: poetry run python -c "import httpcore; assert httpcore.__version__ == '1.0.9'"
+
+      - name: G6a — fast server + metrics tests
+        run: poetry run pytest tests/stress/test_ephemeral_server.py tests/stress/test_metrics_collector.py -q --timeout=15 -m slow
+
+      - name: G6b — concurrency scenarios
+        run: poetry run pytest tests/stress/test_cap_prevents_freeze.py tests/stress/test_connection_growth.py tests/stress/test_multi_client.py tests/stress/test_stream_exhaustion.py tests/stress/test_cascading_freeze.py tests/stress/test_pool_saturation.py tests/stress/test_throughput_bottleneck.py -q --timeout=30 -m slow
+
+      - name: G6c — long-running scenarios
+        run: poetry run pytest tests/stress/test_pool_recovery.py tests/stress/test_production_load.py -q --timeout=60 -m slow
+
+  # ── Job 6: PostgreSQL Integration (scheduled/manual only) ──
   postgres-integration:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.run_postgres == 'true')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
