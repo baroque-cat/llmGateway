@@ -61,7 +61,7 @@ class TestConfigErrorBlocksModuleImport:
             patch("src.core.accessor.ConfigAccessor", return_value=MagicMock()),
         ):
             with pytest.raises(FileNotFoundError, match="config.yaml not found"):
-                pass  # pyright: ignore[reportUnusedImport]  # noqa: F811
+                import main  # noqa: F811, F401
 
     def test_err_02_value_error_blocks_import(self) -> None:
         """ERR-02: load_config → ValueError → import raises ValueError."""
@@ -77,7 +77,7 @@ class TestConfigErrorBlocksModuleImport:
             patch("src.core.accessor.ConfigAccessor", return_value=MagicMock()),
         ):
             with pytest.raises(ValueError, match="Invalid config value"):
-                pass  # pyright: ignore[reportUnusedImport]  # noqa: F811
+                import main  # noqa: F811, F401
 
     def test_err_03_system_exit_1_blocks_import(self) -> None:
         """ERR-03: load_config → SystemExit(1) (Pydantic validation error) → import raises SystemExit(1).
@@ -97,7 +97,7 @@ class TestConfigErrorBlocksModuleImport:
             patch("src.core.accessor.ConfigAccessor", return_value=MagicMock()),
         ):
             with pytest.raises(SystemExit) as exc_info:
-                pass  # pyright: ignore[reportUnusedImport]  # noqa: F811
+                import main  # noqa: F811, F401
 
             assert (
                 exc_info.value.code == 1
@@ -115,7 +115,7 @@ class TestConfigErrorBlocksModuleImport:
             patch("src.core.accessor.ConfigAccessor", return_value=MagicMock()),
         ):
             with pytest.raises(Exception, match="Unexpected error"):
-                pass  # pyright: ignore[reportUnusedImport]  # noqa: F811
+                import main  # noqa: F811, F401
 
     def test_err_05_successful_import_after_previous_failure(self) -> None:
         """ERR-05: After a failed import, removing main from sys.modules allows a successful re-import.

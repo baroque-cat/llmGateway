@@ -140,6 +140,8 @@ EXCLUDE_FILES=(
     "test_postgres_runner.py"
     "test_test_infra_polish.py"
     "test_postgres_policy.py"
+    "test_pyright_tiered_config.py"
+    "test_pyright_ci_gate.py"
     # Pre-existing violations: tests/unit/ (canonical mode — strict, no annotations)
     # These files use production URLs, wrong provider types, and/or obsolete model
     # names (especially "gpt-4" as a generic test fixture) for URL construction,

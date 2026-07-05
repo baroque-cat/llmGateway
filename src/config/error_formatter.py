@@ -28,17 +28,17 @@ def get_line_number(
     Returns:
         Line number (1-indexed) if found, None otherwise.
     """
-    current = raw_yaml_dict
-    parent = None
-    last_key = None
+    current: dict[str, Any] | Any = raw_yaml_dict
+    parent: dict[str, Any] | None = None
+    last_key: str | None = None
 
     try:
         for key in error_path:
             if isinstance(current, dict):
-                parent = current
+                parent = cast("dict[str, Any]", current)
                 last_key = key
                 if key in current:
-                    current = current[key]
+                    current = cast("dict[str, Any]", current)[key]
                 else:
                     break
 

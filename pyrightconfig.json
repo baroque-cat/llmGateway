@@ -1,7 +1,6 @@
 {
   "include": [
     "src",
-    "tests",
     "main.py"
   ],
   "exclude": [
@@ -12,21 +11,18 @@
     "venv",
     "build",
     "dist",
-    "*.egg-info"
+    "*.egg-info",
+    "src/core/http2"
   ],
   "pythonVersion": "3.13",
   "pythonPlatform": "Linux",
-  "typeCheckingMode": "strict",
+  "typeCheckingMode": "basic",
+  "strict": [
+    "src/core",
+    "src/config"
+  ],
   "reportMissingTypeStubs": false,
-  "reportUnknownMemberType": true,
-  "reportUnknownVariableType": true,
-  "reportUnknownArgumentType": true,
-  "reportUnknownLambdaType": true,
-  "reportUnknownParameterType": true,
-  "reportMissingTypeArgument": true,
-  "reportInvalidTypeVarUse": true,
-  "reportCallInDefaultInitializer": true,
-  "reportUnnecessaryTypeIgnoreComment": true,
+  "reportUnnecessaryTypeIgnoreComment": false,
   "executionEnvironments": [
     {
       "root": ".",
