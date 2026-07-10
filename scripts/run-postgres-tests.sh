@@ -21,10 +21,14 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 cd "$PROJECT_DIR"
 
-# ── Engine detection (podman-first, then docker) ──
+# ── Engine detection (docker-first when DOCKER_HOST is set, podman-first otherwise) ──
 COMPOSE_CMD=()
 
-if command -v podman >/dev/null 2>&1 && podman info >/dev/null 2>&1; then
+# In CI environments DOCKER_HOST is often set; prefer docker since the CI
+# workflow already uses `docker compose`. Locally, podman-first for rootless setups.
+if [ -n "${DOCKER_HOST:-}" ] && command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    COMPOSE_CMD=(docker compose)
+elif command -v podman >/dev/null 2>&1 && podman info >/dev/null 2>&1; then
     COMPOSE_CMD=(podman compose)
 elif command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
     COMPOSE_CMD=(docker compose)

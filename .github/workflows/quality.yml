@@ -194,6 +194,12 @@ jobs:
       - name: Install dependencies
         run: poetry install --with dev
 
+      - name: Create .env for compose
+        # docker-compose.yml references .env via env_file on gateway/keeper
+        # services. The file is gitignored; create it from .env.example so
+        # compose commands (up, down, config) don't fail with "no such file".
+        run: cp .env.example .env
+
       - name: Start test database
         run: docker compose up -d --wait test-database
 
