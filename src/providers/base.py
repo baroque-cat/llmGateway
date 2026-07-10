@@ -233,6 +233,9 @@ class AIBaseProvider(IProvider):
         content_bytes: bytes | None = None
 
         try:
+            # Inject per-stream timeout into request extensions so the custom
+            # HTTP/2 transport can enforce it via asyncio.wait_for().
+            request.extensions["stream_read"] = self.config.timeouts.stream_read
             upstream_response = await client.send(request, stream=True)
 
             if upstream_response.is_success:

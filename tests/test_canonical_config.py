@@ -78,6 +78,7 @@ def test_parses_example_files_correctly() -> None:
     assert cfg.timeout_write == 20.0
     assert cfg.timeout_pool == 15.0
     assert cfg.timeout_total == 600.0
+    assert cfg.timeout_stream_read is None
 
     # === Metrics (from YAML + .env.example) ===
     assert cfg.metrics_enabled is True

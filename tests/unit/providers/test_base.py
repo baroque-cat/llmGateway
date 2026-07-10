@@ -20,10 +20,12 @@ from src.config.schemas import (
     ErrorParsingRule,
     GatewayPolicyConfig,
     ProviderConfig,
+    TimeoutConfig,
 )
 from src.core.constants import ErrorReason
 from src.core.models import CheckResult, RequestDetails
 from src.providers.base import AIBaseProvider
+from tests._canonical import CanonicalConfig
 
 
 class MockAIBaseProvider(AIBaseProvider):
@@ -885,8 +887,18 @@ class TestSendProxyRequestChangedContract:
         debug_mode: str = "disabled",
         error_parsing_enabled: bool = False,
         error_parsing_rules: list | None = None,
+        stream_read: float | None = None,
     ) -> MockAIBaseProvider:
-        """Helper to create a MockAIBaseProvider with specific config."""
+        """Helper to create a MockAIBaseProvider with specific config.
+
+        Args:
+            debug_mode: Gateway debug mode (``disabled``, ``no_content``,
+                ``full_body``).
+            error_parsing_enabled: Whether error parsing is enabled.
+            error_parsing_rules: List of :class:`ErrorParsingRule` objects.
+            stream_read: Value for ``TimeoutConfig.stream_read``.  ``None``
+                (default) means the per-stream timeout falls back to ``read``.
+        """
         if error_parsing_rules is None:
             error_parsing_rules = []
 
@@ -902,6 +914,7 @@ class TestSendProxyRequestChangedContract:
             error_parsing=ErrorParsingConfig(
                 enabled=error_parsing_enabled, rules=error_parsing_rules
             ),
+            timeouts=TimeoutConfig(stream_read=stream_read),
         )
 
         return MockAIBaseProvider("test_provider", provider_config)
@@ -934,6 +947,7 @@ class TestSendProxyRequestChangedContract:
         mock_client = AsyncMock(spec=httpx.AsyncClient)
         mock_client.send = AsyncMock(return_value=mock_upstream)
         mock_request = MagicMock(spec=httpx.Request)
+        mock_request.extensions = {}
 
         with patch.object(
             provider,
@@ -977,6 +991,7 @@ class TestSendProxyRequestChangedContract:
             mock_client = AsyncMock(spec=httpx.AsyncClient)
             mock_client.send = AsyncMock(return_value=mock_upstream)
             mock_request = MagicMock(spec=httpx.Request)
+            mock_request.extensions = {}
 
             with patch.object(
                 provider,
@@ -987,6 +1002,9 @@ class TestSendProxyRequestChangedContract:
 
                 # Verify: aclose() NOT called for any status code
                 mock_upstream.aclose.assert_not_called()
+
+                # Verify: stream_read extension was injected before send()
+                assert "stream_read" in mock_request.extensions
 
     # --- UT-4: error_parsing reads body, returns body_bytes ---
     @pytest.mark.asyncio
@@ -1016,6 +1034,7 @@ class TestSendProxyRequestChangedContract:
         mock_client = AsyncMock(spec=httpx.AsyncClient)
         mock_client.send = AsyncMock(return_value=mock_upstream)
         mock_request = MagicMock(spec=httpx.Request)
+        mock_request.extensions = {}
 
         with patch.object(
             provider,
@@ -1056,6 +1075,7 @@ class TestSendProxyRequestChangedContract:
         mock_client = AsyncMock(spec=httpx.AsyncClient)
         mock_client.send = AsyncMock(return_value=mock_upstream)
         mock_request = MagicMock(spec=httpx.Request)
+        mock_request.extensions = {}
 
         with patch.object(
             provider,
@@ -1092,6 +1112,7 @@ class TestSendProxyRequestChangedContract:
         mock_client = AsyncMock(spec=httpx.AsyncClient)
         mock_client.send = AsyncMock(return_value=mock_upstream)
         mock_request = MagicMock(spec=httpx.Request)
+        mock_request.extensions = {}
 
         result = await provider._send_proxy_request(mock_client, mock_request)
 
@@ -1140,6 +1161,7 @@ class TestSendProxyRequestChangedContract:
         mock_client = AsyncMock(spec=httpx.AsyncClient)
         mock_client.send = AsyncMock(return_value=mock_upstream)
         mock_request = MagicMock(spec=httpx.Request)
+        mock_request.extensions = {}
 
         with patch.object(
             provider_with_parsing,
@@ -1204,6 +1226,7 @@ class TestSendProxyRequestChangedContract:
         mock_client = AsyncMock(spec=httpx.AsyncClient)
         mock_client.send = AsyncMock(return_value=mock_upstream)
         mock_request = MagicMock(spec=httpx.Request)
+        mock_request.extensions = {}
 
         with patch.object(
             provider,
@@ -1230,6 +1253,7 @@ class TestSendProxyRequestChangedContract:
         mock_client = AsyncMock(spec=httpx.AsyncClient)
         mock_client.send = AsyncMock(return_value=mock_upstream)
         mock_request = MagicMock(spec=httpx.Request)
+        mock_request.extensions = {}
 
         response, check_result, body_bytes = await provider._send_proxy_request(
             mock_client, mock_request
@@ -1246,6 +1270,9 @@ class TestSendProxyRequestChangedContract:
 
         # Verify: aclose() NOT called
         mock_upstream.aclose.assert_not_called()
+
+        # Verify: stream_read extension was injected before send()
+        assert "stream_read" in mock_request.extensions
 
     # --- NEW: no debug, no matching error_parsing rule → body_bytes=None ---
     @pytest.mark.asyncio
@@ -1270,6 +1297,7 @@ class TestSendProxyRequestChangedContract:
         mock_client = AsyncMock(spec=httpx.AsyncClient)
         mock_client.send = AsyncMock(return_value=mock_upstream)
         mock_request = MagicMock(spec=httpx.Request)
+        mock_request.extensions = {}
 
         with patch.object(
             provider,
@@ -1303,6 +1331,7 @@ class TestSendProxyRequestChangedContract:
             side_effect=httpx.RequestError("Connection failed")
         )
         mock_request = MagicMock(spec=httpx.Request)
+        mock_request.extensions = {}
 
         response, check_result, body_bytes = await provider._send_proxy_request(
             mock_client, mock_request
@@ -1332,6 +1361,7 @@ class TestSendProxyRequestChangedContract:
         mock_client = AsyncMock(spec=httpx.AsyncClient)
         mock_client.send = AsyncMock(return_value=mock_upstream)
         mock_request = MagicMock(spec=httpx.Request)
+        mock_request.extensions = {}
 
         with patch.object(
             provider,
@@ -1369,6 +1399,7 @@ class TestSendProxyRequestChangedContract:
             side_effect=httpx.LocalProtocolError("All streams busy")
         )
         mock_request = MagicMock(spec=httpx.Request)
+        mock_request.extensions = {}
 
         response, check_result, body_bytes = await provider._send_proxy_request(
             mock_client, mock_request
@@ -1417,6 +1448,7 @@ class TestSendProxyRequestChangedContract:
         mock_client = AsyncMock(spec=httpx.AsyncClient)
         mock_client.send = AsyncMock(side_effect=error_class("test error"))
         mock_request = MagicMock(spec=httpx.Request)
+        mock_request.extensions = {}
 
         response, check_result, body_bytes = await provider._send_proxy_request(
             mock_client, mock_request
@@ -1431,6 +1463,72 @@ class TestSendProxyRequestChangedContract:
 
         # Verify: body_bytes=None
         assert body_bytes is None
+
+    # --- NEW: stream_read injection into request.extensions ---
+
+    @pytest.mark.asyncio
+    async def test_send_proxy_request_injects_stream_read_into_extensions(self):
+        """
+        Verifies: _send_proxy_request injects ``config.timeouts.stream_read``
+        into ``request.extensions["stream_read"]`` before ``client.send()``
+        is called.
+
+        The injected value must match the configured ``stream_read`` timeout
+        so the custom HTTP/2 transport can enforce a per-stream deadline via
+        ``asyncio.wait_for()``.
+        """
+        cfg = CanonicalConfig.from_example_files()
+        # Use canonical read timeout as a non-None stream_read value
+        # (cfg.timeout_stream_read is None in the canonical config, so we
+        # use timeout_read which is a valid non-None canonical float).
+        stream_read_value = cfg.timeout_read
+        assert stream_read_value is not None
+
+        provider = self._create_provider_with_config(stream_read=stream_read_value)
+
+        mock_upstream = self._create_mock_upstream_response(status_code=200)
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.send = AsyncMock(return_value=mock_upstream)
+        mock_request = MagicMock(spec=httpx.Request)
+        mock_request.extensions = {}
+
+        await provider._send_proxy_request(mock_client, mock_request)
+
+        # Verify: stream_read was injected into extensions before send()
+        assert "stream_read" in mock_request.extensions
+        assert mock_request.extensions["stream_read"] == stream_read_value
+
+        # Verify: the request passed to send() carries the injected extension
+        sent_request = mock_client.send.call_args[0][0]
+        assert sent_request is mock_request
+        assert sent_request.extensions["stream_read"] == stream_read_value
+
+    @pytest.mark.asyncio
+    async def test_send_proxy_request_injects_stream_read_none_when_unset(self):
+        """
+        Verifies: When ``config.timeouts.stream_read`` is ``None`` (default),
+        _send_proxy_request still injects the key with value ``None`` into
+        ``request.extensions``.
+
+        The key's presence (even with ``None``) signals to the HTTP/2 transport
+        that it should fall back to the ``read`` timeout.
+        """
+        provider = self._create_provider_with_config(stream_read=None)
+
+        # Verify: config.timeouts.stream_read is indeed None
+        assert provider.config.timeouts.stream_read is None
+
+        mock_upstream = self._create_mock_upstream_response(status_code=200)
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.send = AsyncMock(return_value=mock_upstream)
+        mock_request = MagicMock(spec=httpx.Request)
+        mock_request.extensions = {}
+
+        await provider._send_proxy_request(mock_client, mock_request)
+
+        # Verify: stream_read key exists but value is None (fallback signal)
+        assert "stream_read" in mock_request.extensions
+        assert mock_request.extensions["stream_read"] is None
 
 
 class TestCheckFastFailRemoved:
@@ -1527,6 +1625,7 @@ class TestEnhancedNetworkErrorLogging:
         mock_client = AsyncMock(spec=httpx.AsyncClient)
         mock_client.send = AsyncMock(side_effect=httpx.ReadTimeout("read timeout"))
         mock_request = MagicMock(spec=httpx.Request)
+        mock_request.extensions = {}
         mock_request.url = "https://api.example.com/v1/chat"
 
         with patch("src.providers.base.logger") as mock_logger:
@@ -1566,6 +1665,7 @@ class TestEnhancedNetworkErrorLogging:
             side_effect=httpx.RemoteProtocolError("protocol error")
         )
         mock_request = MagicMock(spec=httpx.Request)
+        mock_request.extensions = {}
         mock_request.url = "https://api.example.com/v1/chat"
 
         with patch("src.providers.base.logger") as mock_logger:
@@ -1600,6 +1700,7 @@ class TestEnhancedNetworkErrorLogging:
         mock_client = AsyncMock(spec=httpx.AsyncClient)
         mock_client.send = AsyncMock(side_effect=httpx.PoolTimeout("pool timeout"))
         mock_request = MagicMock(spec=httpx.Request)
+        mock_request.extensions = {}
         mock_request.url = "https://api.example.com/v1/chat"
 
         with patch("src.providers.base.logger") as mock_logger:
@@ -1636,6 +1737,7 @@ class TestEnhancedNetworkErrorLogging:
             side_effect=httpx.CloseError("connection closed unexpectedly")
         )
         mock_request = MagicMock(spec=httpx.Request)
+        mock_request.extensions = {}
         mock_request.url = "https://api.example.com/v1/chat"
 
         with patch("src.providers.base.logger") as mock_logger:

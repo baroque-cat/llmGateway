@@ -136,6 +136,35 @@ def test_default_config_max_concurrent_streams_per_connection():
     )
 
 
+def test_default_config_stream_read_timeout():
+    """IT-Y07-2: get_default_config()['providers']['llm_provider_default']['timeouts']
+    contains 'stream_read' key with value None.
+
+    The stream_read timeout defaults to None (disabled) — when not set, the
+    gateway uses the standard read timeout for streaming responses.
+    """
+    defaults = get_default_config()
+
+    assert "providers" in defaults
+    llm_default = defaults["providers"]["llm_provider_default"]
+
+    # Verify the timeouts block exists
+    assert "timeouts" in llm_default, (
+        f"Key 'timeouts' not found in llm_provider_default. "
+        f"Available keys: {list(llm_default.keys())}"
+    )
+    timeouts = llm_default["timeouts"]
+
+    # Verify the stream_read key exists and is None
+    assert "stream_read" in timeouts, (
+        f"Key 'stream_read' not found in timeouts. "
+        f"Available keys: {list(timeouts.keys())}"
+    )
+    assert (
+        timeouts["stream_read"] is None
+    ), f"Expected stream_read=None, got {timeouts['stream_read']!r}"
+
+
 # --- Test moved from integration/test_config_examples.py ---
 
 

@@ -271,6 +271,8 @@ class CanonicalConfig:
         timeout_write: Provider write timeout in seconds.
         timeout_pool: Provider pool timeout in seconds.
         timeout_total: Provider total request timeout in seconds.
+        timeout_stream_read: Per-stream response header timeout in seconds
+            (None = no per-stream deadline, socket-level read timeout remains).
         metrics_enabled: Whether the /metrics endpoint is enabled.
         metrics_access_token: Metrics access token (test-safe mock).
         metrics_backend: Metrics backend (``""`` for memory/disabled).
@@ -332,12 +334,13 @@ class CanonicalConfig:
     pool_max_keepalive: int
     pool_keepalive_expiry: float
 
-    # === Timeouts (5) ===
+    # === Timeouts (6) ===
     timeout_connect: float
     timeout_read: float
     timeout_write: float
     timeout_pool: float
     timeout_total: float
+    timeout_stream_read: float | None
 
     # === Metrics (4) ===
     metrics_enabled: bool
@@ -453,6 +456,11 @@ class CanonicalConfig:
             timeout_write=float(timeouts.get("write", 20.0)),
             timeout_pool=float(timeouts.get("pool", 15.0)),
             timeout_total=float(timeouts.get("total", 600.0)),
+            timeout_stream_read=(
+                float(timeouts["stream_read"])
+                if timeouts.get("stream_read") is not None
+                else None
+            ),
             # Metrics (enabled from YAML, token from env, backend/dir from env)
             metrics_enabled=bool(metrics.get("enabled", True)),
             metrics_access_token=env["METRICS_ACCESS_TOKEN"],

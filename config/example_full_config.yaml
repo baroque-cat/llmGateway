@@ -242,7 +242,31 @@ providers:
     access_control:
       gateway_access_token: "${DEEPSEEK_TOKEN}"
 
-    # Using default health and gateway policies by omitting them
+    # Explicit timeouts and gateway policy (matching other providers).
+    # Previously omitted, but gateway_policy.retry.enabled defaults to False,
+    # meaning DeepSeek did not retry on errors unlike other providers.
+    timeouts:
+      connect: 10.0
+      read: 120.0
+      write: 20.0
+      pool: 15.0
+      total: 600.0
+
+    gateway_policy:
+      streaming_mode: "auto"
+      debug_mode: "disabled"
+
+      retry:
+        enabled: true
+        on_key_error:
+          attempts: 3
+          backoff_sec: 0.1
+          backoff_factor: 1.5
+        on_server_error:
+          attempts: 5
+          backoff_sec: 0.5
+          backoff_factor: 2.0
+
     proxy_config:
       mode: "none"
 
@@ -413,6 +437,10 @@ providers:
       write: 20.0
       pool: 15.0
       total: 600.0
+      # Per-stream deadline for receiving response headers (DashScope SDK readTimeout).
+      # None (default) = no per-stream deadline — socket-level read timeout remains.
+      # 300 s matches the DashScope SDK default.
+      stream_read: 300.0
 
     worker_health_policy:
       on_server_error_min: 30

@@ -382,6 +382,13 @@ class TimeoutConfig(BaseModel):
     # Total wall-clock deadline for the entire request lifecycle (including retries).
     # Enforced via ``asyncio.timeout()`` around the gateway retry loop.
     total: float = Field(default=600.0, gt=0)
+    # Per-stream deadline for receiving response headers on a single HTTP/2 stream.
+    # When ``None`` (default), no per-stream deadline is enforced — the socket-level
+    # ``read`` timeout remains as the only backstop.  Set to an explicit value
+    # (e.g., ``300.0``) to enable per-stream deadline enforcement via
+    # ``asyncio.wait_for()``.  This prevents stream starvation under HTTP/2
+    # multiplexing where multiple streams share one TCP connection.
+    stream_read: float | None = Field(default=None, gt=0)
 
 
 class ErrorParsingRule(BaseModel):

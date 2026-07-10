@@ -614,9 +614,14 @@ class TestSignatureContractEnforcement:
                 return await self._send_proxy_request(client, request)
 
         # Create a mock provider config
-        from src.config.schemas import GatewayPolicyConfig, ProviderConfig
+        from src.config.schemas import (
+            GatewayPolicyConfig,
+            ProviderConfig,
+            TimeoutConfig,
+        )
 
         mock_config = MagicMock(spec=ProviderConfig)
+        mock_config.timeouts = TimeoutConfig()
         mock_config.gateway_policy = MagicMock(spec=GatewayPolicyConfig)
         mock_config.gateway_policy.debug_mode = "disabled"
         mock_config.error_parsing = MagicMock()
@@ -634,9 +639,9 @@ class TestSignatureContractEnforcement:
         mock_client.send = AsyncMock(return_value=mock_upstream)
         mock_client.build_request = Mock(return_value=MagicMock(spec=httpx.Request))
 
-        result = await provider._send_proxy_request(
-            mock_client, MagicMock(spec=httpx.Request)
-        )
+        mock_request = MagicMock(spec=httpx.Request)
+        mock_request.extensions = {}
+        result = await provider._send_proxy_request(mock_client, mock_request)
 
         # Must be exactly 3 elements
         assert (

@@ -27,6 +27,7 @@ def get_default_config() -> dict[str, Any]:
                 "max_keepalive_connections": 20,
                 "keepalive_expiry": 5.0,
             },
+            "pool_health_log_interval_sec": 60,
         },
         # The metrics accessor key belongs here in the future when added.
         # --- GATEWAY SETTINGS ---
@@ -95,6 +96,7 @@ def get_default_config() -> dict[str, Any]:
                     "write": 20.0,
                     "pool": 15.0,
                     "total": 600.0,
+                    "stream_read": None,
                 },
                 # Policy for the background worker's health checks.
                 # REFACTORED: This section now perfectly matches the updated HealthPolicyConfig schema.

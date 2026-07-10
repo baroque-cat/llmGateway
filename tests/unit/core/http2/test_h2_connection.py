@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import h2.connection
@@ -11,11 +12,13 @@ import h2.settings
 import pytest
 from httpcore._async.http2 import HTTPConnectionState
 from httpcore._async.http11 import AsyncHTTP11Connection
-from httpcore._models import Origin
+from httpcore._exceptions import ReadTimeout
+from httpcore._models import Origin, Response
 
 from src.core.http2.connection import CapacityAwareHTTPConnection
 from src.core.http2.h2_connection import FixedHTTP2Connection
 from src.core.http2.semaphore import NonBlockingSemaphore
+from tests._canonical import CanonicalConfig
 
 
 class TestFixedHTTP2Connection:
@@ -30,6 +33,8 @@ class TestFixedHTTP2Connection:
         max_streams: int = 100,
         sent_init: bool = True,
         max_streams_cap: int | None = None,
+        stream_read: float | None = None,
+        read_timeout: float = 120.0,
     ) -> FixedHTTP2Connection:
         """Create a FixedHTTP2Connection with common mocks set up.
 
@@ -39,6 +44,12 @@ class TestFixedHTTP2Connection:
             sent_init: Whether ``_sent_connection_init`` is True.
             max_streams_cap: Value for ``_max_streams_cap`` (the per-provider
                 cap). ``None`` means no cap (default behavior).
+            stream_read: Per-stream timeout value.  Not stored on the
+                connection itself — used by new tests to construct mock
+                requests with the correct ``request.extensions`` dict.
+            read_timeout: Read timeout value.  Not stored on the connection
+                itself — used by new tests to construct mock requests with
+                the correct ``request.extensions`` dict.
         """
         # Bypass __init__ to avoid calling super().__init__ which needs real backends
         conn = object.__new__(FixedHTTP2Connection)
@@ -57,6 +68,8 @@ class TestFixedHTTP2Connection:
         conn._sent_connection_init = sent_init  # type: ignore[reportPrivateUsage]
         conn._state = HTTPConnectionState.ACTIVE  # type: ignore[reportPrivateUsage]
         conn._state_lock = asyncio.Lock()  # type: ignore[reportPrivateUsage]
+        conn._init_lock = asyncio.Lock()  # type: ignore[reportPrivateUsage]
+        conn._read_lock = asyncio.Lock()  # type: ignore[reportPrivateUsage]
         conn._connection_terminated = None  # type: ignore[reportPrivateUsage]
         conn._used_all_stream_ids = False  # type: ignore[reportPrivateUsage]
         conn._request_count = 0  # type: ignore[reportPrivateUsage]
@@ -72,6 +85,9 @@ class TestFixedHTTP2Connection:
 
         # Mock handle_async_request to avoid running the real one
         conn._send_connection_init = AsyncMock()  # type: ignore[reportPrivateUsage]
+
+        # Allow handle_async_request to pass the origin check
+        conn.can_handle_request = MagicMock(return_value=True)
 
         return conn
 
@@ -98,7 +114,16 @@ class TestFixedHTTP2Connection:
 
     @pytest.mark.asyncio
     async def test_response_closed_cancelled_stream_reset(self) -> None:
-        """Cancelled stream (not in _closed_streams): reset_stream called."""
+        """Cancelled stream (not in _closed_streams): reset_stream called.
+
+        This test also covers the MODIFIED requirement: the outer
+        ``except BaseException`` → ``_response_closed`` path handles
+        ``ReadTimeout`` (raised by the inner ``except TimeoutError``
+        handler) identically to ``CancelledError`` — both are
+        ``BaseException`` subclasses that bypass ``except Exception``.
+        The existing assertions verify the cleanup path (reset_stream +
+        semaphore release + event deletion).
+        """
         conn = self._make_conn()
         stream_id = 7
         conn._events[stream_id] = []  # type: ignore[reportPrivateUsage]
@@ -371,3 +396,294 @@ class TestFixedHTTP2Connection:
         assert isinstance(inner, AsyncHTTP11Connection)
         # H1 connections have no _max_streams_cap attribute — cap is H2-only.
         assert not hasattr(inner, "_max_streams_cap")
+
+
+class TestPerStreamTimeout:
+    """Tests for the per-stream timeout in ``handle_async_request``.
+
+    Verifies that ``stream_read`` (or the fallback ``read`` timeout) is
+    enforced via ``asyncio.wait_for`` around ``_receive_response``, that
+    RST_STREAM is sent before semaphore release, and that the send phases
+    are NOT wrapped by the timeout.
+    """
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _make_request(
+        stream_read: float | None = None,
+        read_timeout: float | None = None,
+    ) -> MagicMock:
+        """Create a mock Request with the correct ``extensions`` dict.
+
+        Args:
+            stream_read: Per-stream timeout for ``extensions["stream_read"]``.
+            read_timeout: Read timeout for ``extensions["timeout"]["read"]``.
+
+        Returns:
+            A MagicMock request whose ``extensions`` is a real dict so
+            ``request.extensions.get(...)`` behaves correctly.
+        """
+        request = MagicMock()
+        request.url.origin = MagicMock()
+        extensions: dict[str, object] = {"stream_read": stream_read}
+        if read_timeout is not None:
+            extensions["timeout"] = {"read": read_timeout}
+        request.extensions = extensions
+        return request
+
+    @staticmethod
+    def _setup_conn_for_handle(conn: FixedHTTP2Connection) -> int:
+        """Configure a conn from ``_make_conn`` for ``handle_async_request``.
+
+        Sets up ``get_next_available_stream_id`` and no-op send mocks.
+
+        Returns:
+            The stream ID that ``get_next_available_stream_id`` will return.
+        """
+        stream_id = 1
+        conn._h2_state.get_next_available_stream_id = MagicMock(  # type: ignore[reportPrivateUsage]
+            return_value=stream_id
+        )
+        conn._send_request_headers = AsyncMock()  # type: ignore[reportPrivateUsage]
+        conn._send_request_body = AsyncMock()  # type: ignore[reportPrivateUsage]
+        return stream_id
+
+    @staticmethod
+    async def _hang_forever(
+        **kwargs: object,
+    ) -> tuple[int, list[tuple[bytes, bytes]]]:
+        """Mock ``_receive_response`` that hangs beyond any deadline."""
+        await asyncio.sleep(10)
+        return (200, [])
+
+    # ------------------------------------------------------------------
+    # Tests
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_per_stream_timeout_fires_releases_semaphore_and_survives(
+        self,
+    ) -> None:
+        """Per-stream timeout fires, releases semaphore, connection survives.
+
+        When ``stream_read`` deadline is exceeded, ``ReadTimeout`` is
+        raised, RST_STREAM is sent, the semaphore slot is released, and
+        a second stream on the same connection continues unaffected.
+        """
+        conn = TestFixedHTTP2Connection._make_conn()
+        stream_id = self._setup_conn_for_handle(conn)
+        conn._write_outgoing_data = AsyncMock()  # type: ignore[reportPrivateUsage]
+        conn._receive_response = AsyncMock(  # type: ignore[reportPrivateUsage]
+            side_effect=self._hang_forever
+        )
+
+        # Second stream to prove the connection survives
+        other_stream = 3
+        conn._events[other_stream] = []  # type: ignore[reportPrivateUsage]
+
+        request = self._make_request(stream_read=0.05)
+
+        with pytest.raises(ReadTimeout):
+            await conn.handle_async_request(request)
+
+        # RST_STREAM was sent
+        conn._h2_state.reset_stream.assert_called_with(  # type: ignore[reportPrivateUsage]
+            stream_id
+        )
+        # Outgoing data was flushed
+        conn._write_outgoing_data.assert_called_once()  # type: ignore[reportPrivateUsage]
+        # Semaphore released — _response_closed ran and deleted the stream
+        assert stream_id not in conn._events  # type: ignore[reportPrivateUsage]
+        # Second stream unaffected
+        assert other_stream in conn._events  # type: ignore[reportPrivateUsage]
+        assert conn._state != HTTPConnectionState.CLOSED  # type: ignore[reportPrivateUsage]
+
+    @pytest.mark.asyncio
+    async def test_per_stream_timeout_does_not_fire_for_fast_response(
+        self,
+    ) -> None:
+        """Fast response does not trigger the per-stream timeout.
+
+        When ``_receive_response`` returns immediately, the
+        ``stream_read`` deadline is not reached and a ``Response`` is
+        returned normally.
+        """
+        conn = TestFixedHTTP2Connection._make_conn()
+        self._setup_conn_for_handle(conn)
+
+        status = 200
+        headers: list[tuple[bytes, bytes]] = [(b"content-type", b"application/json")]
+        conn._receive_response = AsyncMock(  # type: ignore[reportPrivateUsage]
+            return_value=(status, headers)
+        )
+
+        request = self._make_request(stream_read=0.05)
+
+        result = await conn.handle_async_request(request)
+
+        assert isinstance(result, Response)
+        assert result.status == status
+
+    @pytest.mark.asyncio
+    async def test_stream_read_takes_priority_over_read(self) -> None:
+        """``stream_read`` takes priority over the ``read`` timeout.
+
+        When both ``stream_read`` and ``timeout.read`` are set, the
+        smaller ``stream_read`` value is used, proving priority over
+        the larger ``read`` value.
+        """
+        cfg = CanonicalConfig.from_example_files()
+        conn = TestFixedHTTP2Connection._make_conn()
+        self._setup_conn_for_handle(conn)
+        conn._write_outgoing_data = AsyncMock()  # type: ignore[reportPrivateUsage]
+        conn._receive_response = AsyncMock(  # type: ignore[reportPrivateUsage]
+            side_effect=self._hang_forever
+        )
+
+        # stream_read=0.05 takes priority over read=cfg.timeout_read (120.0)
+        request = self._make_request(stream_read=0.05, read_timeout=cfg.timeout_read)
+
+        start = time.monotonic()
+        with pytest.raises(ReadTimeout):
+            await conn.handle_async_request(request)
+        elapsed = time.monotonic() - start
+
+        # Should fire after ~0.05 s, not 120 s
+        assert elapsed < 1.0
+
+    @pytest.mark.asyncio
+    async def test_stream_read_none_no_per_stream_timeout(self) -> None:
+        """``stream_read=None`` disables the per-stream timeout.
+
+        When ``stream_read`` is ``None``, ``_receive_response`` is called
+        directly without ``asyncio.wait_for`` wrapping.  The socket-level
+        ``read`` timeout remains as the backstop — preserving the original
+        behavior where active streams keep the socket busy and a starved
+        stream does NOT time out at the event-loop level.
+        """
+        conn = TestFixedHTTP2Connection._make_conn()
+        self._setup_conn_for_handle(conn)
+
+        status = 200
+        headers: list[tuple[bytes, bytes]] = [(b"content-type", b"application/json")]
+        conn._receive_response = AsyncMock(  # type: ignore[reportPrivateUsage]
+            return_value=(status, headers)
+        )
+
+        # stream_read=None, read=0.001 (very small) — if the code fell back
+        # to using read as the asyncio.wait_for timeout, this would raise
+        # ReadTimeout.  Instead, no per-stream timeout is applied.
+        request = self._make_request(stream_read=None, read_timeout=0.001)
+
+        result = await conn.handle_async_request(request)
+
+        assert isinstance(result, Response)
+        assert result.status == status
+        # _receive_response was called directly (not through asyncio.wait_for)
+        conn._receive_response.assert_called_once()  # type: ignore[reportPrivateUsage]
+
+    @pytest.mark.asyncio
+    async def test_rst_stream_sent_before_semaphore_release(self) -> None:
+        """RST_STREAM sent before semaphore release; cleanup runs even if write fails.
+
+        Verifies that ``reset_stream`` and ``_write_outgoing_data`` are
+        called in the inner ``except TimeoutError`` handler before the
+        outer ``except BaseException`` → ``_response_closed`` path.  The
+        inner handler converts ``TimeoutError`` to ``ReadTimeout``.  Also
+        verifies that even if ``_write_outgoing_data`` raises,
+        ``_response_closed`` still runs and releases the semaphore.
+        """
+        # --- Scenario A: Normal call order ---
+        conn = TestFixedHTTP2Connection._make_conn()
+        stream_id = self._setup_conn_for_handle(conn)
+
+        call_order: list[str] = []
+
+        conn._h2_state.reset_stream = MagicMock(  # type: ignore[reportPrivateUsage]
+            side_effect=lambda sid: call_order.append("reset_stream")
+        )
+
+        async def _track_write(*args: object, **kwargs: object) -> None:
+            call_order.append("write_outgoing_data")
+
+        conn._write_outgoing_data = AsyncMock(  # type: ignore[reportPrivateUsage]
+            side_effect=_track_write
+        )
+        conn._receive_response = AsyncMock(  # type: ignore[reportPrivateUsage]
+            side_effect=self._hang_forever
+        )
+
+        original_closed = conn._response_closed  # type: ignore[reportPrivateUsage]
+
+        async def _track_closed(stream_id: int) -> None:
+            call_order.append("response_closed")
+            await original_closed(stream_id=stream_id)
+
+        conn._response_closed = _track_closed  # type: ignore[reportPrivateUsage]
+
+        request = self._make_request(stream_read=0.05)
+
+        with pytest.raises(ReadTimeout):
+            await conn.handle_async_request(request)
+
+        # reset_stream and write_outgoing_data called before response_closed
+        assert call_order[0] == "reset_stream"
+        assert call_order[1] == "write_outgoing_data"
+        assert call_order[2] == "response_closed"
+        # Semaphore released
+        assert stream_id not in conn._events  # type: ignore[reportPrivateUsage]
+
+        # --- Scenario B: _write_outgoing_data raises ---
+        conn2 = TestFixedHTTP2Connection._make_conn()
+        self._setup_conn_for_handle(conn2)
+        conn2._write_outgoing_data = AsyncMock(  # type: ignore[reportPrivateUsage]
+            side_effect=RuntimeError("write failed")
+        )
+        conn2._receive_response = AsyncMock(  # type: ignore[reportPrivateUsage]
+            side_effect=self._hang_forever
+        )
+
+        request2 = self._make_request(stream_read=0.05)
+
+        # RuntimeError from _write_outgoing_data is caught by except BaseException
+        with pytest.raises(RuntimeError, match="write failed"):
+            await conn2.handle_async_request(request2)
+
+        # _response_closed still ran — semaphore released
+        assert stream_id not in conn2._events  # type: ignore[reportPrivateUsage]
+
+    @pytest.mark.asyncio
+    async def test_send_request_phases_not_wrapped_by_wait_for(self) -> None:
+        """Send phases are not wrapped by ``asyncio.wait_for``.
+
+        ``_send_request_headers`` and ``_send_request_body`` are outside
+        the ``asyncio.wait_for`` wrapper.  Even if
+        ``_send_request_headers`` sleeps longer than the ``stream_read``
+        deadline, no ``TimeoutError`` fires during the send phase.
+        """
+        conn = TestFixedHTTP2Connection._make_conn()
+        self._setup_conn_for_handle(conn)
+
+        async def _slow_send(**kwargs: object) -> None:
+            await asyncio.sleep(0.2)
+
+        conn._send_request_headers = AsyncMock(  # type: ignore[reportPrivateUsage]
+            side_effect=_slow_send
+        )
+
+        status = 200
+        headers: list[tuple[bytes, bytes]] = [(b"content-type", b"application/json")]
+        conn._receive_response = AsyncMock(  # type: ignore[reportPrivateUsage]
+            return_value=(status, headers)
+        )
+
+        # stream_read=0.05 — if send phases were wrapped, this would timeout
+        request = self._make_request(stream_read=0.05)
+
+        result = await conn.handle_async_request(request)
+
+        assert isinstance(result, Response)
+        assert result.status == status

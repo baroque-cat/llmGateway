@@ -22,6 +22,7 @@ Remove this class when upstream httpcore merges both fixes.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 import typing
@@ -38,6 +39,7 @@ from httpcore._async.http2 import (
 from httpcore._exceptions import (
     ConnectionNotAvailable,
     LocalProtocolError,
+    ReadTimeout,
     RemoteProtocolError,
 )
 from httpcore._models import Response
@@ -344,9 +346,34 @@ class FixedHTTP2Connection(AsyncHTTP2Connection):
             async with Trace(
                 "receive_response_headers", logger, request, kwargs
             ) as trace:
-                status, headers = await self._receive_response(
-                    request=request, stream_id=stream_id
-                )
+                # Per-stream deadline enforced at the event-loop level.
+                # Only active when stream_read is explicitly set (not None).
+                # When None, the socket-level read timeout remains as backstop
+                # — preserving the original behavior where active streams keep
+                # the socket busy and a starved stream does NOT time out.
+                stream_read = request.extensions.get("stream_read")
+                if stream_read is not None:
+                    try:
+                        status, headers = await asyncio.wait_for(
+                            self._receive_response(
+                                request=request, stream_id=stream_id
+                            ),
+                            timeout=stream_read,
+                        )
+                    except TimeoutError:
+                        # Send RST_STREAM so the server knows this stream is
+                        # abandoned, then flush the outgoing frame before
+                        # raising.  The outer ``except BaseException`` block
+                        # will run ``_response_closed`` for local cleanup.
+                        self._h2_state.reset_stream(stream_id)
+                        await self._write_outgoing_data(request)
+                        raise ReadTimeout(
+                            "Per-stream timeout reading response headers"
+                        ) from None
+                else:
+                    status, headers = await self._receive_response(
+                        request=request, stream_id=stream_id
+                    )
                 trace.return_value = (status, headers)
 
             return Response(

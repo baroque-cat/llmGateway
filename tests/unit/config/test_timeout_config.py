@@ -3,18 +3,24 @@
 """
 Unit tests for TimeoutConfig schema validation and YAML loading.
 
-Covers the new ``total`` field (default 600.0, constraint ``gt=0``), updated
-defaults for ``connect``, ``read``, ``write``, ``pool``, backward compatibility
-for configs that omit the ``total`` field, and YAML round-trip loading via
-``ConfigLoader``.
+Covers the ``total`` field (default 600.0, constraint ``gt=0``), the
+``stream_read`` field (default None, constraint ``gt=0``), updated defaults
+for ``connect``, ``read``, ``write``, ``pool``, backward compatibility for
+configs that omit the ``total`` / ``stream_read`` fields, and YAML round-trip
+loading via ``ConfigLoader``.
 
 Scenarios from test-plan:
   Scenario #5  — Default total timeout is 600 seconds
   Scenario #6  — Custom total timeout from YAML
+  Scenario #10 — stream_read accepts a valid positive float
+  Scenario #11 — stream_read defaults to None when omitted
+  Scenario #12 — stream_read=0 rejected by gt=0
+  Scenario #13 — stream_read=-5.0 rejected by gt=0
   Edge Cases  — total=0 / total=-1 rejection, backward compatibility
 
 Test IDs:
-  UT-TC01..UT-TC10  — Functional tests for TimeoutConfig
+  UT-TC01..UT-TC15 — Functional tests for TimeoutConfig
+  stream_read tests — Per-stream HTTP/2 timeout field
 """
 
 from unittest.mock import mock_open, patch
@@ -48,6 +54,7 @@ class TestTimeoutConfigDefaults:
         assert timeouts.write == 20.0
         assert timeouts.pool == 15.0
         assert timeouts.total == 600.0
+        assert timeouts.stream_read is None
 
     def test_ut_tc02_default_total_timeout_is_600(self):
         """
@@ -74,6 +81,7 @@ class TestTimeoutConfigDefaults:
         assert timeouts.write == 20.0  # default preserved
         assert timeouts.pool == 15.0  # default preserved
         assert timeouts.total == 600.0  # default preserved
+        assert timeouts.stream_read is None  # default preserved
 
 
 # ==============================================================================
@@ -104,12 +112,14 @@ class TestTimeoutConfigCustomValues:
             write=5.0,
             pool=2.0,
             total=120.0,
+            stream_read=300.0,
         )
         assert timeouts.connect == 3.0
         assert timeouts.read == 60.0
         assert timeouts.write == 5.0
         assert timeouts.pool == 2.0
         assert timeouts.total == 120.0
+        assert timeouts.stream_read == 300.0
 
 
 # ==============================================================================
@@ -331,6 +341,7 @@ class TestTimeoutConfigYamlLoading:
       write: 7.0
       pool: 4.0
       total: 90.0
+      stream_read: 300.0
 """
 
         with (
@@ -346,3 +357,119 @@ class TestTimeoutConfigYamlLoading:
             assert provider.timeouts.write == 7.0
             assert provider.timeouts.pool == 4.0
             assert provider.timeouts.total == 90.0
+            assert provider.timeouts.stream_read == 300.0
+
+
+# ==============================================================================
+# UT-TC16..UT-TC19: stream_read field (per-stream HTTP/2 timeout)
+# ==============================================================================
+
+
+class TestStreamReadField:
+    """Test the ``stream_read`` field of TimeoutConfig.
+
+    The ``stream_read`` field is a per-stream deadline for receiving response
+    headers on a single HTTP/2 stream.  When ``None`` (default), it falls back
+    to ``read``.  When set, it must be a positive float (``gt=0``).
+    """
+
+    def test_stream_read_accepts_valid_float(self):
+        """
+        Scenario #10: stream_read accepts a valid positive float.
+
+        WHEN ``stream_read=30.0`` is passed to TimeoutConfig,
+        THEN ``timeouts.stream_read`` SHALL be ``30.0``.
+
+        Also verifies YAML loading through ConfigLoader with
+        ``timeouts: { stream_read: 30.0 }``.
+        """
+        # Direct construction
+        timeouts = TimeoutConfig(stream_read=30.0)
+        assert timeouts.stream_read == 30.0
+
+        # YAML loading via ConfigLoader
+        mock_yaml_content = """providers:
+  test_provider:
+    enabled: true
+    provider_type: "openai_like"
+    api_base_url: "https://api.test.com/v1"
+    access_control:
+      gateway_access_token: "test_token"
+    timeouts:
+      stream_read: 30.0
+"""
+
+        with (
+            patch("os.path.exists", return_value=True),
+            patch("builtins.open", mock_open(read_data=mock_yaml_content)),
+        ):
+            loader = ConfigLoader(path="dummy_path.yaml")
+            config = loader.load()
+
+            provider = config.providers["test_provider"]
+            assert provider.timeouts.stream_read == 30.0
+
+    def test_stream_read_defaults_to_none(self):
+        """
+        Scenario #11: stream_read defaults to None when omitted.
+
+        WHEN TimeoutConfig() is constructed without ``stream_read``,
+        THEN ``timeouts.stream_read`` SHALL be ``None``.
+
+        Also verifies YAML loading when ``stream_read`` is omitted from
+        the ``timeouts`` block.
+        """
+        # Direct construction
+        timeouts = TimeoutConfig()
+        assert timeouts.stream_read is None
+
+        # YAML loading via ConfigLoader (stream_read omitted)
+        mock_yaml_content = """providers:
+  test_provider:
+    enabled: true
+    provider_type: "openai_like"
+    api_base_url: "https://api.test.com/v1"
+    access_control:
+      gateway_access_token: "test_token"
+    timeouts:
+      connect: 5.0
+      read: 30.0
+"""
+
+        with (
+            patch("os.path.exists", return_value=True),
+            patch("builtins.open", mock_open(read_data=mock_yaml_content)),
+        ):
+            loader = ConfigLoader(path="dummy_path.yaml")
+            config = loader.load()
+
+            provider = config.providers["test_provider"]
+            assert provider.timeouts.stream_read is None
+
+    def test_stream_read_rejects_zero(self):
+        """
+        Scenario #12: stream_read=0 is rejected by the gt=0 constraint.
+
+        WHEN ``stream_read=0.0`` is passed to TimeoutConfig,
+        THEN a ValidationError SHALL be raised with "greater than 0".
+        """
+        with pytest.raises(ValidationError) as exc_info:
+            TimeoutConfig(stream_read=0.0)
+
+        error_message = str(exc_info.value)
+        assert "stream_read" in error_message
+        assert "greater than 0" in error_message
+
+    def test_stream_read_rejects_negative(self):
+        """
+        Scenario #13: stream_read=-5.0 is rejected by the gt=0 constraint.
+
+        WHEN ``stream_read=-5.0`` is passed to TimeoutConfig,
+        THEN a ValidationError SHALL be raised with "greater than 0".
+        """
+        with pytest.raises(ValidationError) as exc_info:
+            TimeoutConfig(stream_read=-5.0)
+
+        error_message = str(exc_info.value)
+        assert "stream_read" in error_message
+        assert "greater than 0" in error_message

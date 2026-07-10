@@ -447,6 +447,7 @@ class TestOpenAILikeProxyRequest:
         provider = self.create_mock_provider()
         mock_client = MagicMock(spec=httpx.AsyncClient)
         mock_request = MagicMock(spec=httpx.Request)
+        mock_request.extensions = {}
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
         mock_response.is_success = True
@@ -490,6 +491,7 @@ class TestOpenAILikeProxyRequest:
         provider = self.create_mock_provider()
         mock_client = MagicMock(spec=httpx.AsyncClient)
         mock_request = MagicMock(spec=httpx.Request)
+        mock_request.extensions = {}
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
         mock_response.is_success = True
@@ -540,6 +542,7 @@ class TestOpenAILikeProxyRequest:
         provider = self.create_mock_provider()
         mock_client = MagicMock(spec=httpx.AsyncClient)
         mock_request = MagicMock(spec=httpx.Request)
+        mock_request.extensions = {}
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
         mock_response.is_success = True
@@ -573,6 +576,7 @@ class TestOpenAILikeProxyRequest:
         provider = self.create_mock_provider()
         mock_client = MagicMock(spec=httpx.AsyncClient)
         mock_request = MagicMock(spec=httpx.Request)
+        mock_request.extensions = {}
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 400
         mock_response.is_success = False
