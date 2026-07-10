@@ -211,6 +211,7 @@ class StreamMonitor:
         self.model_name = model_name
         self.check_result = check_result
         self.start_time = None
+        self._finalized: bool = False
         # Initialize the stream iterator once to avoid StreamConsumed error
         self.stream_iterator = upstream_response.aiter_bytes()
 
@@ -237,11 +238,16 @@ class StreamMonitor:
     async def __anext__(self):
         if self.start_time is None:
             self.start_time = asyncio.get_event_loop().time()
+        # Track whether this call ends the stream (exception/completion)
+        # vs. returns a chunk normally (stream continues). On normal chunk
+        # return, finally must NOT finalize — the stream is still active.
+        _stream_ended = True
         try:
             chunk = await self.stream_iterator.__anext__()
+            _stream_ended = False
             return chunk
         except StopAsyncIteration:
-            await self._finalize_logging()
+            # Normal stream completion — finalize in finally
             raise
         except httpx.ReadError as e:
             # Upstream provider disconnected the stream prematurely.
@@ -251,20 +257,20 @@ class StreamMonitor:
                 f"Upstream stream disconnect for provider '{self.provider_name}' "
                 f"model '{self.model_name}': {e}"
             )
-            await self._finalize_logging()
             raise GatewayStreamError(
                 f"Stream disconnected by upstream provider '{self.provider_name}'",
                 provider_name=self.provider_name,
                 model_name=self.model_name,
             ) from e
-        except Exception as e:
-            # Log the error but re-raise it so FastAPI can handle it properly.
-            logger.error(f"Error during streaming: {e}")
-            await self._finalize_logging()
-            raise
+        finally:
+            if _stream_ended and not self._finalized:
+                await self._finalize_logging()
 
     async def _finalize_logging(self):
         """Logs the final transaction summary after the stream is complete or failed."""
+        if self._finalized:
+            return
+        self._finalized = True
         if self.start_time is None:
             return  # The stream never started
 
@@ -278,7 +284,14 @@ class StreamMonitor:
             f"{self.provider_name}:{formatted_model} | {http_status} -> {internal_status} ({duration:.2f}s)"
         )
         # Ensure the upstream connection is closed.
-        await self.upstream_response.aclose()
+        try:
+            await self.upstream_response.aclose()
+        except Exception:
+            logger.error(
+                "Failed to close upstream response for provider "
+                f"'{self.provider_name}'",
+                exc_info=True,
+            )
 
 
 # --- Helper Functions ---
@@ -623,6 +636,12 @@ async def _handle_buffered_retryable_request(
     ):  # pyright: ignore[reportUnnecessaryIsInstance]
         timeout_sec = 600.0
 
+    # Hoisted to function scope so they are accessible in the finally block
+    # for guaranteed upstream response closure on timeout (Design Decision 4).
+    upstream_response: httpx.Response | None = None
+    body_bytes: bytes | None = None
+    _response_handled = False
+
     try:
         async with asyncio.timeout(timeout_sec):
             while True:
@@ -652,6 +671,7 @@ async def _handle_buffered_retryable_request(
                         content=request_body,
                     )
                 )
+                _response_handled = False
 
                 if check_result.ok:
                     # Case 1: Success. Check if debug logging is needed.
@@ -660,12 +680,14 @@ async def _handle_buffered_retryable_request(
                     )
 
                     if effective_debug_mode != "disabled":
+                        _response_handled = True
                         return await forward_buffered_body(
                             upstream_response, body_bytes
                         )
                     else:
                         # Normal streaming response when debug is disabled
                         client_ip = request.client.host if request.client else "unknown"
+                        _response_handled = True
                         return await forward_success_stream(
                             upstream_response=upstream_response,
                             check_result=check_result,
@@ -698,10 +720,12 @@ async def _handle_buffered_retryable_request(
                         instance_name, "disabled"
                     )
                     if effective_debug_mode != "disabled":
+                        _response_handled = True
                         return await forward_buffered_body(
                             upstream_response, body_bytes
                         )
 
+                    _response_handled = True
                     return await forward_error_to_client(
                         upstream_response, check_result, body_bytes
                     )
@@ -735,6 +759,7 @@ async def _handle_buffered_retryable_request(
                     if key_error_attempts < key_error_policy.attempts:
                         # Intermediate attempt: discard and retry with next key
                         await discard_response(upstream_response, body_bytes)
+                        _response_handled = True
                         delay = key_error_policy.backoff_sec * (
                             key_error_policy.backoff_factor ** (key_error_attempts - 1)
                         )
@@ -747,6 +772,7 @@ async def _handle_buffered_retryable_request(
                         logger.error(
                             f"Exhausted all {key_error_policy.attempts} retry attempts for key errors."
                         )
+                        _response_handled = True
                         return await forward_error_to_client(
                             upstream_response, check_result, body_bytes
                         )
@@ -757,6 +783,7 @@ async def _handle_buffered_retryable_request(
                     if server_error_attempts < server_error_policy.attempts:
                         # Intermediate server error attempt: discard and retry
                         await discard_response(upstream_response, body_bytes)
+                        _response_handled = True
                         delay = server_error_policy.backoff_sec * (
                             server_error_policy.backoff_factor
                             ** (server_error_attempts - 1)
@@ -794,6 +821,7 @@ async def _handle_buffered_retryable_request(
 
                         if key_error_attempts < key_error_policy.attempts:
                             await discard_response(upstream_response, body_bytes)
+                            _response_handled = True
                             delay = key_error_policy.backoff_sec * (
                                 key_error_policy.backoff_factor
                                 ** (key_error_attempts - 1)
@@ -804,6 +832,7 @@ async def _handle_buffered_retryable_request(
                             await asyncio.sleep(delay)
                             continue
                         else:
+                            _response_handled = True
                             return await forward_error_to_client(
                                 upstream_response, check_result, body_bytes
                             )
@@ -828,6 +857,16 @@ async def _handle_buffered_retryable_request(
                 "last_error": last_reason_str,
             },
         )
+    finally:
+        if upstream_response is not None and not _response_handled:
+            try:
+                await discard_response(upstream_response, body_bytes)
+            except Exception:
+                logger.error(
+                    "Failed to discard upstream response after timeout "
+                    f"for provider '{instance_name}'",
+                    exc_info=True,
+                )
 
 
 # --- FastAPI Application Factory and Event Handlers ---

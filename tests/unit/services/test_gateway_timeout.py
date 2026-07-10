@@ -6,6 +6,10 @@ Tests cover:
   2. Timeout does not fire for fast failure
   3. Backoff sleeps are counted within the deadline
   4. Timeout exhaustion response includes structured data
+  7. Timeout with open stream → discard_response calls aclose
+  8. Timeout after discard is safe no-op
+  9. Timeout before proxy_request skips discard
+  10. discard_response failure is logged, not raised
   21. Retry failure log includes key and status
 """
 
@@ -19,6 +23,9 @@ from fastapi.responses import JSONResponse
 from src.core.constants import ErrorReason
 from src.core.models import CheckResult
 from src.services.gateway.gateway_service import _handle_buffered_retryable_request
+from src.services.gateway.response_forwarder import (
+    discard_response as _real_discard_response,
+)
 
 # Save a reference to the real asyncio.sleep before any patching.
 # When ``asyncio.sleep`` is patched, all modules sharing the same
@@ -147,6 +154,23 @@ def _make_success_result() -> CheckResult:
     return CheckResult.success(status_code=200)
 
 
+class _ImmediateTimeout:
+    """A context manager that raises TimeoutError immediately on __aenter__.
+
+    Used to simulate a timeout that fires before any proxy_request call,
+    bypassing real wall-clock waiting.
+    """
+
+    def __init__(self, delay: float) -> None:
+        pass
+
+    async def __aenter__(self) -> None:
+        raise TimeoutError()
+
+    async def __aexit__(self, *args: object) -> bool:
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Scenario #1 — Timeout fires during retry loop
 # ---------------------------------------------------------------------------
@@ -180,10 +204,14 @@ class TestTimeoutFiresDuringRetryLoop:
         async def _long_sleep(_delay: float) -> None:
             await _real_asyncio_sleep(0.05)
 
+        # Save a reference to the discard_response mock so we can verify
+        # the finally block invokes it (Design Decision 4).
+        mock_discard = AsyncMock()
+
         with (
             patch(
                 "src.services.gateway.gateway_service.discard_response",
-                new=AsyncMock(),
+                new=mock_discard,
             ),
             patch(
                 "src.services.gateway.gateway_service._report_key_failure",
@@ -201,6 +229,9 @@ class TestTimeoutFiresDuringRetryLoop:
         # Verify 504 JSON response
         assert isinstance(result, JSONResponse)
         assert result.status_code == 504
+
+        # Verify the finally block called discard_response
+        mock_discard.assert_called()
 
     @pytest.mark.asyncio
     async def test_timeout_response_contains_structured_data(self):
@@ -916,3 +947,263 @@ class TestRetryFailureLogIncludesKeyAndStatus:
         assert (
             "Status: 429" in attempt_msgs[0]
         ), f"Attempt log should contain Status: 429. Got: {attempt_msgs[0]}"
+
+
+# ---------------------------------------------------------------------------
+# Scenario #7-10 — Timeout discard_response behavior (Design Decision 4)
+# ---------------------------------------------------------------------------
+
+
+class TestTimeoutDiscardResponse:
+    """Tests for discard_response behavior in the finally block on timeout.
+
+    These tests verify Design Decision 4: the finally block guarantees
+    upstream response closure on timeout by calling discard_response,
+    regardless of whether the stream is open or already closed.
+    """
+
+    @pytest.mark.asyncio
+    async def test_timeout_calls_discard_response_with_open_stream(self):
+        """Timeout with body_bytes=None (open stream) → discard_response calls aclose.
+
+        When proxy_request returns body_bytes=None, the stream is still open.
+        The finally block calls discard_response(upstream_response, None),
+        which invokes upstream_response.aclose().
+        """
+        request = _make_request_for_retry(
+            instance_name="deepseek-home",
+            timeout_total=0.001,
+            server_error_backoff_sec=0.01,
+        )
+        provider = _make_provider()
+
+        fail_response = _make_upstream_response(status_code=503)
+        fail_result = _make_fail_result(ErrorReason.NETWORK_ERROR, status_code=503)
+
+        # body_bytes=None means the stream is still open
+        provider.proxy_request.return_value = (
+            fail_response,
+            fail_result,
+            None,
+        )
+
+        async def _long_sleep(_delay: float) -> None:
+            await _real_asyncio_sleep(0.05)
+
+        # Use side_effect to delegate to the real discard_response so that
+        # aclose() is actually invoked, while the mock tracks calls.
+        mock_discard = AsyncMock(side_effect=_real_discard_response)
+
+        with (
+            patch(
+                "src.services.gateway.gateway_service.discard_response",
+                new=mock_discard,
+            ),
+            patch(
+                "src.services.gateway.gateway_service._report_key_failure",
+                new=AsyncMock(),
+            ),
+            patch(
+                "src.services.gateway.gateway_service.asyncio.sleep",
+                _long_sleep,
+            ),
+        ):
+            result = await _handle_buffered_retryable_request(
+                request, provider, "deepseek-home"
+            )
+
+        # Assert 504 JSONResponse returned
+        assert isinstance(result, JSONResponse)
+        assert result.status_code == 504
+
+        # Assert discard_response was called (in both retry loop and finally)
+        mock_discard.assert_called()
+
+        # Assert the finally block call used the upstream response and
+        # body_bytes=None (the last call is from the finally block)
+        mock_discard.assert_called_with(fail_response, None)
+
+        # Assert aclose() was invoked (since body_bytes=None means open stream)
+        fail_response.aclose.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_timeout_after_discard_is_safe_noop(self):
+        """Timeout with body_bytes=b"" (already read) → discard_response is a no-op.
+
+        When proxy_request returns body_bytes=b"", the body was already read
+        and the connection is closed. discard_response with body_bytes=b"" is
+        a safe no-op — it does NOT call aclose().
+        """
+        request = _make_request_for_retry(
+            instance_name="deepseek-home",
+            timeout_total=0.001,
+            server_error_backoff_sec=0.01,
+        )
+        provider = _make_provider()
+
+        fail_response = _make_upstream_response(status_code=503)
+        fail_result = _make_fail_result(ErrorReason.NETWORK_ERROR, status_code=503)
+
+        # body_bytes=b"" means the body was already read (stream closed)
+        provider.proxy_request.return_value = (
+            fail_response,
+            fail_result,
+            b"",
+        )
+
+        async def _long_sleep(_delay: float) -> None:
+            await _real_asyncio_sleep(0.05)
+
+        # Use side_effect to delegate to the real discard_response so that
+        # we can verify aclose() is NOT called when body_bytes is not None.
+        mock_discard = AsyncMock(side_effect=_real_discard_response)
+
+        with (
+            patch(
+                "src.services.gateway.gateway_service.discard_response",
+                new=mock_discard,
+            ),
+            patch(
+                "src.services.gateway.gateway_service._report_key_failure",
+                new=AsyncMock(),
+            ),
+            patch(
+                "src.services.gateway.gateway_service.asyncio.sleep",
+                _long_sleep,
+            ),
+        ):
+            result = await _handle_buffered_retryable_request(
+                request, provider, "deepseek-home"
+            )
+
+        # Assert 504 JSONResponse returned
+        assert isinstance(result, JSONResponse)
+        assert result.status_code == 504
+
+        # Assert discard_response was called (in finally block)
+        mock_discard.assert_called()
+
+        # Assert aclose() was NOT called (since body_bytes is not None → no-op)
+        fail_response.aclose.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_timeout_before_proxy_request_skips_discard(self):
+        """Timeout before any proxy_request → discard_response not called.
+
+        When the timeout fires immediately (before any proxy_request call),
+        upstream_response is still None. The finally block checks
+        `if upstream_response is not None` and skips discard_response.
+        """
+        request = _make_request_for_retry(
+            instance_name="deepseek-home",
+            timeout_total=0.001,
+        )
+        provider = _make_provider()
+
+        mock_discard = AsyncMock()
+
+        with (
+            patch("asyncio.timeout", _ImmediateTimeout),
+            patch(
+                "src.services.gateway.gateway_service.discard_response",
+                new=mock_discard,
+            ),
+            patch(
+                "src.services.gateway.gateway_service._report_key_failure",
+                new=AsyncMock(),
+            ),
+            patch(
+                "src.services.gateway.gateway_service.asyncio.sleep",
+                new=AsyncMock(),
+            ),
+        ):
+            result = await _handle_buffered_retryable_request(
+                request, provider, "deepseek-home"
+            )
+
+        # Assert 504 JSONResponse returned
+        assert isinstance(result, JSONResponse)
+        assert result.status_code == 504
+
+        # Assert discard_response was NOT called (upstream_response is None)
+        mock_discard.assert_not_called()
+
+        # Assert attempts=0 and last_error="unknown"
+        content = json.loads(bytes(result.body))
+        assert content["attempts"] == 0
+        assert content["last_error"] == "unknown"
+
+    @pytest.mark.asyncio
+    async def test_discard_response_failure_logged_not_raised(self):
+        """discard_response raising in finally → logged, not raised, 504 returned.
+
+        When the timeout fires DURING discard_response in the retry loop,
+        _response_handled stays False (the assignment after discard_response
+        is never reached). The finally block then calls discard_response
+        again, which raises RuntimeError. The exception is caught by the
+        inner try/except, logger.error is called with exc_info=True, and
+        the original 504 JSONResponse from the except TimeoutError block
+        is still returned.
+        """
+        request = _make_request_for_retry(
+            instance_name="deepseek-home",
+            timeout_total=0.001,
+            server_error_backoff_sec=0.01,
+        )
+        provider = _make_provider()
+
+        fail_response = _make_upstream_response(status_code=503)
+        fail_result = _make_fail_result(ErrorReason.NETWORK_ERROR, status_code=503)
+
+        provider.proxy_request.return_value = (
+            fail_response,
+            fail_result,
+            b"",
+        )
+
+        # discard_response is called twice:
+        # 1st call (in retry loop) → hangs so the 0.001s timeout fires
+        #   DURING it, leaving _response_handled = False.
+        # 2nd call (in finally block) → raises RuntimeError.
+        discard_call_count = 0
+
+        async def _mock_discard(resp: object, body: object) -> None:
+            nonlocal discard_call_count
+            discard_call_count += 1
+            if discard_call_count == 1:
+                # Hang so timeout fires during discard_response in the loop.
+                await _real_asyncio_sleep(0.05)
+            else:
+                raise RuntimeError("discard failed")
+
+        with (
+            patch(
+                "src.services.gateway.gateway_service.discard_response",
+                new=_mock_discard,
+            ),
+            patch(
+                "src.services.gateway.gateway_service._report_key_failure",
+                new=AsyncMock(),
+            ),
+            patch("src.services.gateway.gateway_service.logger") as mock_logger,
+        ):
+            result = await _handle_buffered_retryable_request(
+                request, provider, "deepseek-home"
+            )
+
+        # Assert 504 JSONResponse was still returned (not masked by RuntimeError)
+        assert isinstance(result, JSONResponse)
+        assert result.status_code == 504
+
+        # Assert discard_response was called exactly twice:
+        # 1st in the retry loop (hung → timeout), 2nd in finally (raised).
+        assert discard_call_count == 2
+
+        # Assert logger.error was called with exc_info=True (from the finally
+        # block's inner except clause)
+        error_calls = mock_logger.error.call_args_list
+        assert any(call.kwargs.get("exc_info") is True for call in error_calls), (
+            "logger.error should have been called with exc_info=True when "
+            "discard_response raised in the finally block. "
+            f"Error calls: {error_calls}"
+        )

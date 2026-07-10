@@ -1,7 +1,21 @@
 """
 Unit tests for the StreamMonitor class in gateway_service.
+
+Covers the ``finally``-based cleanup contract introduced by the
+``fix-stream-leaks`` change:
+
+* ``StopAsyncIteration`` (normal completion) — ``finally`` runs
+  ``_finalize_logging()`` which logs the GATEWAY_ACCESS line and calls
+  ``upstream_response.aclose()``.
+* ``httpx.ReadError`` (upstream disconnect) — ``finally`` still runs
+  ``_finalize_logging()`` after the ``GatewayStreamError`` is raised.
+* ``CancelledError`` / ``GeneratorExit`` (``BaseException`` subclasses) —
+  bypass all ``except`` clauses; ``finally`` guarantees cleanup.
+* ``_finalize_logging()`` is idempotent (``_finalized`` guard) and
+  swallows ``aclose()`` failures so the original exception propagates.
 """
 
+import asyncio
 from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
@@ -55,7 +69,10 @@ class TestStreamMonitor:
         async for chunk in monitor:
             chunks.append(chunk)
         assert chunks == [b"chunk1", b"chunk2"]
-        # Verify final logging
+        # Verify final logging — exactly-once guarantee under the new ``finally``
+        # block.  Both ``except StopAsyncIteration`` and ``finally`` reach
+        # ``_finalize_logging()``, but the ``_finalized`` guard ensures the
+        # GATEWAY_ACCESS log and ``aclose()`` are invoked exactly once.
         mock_logger.info.assert_called_once()
         log_message = mock_logger.info.call_args[0][0]
         assert "GATEWAY_ACCESS" in log_message
@@ -63,7 +80,8 @@ class TestStreamMonitor:
         assert "POST /v1/chat/completions" in log_message
         assert "openai:gpt-4" in log_message
         assert "200 OK -> VALID" in log_message
-        # Ensure upstream response is closed
+        # Ensure upstream response is closed — exactly-once guarantee via the
+        # ``_finalized`` guard in ``_finalize_logging()``.
         mock_httpx_response.aclose.assert_called_once()
 
     @pytest.mark.asyncio
@@ -120,11 +138,13 @@ class TestStreamMonitor:
         with pytest.raises(RuntimeError, match="Stream broken"):
             async for _ in monitor:
                 pass
-        # Error should be logged
-        mock_logger.error.assert_called_once()
-        assert "Error during streaming" in mock_logger.error.call_args[0][0]
-        # Final logging should still happen (since start_time is set)
+        # Design Decision 3: the ``except Exception`` block was removed from
+        # ``__anext__``.  The old ``logger.error("Error during streaming")``
+        # call no longer exists, so we must NOT assert on ``logger.error``.
+        # The ``finally`` block now guarantees ``_finalize_logging()`` +
+        # ``aclose()`` on unexpected exceptions.
         mock_logger.info.assert_called_once()
+        mock_httpx_response.aclose.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_stream_monitor_format_model_name_shared(self):
@@ -282,7 +302,10 @@ class TestStreamMonitor:
         # 6.8: _finalize_logging was called (GATEWAY_ACCESS info log)
         mock_logger.info.assert_called_once()
 
-        # Verify upstream response was closed
+        # Verify upstream response was closed — idempotency guarantee under
+        # the new ``finally`` block.  Both ``except httpx.ReadError`` and
+        # ``finally`` reach ``_finalize_logging()``, but the ``_finalized``
+        # guard ensures ``aclose()`` is invoked exactly once.
         mock_httpx_response.aclose.assert_called_once()
 
     @pytest.mark.asyncio
@@ -322,3 +345,198 @@ class TestStreamMonitor:
         log_message = mock_logger.info.call_args[0][0]
         assert "test-provider:shared" in log_message
         assert ALL_MODELS_MARKER not in log_message
+
+
+class TestStreamMonitorGracefulShutdown:
+    """Tests for the ``finally``-based cleanup contract in ``StreamMonitor``.
+
+    These tests verify that ``BaseException`` subclasses (``CancelledError``,
+    ``GeneratorExit``) which bypass all ``except`` clauses still trigger
+    ``_finalize_logging()`` and ``aclose()`` via the ``finally`` block.
+    They also cover the idempotency guard (``_finalized``) and the
+    ``aclose()`` failure handling inside ``_finalize_logging()``.
+    """
+
+    @pytest.fixture
+    def mock_httpx_response(self):
+        """Provide a mocked httpx.Response."""
+        response = AsyncMock(spec=httpx.Response)
+        response.status_code = 200
+        response.reason_phrase = "OK"
+        response.headers = {"content-type": "application/json"}
+        response.aclose = AsyncMock()
+        return response
+
+    @pytest.fixture
+    def mock_logger(self):
+        """Mock the module logger."""
+        with patch("src.services.gateway.gateway_service.logger") as mock:
+            yield mock
+
+    @pytest.mark.asyncio
+    async def test_cancelled_error_triggers_finalize_and_aclose(
+        self, mock_httpx_response, mock_logger
+    ):
+        """CancelledError (BaseException) bypasses except clauses; finally
+        guarantees ``_finalize_logging()`` + ``aclose()``.
+
+        The iterator blocks before yielding any chunk so that
+        ``_finalize_logging()`` has NOT been called when the task is
+        cancelled.  This ensures the ``finally`` block — not a prior
+        successful return — is what triggers cleanup.
+        """
+
+        async def blocking_iterator():
+            # Block forever — no chunks yielded, so _finalize_logging
+            # has not been called when CancelledError is thrown.
+            await asyncio.Event().wait()
+            yield b"chunk1"  # pragma: no cover
+
+        mock_httpx_response.aiter_bytes.return_value = blocking_iterator()
+        monitor = StreamMonitor(
+            upstream_response=mock_httpx_response,
+            client_ip="127.0.0.1",
+            request_method="POST",
+            request_path="/v1/chat/completions",
+            provider_name="openai",
+            model_name="gpt-4",
+            check_result=CheckResult.success(),
+        )
+
+        async def consume():
+            async for _ in monitor:
+                pass
+
+        task = asyncio.create_task(consume())
+        # Let the task start and block inside __anext__.
+        await asyncio.sleep(0.05)
+        task.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        # The finally block called _finalize_logging() which logs the
+        # GATEWAY_ACCESS line and calls aclose() on the upstream response.
+        mock_logger.info.assert_called_once()
+        mock_httpx_response.aclose.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_generator_exit_triggers_finalize_and_aclose(
+        self, mock_httpx_response, mock_logger
+    ):
+        """GeneratorExit (BaseException) bypasses except clauses; finally
+        guarantees ``_finalize_logging()`` + ``aclose()``.
+
+        Uses a class-based async iterator (not a native async generator)
+        that raises ``GeneratorExit`` on the first ``__anext__`` call.  This
+        ensures ``GeneratorExit`` is raised inside the ``try`` block of
+        ``StreamMonitor.__anext__`` before any chunk is returned, so
+        ``_finalize_logging()`` has not been called yet.  The ``finally``
+        block is what triggers cleanup.
+
+        Note: ``StreamMonitor`` is not a native async generator, so Python's
+        ``aclose()`` machinery does not apply.  We simulate the effect of
+        ``GeneratorExit`` being raised inside the ``try`` block.
+        """
+
+        class GeneratorExitIterator:
+            """Async iterator that raises GeneratorExit on first __anext__."""
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                raise GeneratorExit("simulated generator exit")
+
+        mock_httpx_response.aiter_bytes.return_value = GeneratorExitIterator()
+        monitor = StreamMonitor(
+            upstream_response=mock_httpx_response,
+            client_ip="127.0.0.1",
+            request_method="POST",
+            request_path="/v1/chat/completions",
+            provider_name="openai",
+            model_name="gpt-4",
+            check_result=CheckResult.success(),
+        )
+
+        with pytest.raises(GeneratorExit):
+            await monitor.__anext__()
+
+        # The finally block called _finalize_logging() which logs the
+        # GATEWAY_ACCESS line and calls aclose() on the upstream response.
+        mock_logger.info.assert_called_once()
+        mock_httpx_response.aclose.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_double_finalize_is_safe_noop(self, mock_httpx_response, mock_logger):
+        """Calling ``_finalize_logging()`` twice is a safe no-op.
+
+        The ``_finalized`` guard ensures the second call returns immediately
+        without a second info log or a second ``aclose()``.
+        """
+        monitor = StreamMonitor(
+            upstream_response=mock_httpx_response,
+            client_ip="127.0.0.1",
+            request_method="POST",
+            request_path="/v1/chat/completions",
+            provider_name="openai",
+            model_name="gpt-4",
+            check_result=CheckResult.success(),
+        )
+        # Set start_time manually so _finalize_logging does not early-return.
+        monitor.start_time = asyncio.get_event_loop().time()
+
+        # First call — should log and close.
+        await monitor._finalize_logging()
+        assert mock_logger.info.call_count == 1
+        assert mock_httpx_response.aclose.call_count == 1
+
+        # Second call — should be a no-op (no second log, no second aclose).
+        await monitor._finalize_logging()
+        mock_logger.info.assert_called_once()
+        mock_httpx_response.aclose.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_aclose_failure_in_finally_logged_not_raised(
+        self, mock_httpx_response, mock_logger
+    ):
+        """When ``aclose()`` raises inside ``_finalize_logging()``, the
+        exception is caught, logged at ERROR with ``exc_info=True``, and
+        does NOT propagate to the caller.
+
+        The GATEWAY_ACCESS info log still happens (it is emitted before
+        ``aclose()`` is called).
+        """
+        mock_httpx_response.aclose = AsyncMock(
+            side_effect=RuntimeError("aclose failed")
+        )
+
+        async def chunk_iterator():
+            yield b"chunk1"
+
+        mock_httpx_response.aiter_bytes.return_value = chunk_iterator()
+        monitor = StreamMonitor(
+            upstream_response=mock_httpx_response,
+            client_ip="127.0.0.1",
+            request_method="POST",
+            request_path="/v1/chat/completions",
+            provider_name="openai",
+            model_name="gpt-4",
+            check_result=CheckResult.success(),
+        )
+
+        # Consume the stream normally — no exception should propagate.
+        chunks: list[bytes] = []
+        async for chunk in monitor:
+            chunks.append(chunk)
+        assert chunks == [b"chunk1"]
+
+        # The GATEWAY_ACCESS info log was emitted before aclose() was called.
+        mock_logger.info.assert_called_once()
+
+        # The aclose() failure was caught and logged at ERROR with exc_info.
+        mock_logger.error.assert_called_once()
+        error_args, error_kwargs = mock_logger.error.call_args
+        assert "Failed to close upstream response" in error_args[0]
+        assert "openai" in error_args[0]
+        assert error_kwargs.get("exc_info") is True
