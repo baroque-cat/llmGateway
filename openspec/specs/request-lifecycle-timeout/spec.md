@@ -90,12 +90,11 @@ scope.
 The gateway SHALL use the per-stream response header deadline (enforced by
 `FixedHTTP2Connection` via `asyncio.wait_for`) as the **primary** defense against
 stream starvation. The `asyncio.timeout(total)` deadline wrapping the retry loop
-SHALL serve as the **backstop** — firing only when the per-stream timeout
-itself fails to resolve the situation (e.g., all streams time out and retries
-exhaust the total deadline).
+SHALL serve as the **backstop** — firing only when per-stream timeouts plus
+retry attempts consume the total allotted time without resolving the error.
 
 #### Scenario: Per-stream timeout fires before total deadline
-- **WHEN** a provider has `timeouts.total: 600` and `timeouts.read: 120`,
+- **WHEN** a provider has `timeouts.stream_read: 120` and `timeouts.total: 600`,
   and the upstream hangs without sending response headers
 - **THEN** the per-stream timeout SHALL fire at approximately 120s
 - **AND** the `NETWORK_ERROR` SHALL be returned to the retry loop
@@ -103,7 +102,7 @@ exhaust the total deadline).
 - **AND** the `asyncio.timeout(600)` SHALL NOT fire before retries are exhausted
 
 #### Scenario: Total deadline fires when all retries time out
-- **WHEN** a provider has `timeouts.total: 600` and `timeouts.read: 120`,
+- **WHEN** a provider has `timeouts.stream_read: 120` and `timeouts.total: 600`,
   and retries are configured but every attempt hits the per-stream timeout
 - **THEN** approximately 5 per-stream timeouts (120s each) SHALL occur within the 600s window
 - **AND** if retries are exhausted, the gateway SHALL return an error
