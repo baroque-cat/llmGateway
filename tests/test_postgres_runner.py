@@ -37,21 +37,36 @@ def _line_index(lines: list[str], pattern: str) -> int | None:
 class TestPostgresRunner:
     """Tests for the postgres test-runner script and Makefile delegation."""
 
-    def test_script_detects_podman_first_then_docker(self) -> None:
-        """Engine detection checks podman before docker, exiting 0 if neither.
+    def test_script_engine_detection_ordered_correctly(self) -> None:
+        """Engine detection: docker-first when DOCKER_HOST is set, then podman,
+        then docker as fallback, exiting 0 if none available.
 
-        Verifies ``command -v podman`` appears before ``command -v docker``
-        and that an ``exit 0`` skip path exists when no engine is found.
+        Verifies:
+        - ``DOCKER_HOST`` check appears before ``command -v podman``
+        - ``command -v podman`` appears before the fallback ``command -v docker``
+        - ``exit 0`` skip path exists
         """
         script = _RUNNER_SCRIPT.read_text()
 
+        assert "DOCKER_HOST" in script, "Missing DOCKER_HOST CI detection"
         assert "command -v podman" in script, "Missing podman detection"
         assert "command -v docker" in script, "Missing docker detection"
         assert "exit 0" in script, "Missing exit-0 skip path"
 
+        # Docker-first logic (when DOCKER_HOST is set) must appear before
+        # the podman fallback, which must appear before the final docker
+        # fallback.
+        host_idx = script.index("DOCKER_HOST")
         podman_idx = script.index("command -v podman")
-        docker_idx = script.index("command -v docker")
-        assert podman_idx < docker_idx, "podman must be detected before docker"
+        # Second "command -v docker" is the fallback; find it after podman.
+        fallback_docker_idx = script.index("command -v docker", podman_idx)
+
+        assert (
+            host_idx < podman_idx
+        ), "DOCKER_HOST check must appear before podman detection"
+        assert (
+            podman_idx < fallback_docker_idx
+        ), "podman detection must appear before fallback docker detection"
 
     def test_pre_teardown_uses_down_v_with_error_suppression(self) -> None:
         """Pre-teardown runs ``down -v`` with ``2>/dev/null || true``."""
