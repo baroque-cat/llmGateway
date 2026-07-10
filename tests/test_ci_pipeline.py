@@ -321,16 +321,16 @@ def test_all_test_jobs_use_correct_timeout_and_markers() -> None:
         ), f"Job '{job_name}' should have at least one pytest step"
         for step in pytest_steps:
             cmd = cast("str", step["run"])
-            assert "--timeout=" in cmd, (
-                f"Job '{job_name}' pytest command should include a --timeout: {cmd}"
-            )
+            assert (
+                "--timeout=" in cmd
+            ), f"Job '{job_name}' pytest command should include a --timeout: {cmd}"
             assert "-m slow" in cmd, (
                 f"Job '{job_name}' pytest command should use "
                 f"positive '-m slow' marker (selects slow tests): {cmd}"
             )
-            assert "not slow" not in cmd, (
-                f"Job '{job_name}' should NOT exclude slow tests: {cmd}"
-            )
+            assert (
+                "not slow" not in cmd
+            ), f"Job '{job_name}' should NOT exclude slow tests: {cmd}"
 
 
 def test_workflow_has_required_push_and_pr_triggers() -> None:

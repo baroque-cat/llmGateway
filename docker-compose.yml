@@ -4,9 +4,9 @@ services:
     container_name: llmgateway_postgres_db
     restart: always
     environment:
-      - POSTGRES_USER=${DB_USER}
-      - POSTGRES_PASSWORD=${DB_PASSWORD}
-      - POSTGRES_DB=${DB_NAME}
+      - POSTGRES_USER=${DB_USER:-llm_gateway}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-your_secure_password_here}
+      - POSTGRES_DB=${DB_NAME:-llmgateway}
     volumes:
       - pg_data:/var/lib/postgresql
     healthcheck:
@@ -28,15 +28,15 @@ services:
         "uvicorn",
         "main:app",
         "--host",
-        "${GATEWAY_HOST}",
+        "${GATEWAY_HOST:-0.0.0.0}",
         "--port",
-        "${GATEWAY_PORT}",
+        "${GATEWAY_PORT:-55300}",
         "--workers",
-        "${GATEWAY_WORKERS}",
+        "${GATEWAY_WORKERS:-4}",
       ]
     restart: unless-stopped
     ports:
-      - "${GATEWAY_PORT}:${GATEWAY_PORT}"
+      - "${GATEWAY_PORT:-55300}:${GATEWAY_PORT:-55300}"
     # All configuration is loaded from the .env file.
     env_file:
       - .env
@@ -57,7 +57,7 @@ services:
     command: ["python", "main.py", "keeper"]
     restart: unless-stopped
     environment:
-      - KEEPER_METRICS_PORT=${KEEPER_METRICS_PORT}
+      - KEEPER_METRICS_PORT=${KEEPER_METRICS_PORT:-9090}
     # All configuration is loaded from the .env file.
     env_file:
       - .env

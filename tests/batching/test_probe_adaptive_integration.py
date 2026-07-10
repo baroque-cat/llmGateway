@@ -194,7 +194,8 @@ async def test_ic02_batch_size_changes_between_batches():
     # We need to observe the batch_size used for each sub-batch.
     # Patch the while-loop body to record batch_size at each iteration.
     # Instead, we can infer from the controller state after processing.
-    await probe._process_provider_batch("test_provider", resources)
+    with patch("src.core.probes.asyncio.sleep", new_callable=AsyncMock):
+        await probe._process_provider_batch("test_provider", resources)
 
     controller = probe._batch_controllers["test_provider"]
 

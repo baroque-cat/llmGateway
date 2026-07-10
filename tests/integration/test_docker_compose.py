@@ -52,11 +52,11 @@ def test_it_d01_gateway_command() -> None:
         "uvicorn",
         "main:app",
         "--host",
-        "${GATEWAY_HOST}",
+        "${GATEWAY_HOST:-0.0.0.0}",
         "--port",
-        "${GATEWAY_PORT}",
+        "${GATEWAY_PORT:-55300}",
         "--workers",
-        "${GATEWAY_WORKERS}",
+        "${GATEWAY_WORKERS:-4}",
     ]
     assert (
         gateway_command == expected

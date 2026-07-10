@@ -2,7 +2,7 @@
 """Callback pattern unit tests for IResourceProbe (scenarios UT-03..UT-11)."""
 
 from collections.abc import Callable
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -152,7 +152,8 @@ async def test_ut08_callback_after_ramp_up():
 
     # 30 resources, initial batch_size=10 (from _make_probe), so 3+ batches
     resources = [{"key_id": i, "provider_name": "test_provider"} for i in range(30)]
-    await probe._process_provider_batch("test_provider", resources)
+    with patch("src.core.probes.asyncio.sleep", new_callable=AsyncMock):
+        await probe._process_provider_batch("test_provider", resources)
 
     # After first batch of 10, ramp-up increases batch_size
     assert len(callback_args) >= 2
@@ -251,7 +252,8 @@ async def test_ut10_callback_on_every_while_iteration():
     probe._update_resource_status = AsyncMock()
 
     resources = [{"key_id": i, "provider_name": "test_provider"} for i in range(100)]
-    await probe._process_provider_batch("test_provider", resources)
+    with patch("src.core.probes.asyncio.sleep", new_callable=AsyncMock):
+        await probe._process_provider_batch("test_provider", resources)
 
     # 100 resources / ~30 per batch = at least 3, at most 4
     assert 3 <= call_count <= 5, f"Expected 3-5 callbacks, got {call_count}"

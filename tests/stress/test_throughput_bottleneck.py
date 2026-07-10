@@ -24,7 +24,6 @@ import pytest
 
 from src.core.http2 import CapacityAwareHttp2Transport
 from tests.stress.ephemeral_api import EphemeralHttp2Server
-from tests.stress.metrics import MetricsCollector
 
 pytestmark = pytest.mark.slow
 
