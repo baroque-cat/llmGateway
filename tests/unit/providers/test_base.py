@@ -1615,10 +1615,15 @@ class TestEnhancedNetworkErrorLogging:
     @pytest.mark.asyncio
     async def test_read_timeout_logged_with_detail(self):
         """
-        Scenario 1: httpx.ReadTimeout raised by client.send().
+        Scenario 4: Socket-level timeout reported when per-stream not involved.
+
+        httpx.ReadTimeout with a message that does NOT contain
+        "Per-stream timeout" takes the socket-level detail path:
+        "no data received (read_timeout=Xs)".
 
         Verifies: log message contains [ReadTimeout], provider name,
-        upstream URL, and "no data received" detail.
+        upstream URL, "no data received" detail, and read_timeout=Xs.
+        The per-stream path (stream_read=, per-stream deadline) is NOT taken.
         """
         provider = self._create_provider()
 
@@ -1641,6 +1646,115 @@ class TestEnhancedNetworkErrorLogging:
         assert "test_provider" in log_message
         assert "api.example.com" in log_message
         assert "no data received" in log_message
+
+        # Socket-level detail path: read_timeout=Xs present
+        assert "read_timeout=" in log_message
+
+        # Per-stream detail path NOT taken
+        assert "stream_read=" not in log_message
+        assert "per-stream deadline" not in log_message
+
+        # Verify 3-tuple return contract
+        assert response.status_code == 503
+        assert check_result.available is False
+        assert check_result.error_reason == ErrorReason.NETWORK_ERROR
+        assert body_bytes is None
+
+    # --- 1b. Per-stream ReadTimeout reports stream_read detail ---
+
+    @pytest.mark.asyncio
+    async def test_read_timeout_with_per_stream_message_reports_stream_read_detail(
+        self,
+    ):
+        """
+        Scenario 3: Per-stream deadline identified in error detail.
+
+        When httpx.ReadTimeout's message contains "Per-stream timeout"
+        (the exact message from h2_connection.py), the detail string
+        reports stream_read=Xs instead of read_timeout=Xs.
+
+        Verifies: log message contains "stream_read=" and
+        "per-stream deadline exceeded", and does NOT contain
+        "read_timeout=" or "no data received".
+        """
+        cfg = CanonicalConfig.from_example_files()
+        # cfg.timeout_stream_read is None in the canonical config, so we
+        # use timeout_read (a valid non-None canonical float) as the
+        # stream_read value — same pattern as
+        # test_send_proxy_request_injects_stream_read_into_extensions.
+        provider = TestSendProxyRequestChangedContract._create_provider_with_config(
+            self, stream_read=cfg.timeout_read
+        )
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.send = AsyncMock(
+            side_effect=httpx.ReadTimeout("Per-stream timeout reading response headers")
+        )
+        mock_request = MagicMock(spec=httpx.Request)
+        mock_request.extensions = {}
+        mock_request.url = "https://api.example.com/v1/chat"
+
+        with patch("src.providers.base.logger") as mock_logger:
+            response, check_result, body_bytes = await provider._send_proxy_request(
+                mock_client, mock_request
+            )
+
+        # Verify logger.error was called exactly once
+        mock_logger.error.assert_called_once()
+        log_message: str = mock_logger.error.call_args[0][0]
+
+        # Per-stream detail path: stream_read= and "per-stream deadline exceeded"
+        assert "stream_read=" in log_message
+        assert "per-stream deadline exceeded" in log_message
+
+        # Socket-level detail path NOT taken
+        assert "read_timeout=" not in log_message
+        assert "no data received" not in log_message
+
+        # Verify 3-tuple return contract
+        assert check_result.error_reason == ErrorReason.NETWORK_ERROR
+        assert response.status_code == 503
+        assert body_bytes is None
+
+    # --- 1c. Case-sensitive substring check falls back to socket-level ---
+
+    @pytest.mark.asyncio
+    async def test_read_timeout_substring_check_is_case_sensitive(self):
+        """
+        Risk-driven: Message-based detection fragility.
+
+        The "Per-stream timeout" substring check is case-sensitive.
+        A lowercase "per-stream timeout" does NOT match, so the detail
+        silently falls back to the socket-level string.
+        """
+        cfg = CanonicalConfig.from_example_files()
+        provider = TestSendProxyRequestChangedContract._create_provider_with_config(
+            self, stream_read=cfg.timeout_read
+        )
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.send = AsyncMock(
+            side_effect=httpx.ReadTimeout("per-stream timeout reading response headers")
+        )
+        mock_request = MagicMock(spec=httpx.Request)
+        mock_request.extensions = {}
+        mock_request.url = "https://api.example.com/v1/chat"
+
+        with patch("src.providers.base.logger") as mock_logger:
+            response, check_result, body_bytes = await provider._send_proxy_request(
+                mock_client, mock_request
+            )
+
+        mock_logger.error.assert_called_once()
+        log_message: str = mock_logger.error.call_args[0][0]
+
+        # Socket-level fallback: read_timeout= and "no data received"
+        assert "read_timeout=" in log_message
+        assert "no data received" in log_message
+
+        # Per-stream path NOT taken
+        assert "stream_read=" not in log_message
+        assert "per-stream deadline" not in log_message
 
         # Verify 3-tuple return contract
         assert response.status_code == 503

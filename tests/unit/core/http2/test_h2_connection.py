@@ -687,3 +687,118 @@ class TestPerStreamTimeout:
 
         assert isinstance(result, Response)
         assert result.status == status
+
+    # ------------------------------------------------------------------
+    # Per-stream timeout logging tests
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_per_stream_timeout_emits_info_log_with_stream_id_and_stream_read(
+        self,
+    ) -> None:
+        """Per-stream timeout emits an INFO log with stream_id and stream_read.
+
+        Verifies that the inner ``except TimeoutError`` handler logs at
+        INFO level before sending RST_STREAM and raising ``ReadTimeout``.
+        The log message must contain ``stream_id`` and ``stream_read``
+        values, and must be emitted before ``reset_stream``.
+        """
+        conn = TestFixedHTTP2Connection._make_conn()
+        stream_id = self._setup_conn_for_handle(conn)
+        conn._write_outgoing_data = AsyncMock()  # type: ignore[reportPrivateUsage]
+        conn._receive_response = AsyncMock(  # type: ignore[reportPrivateUsage]
+            side_effect=self._hang_forever
+        )
+
+        request = self._make_request(stream_read=0.05)
+
+        call_order: list[str] = []
+
+        with patch("src.core.http2.h2_connection.logger") as mock_logger:
+
+            def _track_info(*args: object, **kwargs: object) -> None:
+                call_order.append("info_log")
+
+            mock_logger.info.side_effect = _track_info
+
+            conn._h2_state.reset_stream = MagicMock(  # type: ignore[reportPrivateUsage]
+                side_effect=lambda sid: call_order.append("reset_stream")
+            )
+
+            with pytest.raises(ReadTimeout):
+                await conn.handle_async_request(request)
+
+        # Exactly one INFO log
+        mock_logger.info.assert_called_once()
+
+        # Log message contains expected substrings
+        log_message: str = mock_logger.info.call_args[0][0]
+        assert "Per-stream response timeout" in log_message
+        assert f"stream_id={stream_id}" in log_message
+        assert "stream_read=" in log_message
+        # stream_read=0.05 formatted as :.0f gives "0"
+        assert "stream_read=0s" in log_message
+
+        # No ERROR or WARNING logs — confirming INFO level
+        mock_logger.error.assert_not_called()
+        mock_logger.warning.assert_not_called()
+
+        # Log emitted before reset_stream (RST_STREAM + raise sequence)
+        assert call_order[0] == "info_log"
+        assert call_order[1] == "reset_stream"
+
+    @pytest.mark.asyncio
+    async def test_no_per_stream_timeout_log_when_stream_read_is_none(
+        self,
+    ) -> None:
+        """No per-stream timeout log when stream_read is None.
+
+        When ``stream_read`` is ``None``, the ``asyncio.wait_for`` block
+        is never entered, so no per-stream timeout log is emitted.
+        """
+        conn = TestFixedHTTP2Connection._make_conn()
+        self._setup_conn_for_handle(conn)
+
+        status = 200
+        headers: list[tuple[bytes, bytes]] = [(b"content-type", b"application/json")]
+        conn._receive_response = AsyncMock(  # type: ignore[reportPrivateUsage]
+            return_value=(status, headers)
+        )
+
+        request = self._make_request(stream_read=None)
+
+        with patch("src.core.http2.h2_connection.logger") as mock_logger:
+            result = await conn.handle_async_request(request)
+
+        assert isinstance(result, Response)
+        assert result.status == status
+        # No per-stream timeout log was emitted
+        mock_logger.info.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_per_stream_timeout_log_emitted_exactly_once(
+        self,
+    ) -> None:
+        """Per-stream timeout INFO log fires exactly once, not duplicated.
+
+        Under sustained stream starvation, the INFO log fires once per
+        timed-out stream.  The outer ``except BaseException`` →
+        ``_response_closed`` cleanup path does NOT emit a duplicate log.
+        """
+        conn = TestFixedHTTP2Connection._make_conn()
+        self._setup_conn_for_handle(conn)
+        conn._write_outgoing_data = AsyncMock()  # type: ignore[reportPrivateUsage]
+        conn._receive_response = AsyncMock(  # type: ignore[reportPrivateUsage]
+            side_effect=self._hang_forever
+        )
+
+        request = self._make_request(stream_read=0.05)
+
+        with (
+            patch("src.core.http2.h2_connection.logger") as mock_logger,
+            pytest.raises(ReadTimeout),
+        ):
+            await conn.handle_async_request(request)
+
+        # Log fires exactly once — not duplicated by outer cleanup path
+        assert mock_logger.info.call_count == 1

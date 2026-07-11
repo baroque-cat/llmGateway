@@ -361,7 +361,17 @@ class FixedHTTP2Connection(AsyncHTTP2Connection):
                             timeout=stream_read,
                         )
                     except TimeoutError:
-                        # Send RST_STREAM so the server knows this stream is
+                        # Log the per-stream deadline event at INFO level
+                        # before sending RST_STREAM and raising.  This is
+                        # the designed starvation-defense mechanism firing,
+                        # not an error.
+                        logger.info(
+                            f"Per-stream response timeout: "
+                            f"stream_id={stream_id} "
+                            f"stream_read={stream_read:.0f}s — "
+                            f"sending RST_STREAM"
+                        )
+                        # Send RSTSTREAM so the server knows this stream is
                         # abandoned, then flush the outgoing frame before
                         # raising.  The outer ``except BaseException`` block
                         # will run ``_response_closed`` for local cleanup.

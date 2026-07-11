@@ -295,9 +295,16 @@ class AIBaseProvider(IProvider):
             elif isinstance(e, httpx.ConnectError):
                 detail = " — TCP connection failed"
             elif isinstance(e, httpx.ReadTimeout):
-                detail = (
-                    f" — no data received (read_timeout={self.config.timeouts.read}s)"
-                )
+                if "Per-stream timeout" in str(e):
+                    detail = (
+                        f" — per-stream deadline exceeded "
+                        f"(stream_read={self.config.timeouts.stream_read}s)"
+                    )
+                else:
+                    detail = (
+                        f" — no data received "
+                        f"(read_timeout={self.config.timeouts.read}s)"
+                    )
             elif isinstance(e, httpx.RemoteProtocolError):
                 detail = " — HTTP/2 protocol error (server may have reset connection)"
             elif isinstance(e, httpx.LocalProtocolError):
