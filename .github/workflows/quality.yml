@@ -180,6 +180,8 @@ jobs:
   postgres-integration:
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.run_postgres == 'true')
     runs-on: ubuntu-latest
+    env:
+      DOCKER_HOST: unix:///var/run/docker.sock
     steps:
       - uses: actions/checkout@v4
 
@@ -193,6 +195,14 @@ jobs:
 
       - name: Install dependencies
         run: poetry install --with dev
+
+      - name: Ensure Docker is running
+        run: |
+          sudo systemctl start docker || true
+          docker info >/dev/null 2>&1 || {
+            echo "Docker daemon is not available"
+            exit 1
+          }
 
       - name: Create .env for compose
         # docker-compose.yml references .env via env_file on gateway/keeper
