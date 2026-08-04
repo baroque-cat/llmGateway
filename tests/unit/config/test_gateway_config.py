@@ -15,10 +15,12 @@ from pydantic import ValidationError
 
 from src.config.loader import ConfigLoader
 from src.config.schemas import Config, GatewayConfig
+from src.core.constants import KeySelectionMode
 from tests._canonical import CanonicalConfig
 
 # Canonical env vars from .env.example + config/example_full_config.yaml
-_BASE_ENV: dict[str, str] = CanonicalConfig.from_example_files().to_env_dict()
+_base_env: dict[str, str] = CanonicalConfig.from_example_files().to_env_dict()
+_cfg = CanonicalConfig.from_example_files()
 
 
 class TestGatewayConfigDefaults:
@@ -153,6 +155,94 @@ class TestGatewayConfigInRootConfig:
         )
 
 
+class TestGatewayPolicyConfigNested:
+    """Nested ``key_selection`` / ``circuit_breaker`` sections within ``GatewayPolicyConfig``.
+
+    Verifies that the defaults for both subsections are present when the
+    ``gateway_policy`` section is constructed, that explicit values are honoured,
+    and that ``extra='forbid'`` applies inside the nested models.
+    """
+
+    def test_gateway_policy_default_contains_key_selection(self) -> None:
+        """``GatewayPolicyConfig()`` has a ``key_selection`` field with the default mode."""
+        from src.config.schemas import GatewayPolicyConfig
+
+        gp = GatewayPolicyConfig()
+        assert hasattr(gp, "key_selection")
+        assert gp.key_selection.mode is KeySelectionMode.ROUND_ROBIN
+
+    def test_gateway_policy_default_contains_circuit_breaker(self) -> None:
+        """``GatewayPolicyConfig()`` has a ``circuit_breaker`` field with all defaults."""
+        from src.config.schemas import GatewayPolicyConfig
+
+        gp = GatewayPolicyConfig()
+        assert hasattr(gp, "circuit_breaker")
+        assert gp.circuit_breaker.enabled is _cfg.cb_enabled
+        assert gp.circuit_breaker.window_size == _cfg.cb_window_size
+        assert gp.circuit_breaker.error_rate_threshold == _cfg.cb_error_rate_threshold
+        assert gp.circuit_breaker.min_samples == _cfg.cb_min_samples
+        assert gp.circuit_breaker.open_duration_sec == _cfg.cb_open_duration_sec
+        assert gp.circuit_breaker.backoff_factor == _cfg.cb_backoff_factor
+        assert gp.circuit_breaker.max_open_duration_sec == _cfg.cb_max_open_duration_sec
+        assert (
+            gp.circuit_breaker.probe_successes_to_close
+            == _cfg.cb_probe_successes_to_close
+        )
+
+    def test_gateway_policy_explicit_key_selection_mode(self) -> None:
+        """Explicit ``key_selection.mode`` value is honoured."""
+        from src.config.schemas import GatewayPolicyConfig, KeySelectionConfig
+
+        gp = GatewayPolicyConfig(
+            key_selection=KeySelectionConfig(mode=KeySelectionMode.STICKY),
+        )
+        assert gp.key_selection.mode is KeySelectionMode.STICKY
+
+    def test_gateway_policy_nested_extra_fields_forbidden_key_selection(self) -> None:
+        """``key_selection`` has ``extra='forbid'`` — unknown nested fields rejected."""
+        with pytest.raises(ValidationError) as exc_info:
+            Config.model_validate(
+                {
+                    "providers": {
+                        "test": {
+                            "provider_type": "openai_like",
+                            "gateway_policy": {
+                                "key_selection": {"mode": "round_robin", "bogus": True},
+                            },
+                        }
+                    }
+                }
+            )
+
+        errors = exc_info.value.errors()
+        assert any(
+            e.get("type") == "extra_forbidden" or "extra" in str(e.get("type", ""))
+            for e in errors
+        )
+
+    def test_gateway_policy_nested_extra_fields_forbidden_circuit_breaker(self) -> None:
+        """``circuit_breaker`` has ``extra='forbid'`` — unknown nested fields rejected."""
+        with pytest.raises(ValidationError) as exc_info:
+            Config.model_validate(
+                {
+                    "providers": {
+                        "test": {
+                            "provider_type": "openai_like",
+                            "gateway_policy": {
+                                "circuit_breaker": {"enabled": True, "bogus": 42},
+                            },
+                        }
+                    }
+                }
+            )
+
+        errors = exc_info.value.errors()
+        assert any(
+            e.get("type") == "extra_forbidden" or "extra" in str(e.get("type", ""))
+            for e in errors
+        )
+
+
 class TestGatewayConfigYamlLoading:
     """Test GatewayConfig loading via ConfigLoader from YAML."""
 
@@ -162,7 +252,7 @@ class TestGatewayConfigYamlLoading:
 logging: {}
 """
         with (
-            patch.dict(os.environ, _BASE_ENV),
+            patch.dict(os.environ, _base_env),
             patch("os.path.exists", return_value=True),
             patch("builtins.open", mock_open(read_data=yaml_content)),
         ):
@@ -183,7 +273,7 @@ gateway:
   workers: 2
 """
         with (
-            patch.dict(os.environ, _BASE_ENV),
+            patch.dict(os.environ, _base_env),
             patch("os.path.exists", return_value=True),
             patch("builtins.open", mock_open(read_data=yaml_content)),
         ):

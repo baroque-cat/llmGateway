@@ -17,12 +17,14 @@ from pydantic import ValidationError
 from src.config.schemas import (
     ErrorParsingConfig,
     ErrorParsingRule,
+    GatewayPolicyConfig,
     HealthPolicyConfig,
+    KeySelectionConfig,
     PurgeConfig,
     RetryOnErrorConfig,
     RetryPolicyConfig,
 )
-from src.core.constants import ErrorReason
+from src.core.constants import ErrorReason, KeySelectionMode
 
 # ==============================================================================
 # HealthPolicyConfig — verification_timeout constraint
@@ -147,6 +149,12 @@ def test_retry_policy_enabled_with_only_server_attempts_passes():
     """
     enabled=True with only on_server_error.attempts=2 → passes.
     At least one category (server_error) has attempts >= 1.
+
+    NOTE: This test covers the NON-sticky (round_robin) case whose behavior is
+    preserved. Design D5 changes the rule only for sticky mode — when
+    key_selection.mode is 'sticky', on_key_error.attempts must be >= 1
+    regardless of on_server_error.attempts (see
+    test_sticky_retry_without_key_error_attempts_rejected below).
     """
     config = RetryPolicyConfig(
         enabled=True,
@@ -165,6 +173,85 @@ def test_retry_policy_disabled_without_attempts_passes():
     assert config.enabled is False
     assert config.on_key_error.attempts == 0
     assert config.on_server_error.attempts == 0
+
+
+# ==============================================================================
+# GatewayPolicyConfig — sticky-mode retry constraint (design D5)
+#   When key_selection.mode is 'sticky' and retry.enabled is true,
+#   on_key_error.attempts MUST be >= 1.  on_server_error.attempts alone does
+#   NOT satisfy the requirement because sticky retry rotates the key on every
+#   trigger and never executes the same-key on_server_error branch.
+# ==============================================================================
+
+
+def test_sticky_retry_without_key_error_attempts_rejected():
+    """
+    Sticky mode + retry.enabled=true + on_key_error.attempts=0 → ValidationError.
+
+    Design D5: in sticky mode, the retry loop rotates the key on every trigger
+    and ignores on_server_error, so on_key_error.attempts must be >= 1.
+    """
+    with pytest.raises(ValidationError, match="on_key_error"):
+        GatewayPolicyConfig(
+            key_selection=KeySelectionConfig(mode=KeySelectionMode.STICKY),
+            retry=RetryPolicyConfig(
+                enabled=True,
+                on_key_error=RetryOnErrorConfig(attempts=0),
+            ),
+        )
+
+
+def test_sticky_retry_with_only_server_error_attempts_rejected():
+    """
+    Sticky mode + retry.enabled=true + only on_server_error.attempts=5 →
+    ValidationError.  on_server_error.attempts alone does NOT satisfy the
+    requirement in sticky mode.
+    """
+    with pytest.raises(ValidationError, match="on_key_error"):
+        GatewayPolicyConfig(
+            key_selection=KeySelectionConfig(mode=KeySelectionMode.STICKY),
+            retry=RetryPolicyConfig(
+                enabled=True,
+                on_key_error=RetryOnErrorConfig(attempts=0),
+                on_server_error=RetryOnErrorConfig(attempts=5),
+            ),
+        )
+
+
+def test_sticky_retry_with_key_error_attempts_passes():
+    """
+    Sticky mode + retry.enabled=true + on_key_error.attempts=3 → passes.
+    on_key_error.attempts >= 1 satisfies the sticky-mode requirement.
+    """
+    config = GatewayPolicyConfig(
+        key_selection=KeySelectionConfig(mode=KeySelectionMode.STICKY),
+        retry=RetryPolicyConfig(
+            enabled=True,
+            on_key_error=RetryOnErrorConfig(attempts=3),
+        ),
+    )
+    assert config.key_selection.mode is KeySelectionMode.STICKY
+    assert config.retry.enabled is True
+    assert config.retry.on_key_error.attempts == 3
+
+
+def test_round_robin_retry_with_only_server_error_attempts_passes():
+    """
+    Round-robin mode + retry.enabled=true + only on_server_error.attempts=5 →
+    passes.  The sticky constraint does NOT apply to round_robin mode — only
+    the generic RetryPolicyConfig validator runs, and it accepts
+    on_server_error.attempts >= 1.
+    """
+    config = GatewayPolicyConfig(
+        key_selection=KeySelectionConfig(mode=KeySelectionMode.ROUND_ROBIN),
+        retry=RetryPolicyConfig(
+            enabled=True,
+            on_server_error=RetryOnErrorConfig(attempts=5),
+        ),
+    )
+    assert config.key_selection.mode is KeySelectionMode.ROUND_ROBIN
+    assert config.retry.enabled is True
+    assert config.retry.on_server_error.attempts == 5
 
 
 # ==============================================================================

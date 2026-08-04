@@ -27,6 +27,13 @@ DB_PURGED_KEYS: str = "llm_gateway_purged_keys_total"
 REQUESTS_TOTAL: str = "llm_gateway_requests_total"
 REQUEST_DURATION_SECONDS: str = "llm_gateway_request_duration_seconds"
 
+# ---- Sticky key mode / circuit breaker metrics (Gateway) ----
+BREAKER_OPENED_EVENTS: str = "llm_gateway_breaker_opened_total"
+BREAKER_CLOSED_EVENTS: str = "llm_gateway_breaker_closed_total"
+BREAKER_REOPENED_EVENTS: str = "llm_gateway_breaker_reopened_total"
+BREAKER_FAIL_FAST_REQUESTS: str = "llm_gateway_breaker_fail_fast_requests_total"
+STICKY_ROTATIONS_WITHOUT_BAN: str = "llm_gateway_sticky_rotations_without_ban_total"
+
 # ---- Convenience: all metric names as a set ----
 ALL_METRIC_NAMES: frozenset[str] = frozenset(
     {
@@ -42,6 +49,11 @@ ALL_METRIC_NAMES: frozenset[str] = frozenset(
         DB_PURGED_KEYS,
         REQUESTS_TOTAL,
         REQUEST_DURATION_SECONDS,
+        BREAKER_OPENED_EVENTS,
+        BREAKER_CLOSED_EVENTS,
+        BREAKER_REOPENED_EVENTS,
+        BREAKER_FAIL_FAST_REQUESTS,
+        STICKY_ROTATIONS_WITHOUT_BAN,
     }
 )
 
@@ -65,4 +77,19 @@ METRIC_DESCRIPTIONS: dict[str, str] = {
     DB_PURGED_KEYS: "Total number of API keys purged per provider",
     REQUESTS_TOTAL: "Total number of gateway requests",
     REQUEST_DURATION_SECONDS: "Request duration in seconds",
+    BREAKER_OPENED_EVENTS: (
+        "Total number of circuit breaker CLOSED->OPEN transitions per provider"
+    ),
+    BREAKER_CLOSED_EVENTS: (
+        "Total number of circuit breaker HALF_OPEN->CLOSED recoveries per provider"
+    ),
+    BREAKER_REOPENED_EVENTS: (
+        "Total number of circuit breaker HALF_OPEN->OPEN re-openings per provider"
+    ),
+    BREAKER_FAIL_FAST_REQUESTS: (
+        "Total number of requests served fail-fast while the breaker is OPEN"
+    ),
+    STICKY_ROTATIONS_WITHOUT_BAN: (
+        "Total number of sticky key rotations performed without a database ban"
+    ),
 }

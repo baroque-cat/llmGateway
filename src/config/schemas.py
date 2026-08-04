@@ -11,12 +11,13 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from src.core.constants import (
     DebugMode,
     ErrorReason,
+    KeySelectionMode,
     ProviderType,
     ProxyMode,
     Status,
     StreamingMode,
 )
-from src.core.models import AdaptiveBatchingParams
+from src.core.models import AdaptiveBatchingParams, CircuitBreakerParams
 
 # ==============================================================================
 # 1. ATOMIC AND NESTED CONFIGURATION CLASSES
@@ -515,6 +516,93 @@ class HttpClientLoggingConfig(BaseModel):
     trace_enabled: bool = False
 
 
+class KeySelectionConfig(BaseModel):
+    """
+    Configuration of the per-provider API key selection strategy.
+
+    ``round_robin`` (default) preserves the historical behavior: every
+    request rotates the pool head to the back of the deque. ``sticky`` keeps
+    a per-worker pointer to one key per provider and reuses it across
+    consecutive requests until a rotation trigger fires.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Key selection strategy for this provider instance.
+    mode: KeySelectionMode = KeySelectionMode.ROUND_ROBIN
+
+
+class CircuitBreakerConfig(BaseModel):
+    """
+    Configuration of the per-provider gateway circuit breaker.
+
+    The breaker is consulted only in sticky key selection mode; in
+    round-robin mode it has no effect regardless of this configuration.
+    It detects provider-wide failure waves via a count-based sliding window
+    and temporarily suspends retry pressure (fail-fast, ban freeze) until
+    probe traffic confirms recovery.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Master switch. Consulted only when key_selection.mode is 'sticky'.
+    enabled: bool = True
+    # Size of the count-based sliding window of recent upstream outcomes.
+    window_size: int = Field(default=20, ge=1)
+    # Share of retryable-error outcomes in the window (0 < x <= 1) at or
+    # above which the breaker opens.
+    error_rate_threshold: float = Field(default=0.5, gt=0.0, le=1.0)
+    # Minimum number of outcomes in the window before the error-rate
+    # condition is evaluated.
+    min_samples: int = Field(default=5, ge=1)
+    # Base cooldown in seconds before an OPEN breaker becomes HALF_OPEN.
+    open_duration_sec: float = Field(default=30.0, gt=0)
+    # Multiplier applied to the cooldown on every re-open from HALF_OPEN.
+    backoff_factor: float = Field(default=2.0, ge=1.0)
+    # Hard ceiling for the exponentially growing cooldown.
+    max_open_duration_sec: float = Field(default=300.0, gt=0)
+    # Consecutive successful HALF_OPEN probes required to close the breaker.
+    probe_successes_to_close: int = Field(default=3, ge=1)
+
+    @model_validator(mode="after")
+    def check_window_consistency(self) -> "CircuitBreakerConfig":
+        """Validate min_samples <= window_size."""
+        if self.min_samples > self.window_size:
+            raise ValueError(
+                f"min_samples ({self.min_samples}) must be <= "
+                f"window_size ({self.window_size})"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def check_cooldown_bounds(self) -> "CircuitBreakerConfig":
+        """Validate max_open_duration_sec >= open_duration_sec."""
+        if self.max_open_duration_sec < self.open_duration_sec:
+            raise ValueError(
+                f"max_open_duration_sec ({self.max_open_duration_sec}) must be >= "
+                f"open_duration_sec ({self.open_duration_sec})"
+            )
+        return self
+
+    def to_params(self) -> CircuitBreakerParams:
+        """Convert this Pydantic model to a pure ``CircuitBreakerParams`` dataclass.
+
+        Returns:
+            A frozen dataclass with the same field values, suitable for
+            passing into ``KeyCircuitBreaker`` without dragging the Pydantic
+            dependency into the core layer.
+        """
+        return CircuitBreakerParams(
+            window_size=self.window_size,
+            error_rate_threshold=self.error_rate_threshold,
+            min_samples=self.min_samples,
+            open_duration_sec=self.open_duration_sec,
+            backoff_factor=self.backoff_factor,
+            max_open_duration_sec=self.max_open_duration_sec,
+            probe_successes_to_close=self.probe_successes_to_close,
+        )
+
+
 class GatewayPolicyConfig(BaseModel):
     """Groups all policies applied by the API Gateway during live request processing."""
 
@@ -530,6 +618,34 @@ class GatewayPolicyConfig(BaseModel):
 
     # Policy for automatically retrying failed requests.
     retry: RetryPolicyConfig = Field(default_factory=RetryPolicyConfig)
+
+    # API key selection strategy (round_robin default, sticky optional).
+    key_selection: KeySelectionConfig = Field(default_factory=KeySelectionConfig)
+
+    # Circuit breaker protecting sticky mode from failure-wave key burn.
+    # Consulted only when key_selection.mode is 'sticky'.
+    circuit_breaker: CircuitBreakerConfig = Field(default_factory=CircuitBreakerConfig)
+
+    @model_validator(mode="after")
+    def check_sticky_retry_meaningful(self) -> "GatewayPolicyConfig":
+        """In sticky mode with retry enabled, on_key_error.attempts must be >= 1.
+
+        Sticky retry semantics rotate the key on every rotation trigger and
+        never execute the same-key ``on_server_error`` branch, so
+        ``on_server_error.attempts`` alone cannot satisfy the requirement.
+        """
+        if (
+            self.key_selection.mode is KeySelectionMode.STICKY
+            and self.retry.enabled
+            and self.retry.on_key_error.attempts < 1
+        ):
+            raise ValueError(
+                "gateway_policy.key_selection.mode is 'sticky' and retry.enabled "
+                "is True, but retry.on_key_error.attempts is 0. Sticky retry "
+                "rotates the key on every trigger and ignores on_server_error, "
+                "so on_key_error.attempts must be >= 1."
+            )
+        return self
 
 
 class KeyInventoryConfig(BaseModel):

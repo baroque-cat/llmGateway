@@ -292,6 +292,15 @@ class CanonicalConfig:
         verification_attempts: Re-verification count for retryable errors.
         verification_delay_sec: Delay between verification attempts.
         purge_after_days: Days before a stopped key is purged.
+        cb_enabled: Circuit breaker master switch (from YAML).
+        cb_window_size: Count-based sliding window size (from YAML).
+        cb_error_rate_threshold: Error rate threshold opening the breaker (from YAML).
+        cb_min_samples: Minimum outcomes before evaluating threshold (from YAML).
+        cb_open_duration_sec: Base cooldown before HALF_OPEN probing (from YAML).
+        cb_backoff_factor: Cooldown multiplier on re-open (from YAML).
+        cb_max_open_duration_sec: Hard ceiling for cooldown (from YAML).
+        cb_probe_successes_to_close: Consecutive successes to close breaker (from YAML).
+        key_selection_mode_default: Default key selection mode (from YAML).
         canonical_provider_types: Tuple of valid provider type strings.
         canonical_model_names: Tuple of valid model name strings.
     """
@@ -369,6 +378,19 @@ class CanonicalConfig:
     verification_delay_sec: int
     purge_after_days: int
 
+    # === Circuit Breaker (8) ===
+    cb_enabled: bool
+    cb_window_size: int
+    cb_error_rate_threshold: float
+    cb_min_samples: int
+    cb_open_duration_sec: float
+    cb_backoff_factor: float
+    cb_max_open_duration_sec: float
+    cb_probe_successes_to_close: int
+
+    # === Key Selection (1) ===
+    key_selection_mode_default: str
+
     # === Canonical lists (2) ===
     canonical_provider_types: tuple[str, ...] = field(
         default_factory=lambda: ("anthropic", "openai_like", "gemini")
@@ -413,6 +435,12 @@ class CanonicalConfig:
         whp = _dict_or_empty(provider.get("worker_health_policy", {}))
         adaptive = _dict_or_empty(whp.get("adaptive_batching", {}))
         purge = _dict_or_empty(whp.get("purge", {}))
+
+        # Extract circuit_breaker + key_selection from first provider with gateway_policy.circuit_breaker
+        provider_gp = _first_provider_with(cfg, "gateway_policy")
+        gp = _dict_or_empty(provider_gp.get("gateway_policy", {}))
+        cb = _dict_or_empty(gp.get("circuit_breaker", {}))
+        ks = _dict_or_empty(gp.get("key_selection", {}))
 
         return cls(
             # Database (from env vars, with test-safe overrides)
@@ -490,6 +518,17 @@ class CanonicalConfig:
             verification_attempts=int(whp.get("verification_attempts", 3)),
             verification_delay_sec=int(whp.get("verification_delay_sec", 65)),
             purge_after_days=int(purge.get("after_days", 180)),
+            # Circuit Breaker (from YAML, first provider with gateway_policy.circuit_breaker)
+            cb_enabled=bool(cb.get("enabled", True)),
+            cb_window_size=int(cb.get("window_size", 20)),
+            cb_error_rate_threshold=float(cb.get("error_rate_threshold", 0.5)),
+            cb_min_samples=int(cb.get("min_samples", 5)),
+            cb_open_duration_sec=float(cb.get("open_duration_sec", 30.0)),
+            cb_backoff_factor=float(cb.get("backoff_factor", 2.0)),
+            cb_max_open_duration_sec=float(cb.get("max_open_duration_sec", 300.0)),
+            cb_probe_successes_to_close=int(cb.get("probe_successes_to_close", 3)),
+            # Key Selection (from YAML, first provider with gateway_policy.key_selection)
+            key_selection_mode_default=str(ks.get("mode", "round_robin")),
         )
 
     def to_env_dict(self) -> dict[str, str]:

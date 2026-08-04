@@ -77,4 +77,22 @@ These errors are ambiguous. `BAD_REQUEST` (400) typically implies the Worker sen
 
 ## 3. Gateway Behavior
 
-*(Section to be documented. Will cover real-time traffic handling, circuit breakers, and proxying logic)*
+The Gateway (Conductor) classifies real-time request errors using the same
+`ErrorReason` enum. Penalty semantics depend on the configured key selection
+mode (`gateway_policy.key_selection.mode`):
+
+- **Round-robin mode (default)**: failed keys are reported via
+  `_report_key_failure` and removed from the pool per the retry policy
+  (`on_key_error`, `on_server_error`), as before.
+- **Sticky mode**: server errors (`is_server_error()`: `SERVER_ERROR`,
+  `TIMEOUT`, `NETWORK_ERROR`, `SERVICE_UNAVAILABLE`, `STREAM_DISCONNECT`)
+  rotate the sticky key **without** a DB ban and without pool removal — the
+  provider, not the key, is at fault. Fatal errors, `OVERLOADED`, and
+  `RATE_LIMITED` still rotate and ban. Client errors never rotate or penalize.
+  While the circuit breaker is `OPEN`, retryable errors are additionally
+  ban-frozen (fatal errors still ban).
+
+See `docs/STICKY_KEY_MODE.md` for the full sticky-mode semantics, rotation
+triggers, and circuit breaker behavior, and `docs/ERROR_PARSING.md` for the
+pattern-based reclassification that produces the final refined reason consumed
+by these decisions.

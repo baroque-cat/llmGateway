@@ -20,7 +20,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 import pytest
 from fastapi.responses import JSONResponse
 
-from src.core.constants import ErrorReason
+from src.core.constants import ErrorReason, KeySelectionMode
 from src.core.models import CheckResult
 from src.services.gateway.gateway_service import _handle_buffered_retryable_request
 from src.services.gateway.response_forwarder import (
@@ -50,6 +50,7 @@ def _make_request_for_retry(
     server_error_attempts: int = 3,
     server_error_backoff_sec: float = 0.1,
     server_error_backoff_factor: float = 1.0,
+    key_selection_mode: KeySelectionMode = KeySelectionMode.ROUND_ROBIN,
 ) -> MagicMock:
     """Create a mock FastAPI Request with retry policy and timeout config.
 
@@ -64,6 +65,9 @@ def _make_request_for_retry(
         server_error_attempts: Max server error retry attempts.
         server_error_backoff_sec: Base backoff for server errors.
         server_error_backoff_factor: Backoff multiplier for server errors.
+        key_selection_mode: KeySelectionMode for the provider's
+            gateway_policy.key_selection.mode.  Default is ROUND_ROBIN;
+            set to STICKY for sticky-mode timeout tests.
 
     Returns:
         Mocked FastAPI Request with all needed app.state dependencies.
@@ -97,6 +101,10 @@ def _make_request_for_retry(
     mock_provider_config.gateway_policy.debug_mode = debug_mode
     mock_provider_config.timeouts = MagicMock()
     mock_provider_config.timeouts.total = timeout_total
+
+    # Key selection mode (default round_robin; use STICKY for sticky tests)
+    mock_provider_config.gateway_policy.key_selection = MagicMock()
+    mock_provider_config.gateway_policy.key_selection.mode = key_selection_mode
 
     # Retry policies
     key_error_policy = MagicMock()

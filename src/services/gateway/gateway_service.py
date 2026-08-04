@@ -16,6 +16,7 @@ from src.core.accessor import ConfigAccessor
 from src.core.constants import (  # Added explicitly for error type checking
     ALL_MODELS_MARKER,
     ErrorReason,
+    KeySelectionMode,
 )
 from src.core.http_client_factory import HttpClientFactory
 from src.core.interfaces import IProvider
@@ -517,6 +518,11 @@ async def _handle_full_stream_request(
     db_manager = _get_db_manager(request)
     accessor = _get_config_accessor(request)
 
+    # Sticky-mode wiring (design D11). In round-robin mode both flags are
+    # False and the handler behaves exactly as before this change.
+    sticky = cache.get_selection_mode(instance_name) is KeySelectionMode.STICKY
+    fail_fast = cache.should_fail_fast(instance_name) if sticky else False
+
     key_info = cache.get_key_from_pool(instance_name)
     if not key_info:
         logger.warning(f"No valid API keys available in pool for '{instance_name}'.")
@@ -536,6 +542,13 @@ async def _handle_full_stream_request(
         query_params=str(request.url.query),
         content=request.stream(),
     )
+
+    if sticky:
+        # Feed the attempt outcome to the circuit breaker. No-op when the
+        # breaker is disabled.
+        cache.record_upstream_result(
+            instance_name, check_result.ok, check_result.error_reason, key_info
+        )
 
     if check_result.ok:
         # Case 1: Success. Stream the response back to the client using StreamMonitor.
@@ -561,11 +574,30 @@ async def _handle_full_stream_request(
         )
 
     else:
-        # Case 3: Upstream or key-related error. The key is at fault.
-        logger.warning(
-            f"Request for '{instance_name}' failed due to an upstream/key error: [{check_result.error_reason.value}]. "
-            f"The API key (ID: {key_id}) WILL be penalized."
+        # Case 3: Upstream or key-related error.
+        reason = check_result.error_reason
+        sticky_rotate_without_ban = (
+            sticky
+            and not fail_fast
+            and reason.is_server_error()
+            and reason is not ErrorReason.OVERLOADED
         )
+
+        if sticky_rotate_without_ban:
+            logger.warning(
+                f"Request for '{instance_name}' failed with a server error: [{reason.value}]. "
+                f"Sticky key (ID: {key_id}) rotates WITHOUT a penalty (the provider, not the key, is at fault)."
+            )
+        elif sticky and fail_fast and not reason.is_fatal():
+            logger.warning(
+                f"Request for '{instance_name}' failed during fail-fast: [{reason.value}]. "
+                f"Upstream error forwarded transparently; key (ID: {key_id}) ban frozen while the breaker is OPEN."
+            )
+        else:
+            logger.warning(
+                f"Request for '{instance_name}' failed due to an upstream/key error: [{reason.value}]. "
+                f"The API key (ID: {key_id}) WILL be penalized."
+            )
 
         effective_debug_mode = request.app.state.debug_mode_map.get(
             instance_name, "disabled"
@@ -585,13 +617,44 @@ async def _handle_full_stream_request(
                 response_body=body_bytes,
             )
 
-        # Report and remove the failed key from the live cache.
-        asyncio.create_task(
-            _report_key_failure(
-                db_manager, key_id, instance_name, check_result, accessor
+        if sticky:
+            if fail_fast:
+                # Breaker OPEN fail-fast: ban freeze — retryable errors do
+                # NOT penalize the key; fatal errors still ban (design D7).
+                if reason.is_fatal():
+                    asyncio.create_task(
+                        _report_key_failure(
+                            db_manager, key_id, instance_name, check_result, accessor
+                        )
+                    )
+                    asyncio.create_task(
+                        cache.remove_key_from_pool(instance_name, key_id)
+                    )
+            elif sticky_rotate_without_ban:
+                # Server error: rotate the sticky pointer WITHOUT banning the
+                # key in the database and WITHOUT removing it from the pool
+                # (design D4).
+                cache.rotate_sticky_key(instance_name, exclude_key_ids={key_id})
+                cache.note_rotation_without_ban(instance_name)
+            else:
+                # Fatal / OVERLOADED / RATE_LIMITED: rotate + ban (as today).
+                asyncio.create_task(
+                    _report_key_failure(
+                        db_manager, key_id, instance_name, check_result, accessor
+                    )
+                )
+                asyncio.create_task(cache.remove_key_from_pool(instance_name, key_id))
+                cache.rotate_sticky_key(instance_name, exclude_key_ids={key_id})
+        else:
+            # Round-robin: report and remove the failed key from the live
+            # cache (unchanged behavior).
+            asyncio.create_task(
+                _report_key_failure(
+                    db_manager, key_id, instance_name, check_result, accessor
+                )
             )
-        )
-        asyncio.create_task(cache.remove_key_from_pool(instance_name, key_id))
+            asyncio.create_task(cache.remove_key_from_pool(instance_name, key_id))
+
         return await forward_error_to_client(
             upstream_response, check_result, body_bytes
         )
@@ -613,6 +676,13 @@ async def _handle_buffered_retryable_request(
     retry_policy = provider_config.gateway_policy.retry
     key_error_policy = retry_policy.on_key_error
     server_error_policy = retry_policy.on_server_error
+
+    # Sticky-mode wiring (design D5). In round-robin mode both flags are
+    # False and the retry loop below behaves exactly as before this change.
+    sticky = (
+        provider_config.gateway_policy.key_selection.mode is KeySelectionMode.STICKY
+    )
+    fail_fast = cache.should_fail_fast(instance_name) if sticky else False
 
     request_body = await request.body()
     try:
@@ -644,6 +714,261 @@ async def _handle_buffered_retryable_request(
 
     try:
         async with asyncio.timeout(timeout_sec):
+            # The fail-fast and sticky branches below always terminate with a
+            # return. When neither applies, execution falls through to the
+            # original round-robin loop, which is intentionally kept unchanged.
+            if fail_fast:
+                # Breaker OPEN (design D7): bypass the retry loop. Exactly one
+                # upstream attempt; the upstream error is forwarded to the
+                # client transparently; bans are frozen for retryable errors
+                # (fatal errors still ban).
+                key_info = cache.get_key_from_pool(instance_name)
+                if not key_info:
+                    return JSONResponse(
+                        status_code=503,
+                        content={
+                            "error": "No available API keys to handle the request."
+                        },
+                    )
+
+                key_id, api_key = key_info
+                total_attempts += 1
+                client = await http_factory.get_client_for_provider(instance_name)
+
+                upstream_response, check_result, body_bytes = (
+                    await provider.proxy_request(
+                        client=client,
+                        token=api_key,
+                        method=request.method,
+                        headers=dict(request.headers),
+                        path=request.url.path,
+                        query_params=str(request.url.query),
+                        content=request_body,
+                    )
+                )
+                _response_handled = False
+                cache.record_upstream_result(
+                    instance_name,
+                    check_result.ok,
+                    check_result.error_reason,
+                    key_info,
+                )
+
+                if check_result.ok:
+                    effective_debug_mode = request.app.state.debug_mode_map.get(
+                        instance_name, "disabled"
+                    )
+                    if effective_debug_mode != "disabled":
+                        _response_handled = True
+                        return await forward_buffered_body(
+                            upstream_response, body_bytes
+                        )
+                    client_ip = request.client.host if request.client else "unknown"
+                    _response_handled = True
+                    return await forward_success_stream(
+                        upstream_response=upstream_response,
+                        check_result=check_result,
+                        client_ip=client_ip,
+                        request_method=request.method,
+                        request_path=str(request.url),
+                        provider_name=instance_name,
+                        model_name=ALL_MODELS_MARKER,
+                    )
+
+                reason = check_result.error_reason
+                last_reason = reason
+                logger.warning(
+                    f"Fail-fast attempt {total_attempts} failed for '{instance_name}'. "
+                    f"Reason: [{reason.value}], Key: #{key_id}, "
+                    f"Status: {upstream_response.status_code}. "
+                    f"Forwarding upstream error transparently (breaker OPEN)."
+                )
+
+                # Ban freeze while OPEN: retryable errors do not penalize the
+                # key; fatal errors still ban (design D7).
+                if reason.is_fatal():
+                    asyncio.create_task(
+                        _report_key_failure(
+                            db_manager, key_id, instance_name, check_result, accessor
+                        )
+                    )
+                    asyncio.create_task(
+                        cache.remove_key_from_pool(instance_name, key_id)
+                    )
+
+                effective_debug_mode = request.app.state.debug_mode_map.get(
+                    instance_name, "disabled"
+                )
+                if effective_debug_mode != "disabled":
+                    _response_handled = True
+                    return await forward_buffered_body(upstream_response, body_bytes)
+                _response_handled = True
+                return await forward_error_to_client(
+                    upstream_response, check_result, body_bytes
+                )
+
+            elif sticky:
+                # Sticky retry loop (design D5): every rotation trigger
+                # (fatal errors, OVERLOADED, RATE_LIMITED, and server errors)
+                # excludes the failed key, consumes on_key_error attempts, and
+                # retries the REQUEST with a NEW key. The same-key
+                # on_server_error branch is never executed in sticky mode and
+                # server errors never ban the key (design D4).
+                while True:
+                    total_attempts += 1
+                    key_info = cache.get_key_from_pool(
+                        instance_name, exclude_key_ids=failed_key_ids
+                    )
+                    if not key_info:
+                        return JSONResponse(
+                            status_code=503,
+                            content={
+                                "error": "No available API keys to handle the request."
+                            },
+                        )
+
+                    key_id, api_key = key_info
+                    client = await http_factory.get_client_for_provider(instance_name)
+
+                    upstream_response, check_result, body_bytes = (
+                        await provider.proxy_request(
+                            client=client,
+                            token=api_key,
+                            method=request.method,
+                            headers=dict(request.headers),
+                            path=request.url.path,
+                            query_params=str(request.url.query),
+                            content=request_body,
+                        )
+                    )
+                    _response_handled = False
+                    cache.record_upstream_result(
+                        instance_name,
+                        check_result.ok,
+                        check_result.error_reason,
+                        key_info,
+                    )
+
+                    if check_result.ok:
+                        # Case 1: Success. Check if debug logging is needed.
+                        effective_debug_mode = request.app.state.debug_mode_map.get(
+                            instance_name, "disabled"
+                        )
+
+                        if effective_debug_mode != "disabled":
+                            _response_handled = True
+                            return await forward_buffered_body(
+                                upstream_response, body_bytes
+                            )
+                        else:
+                            # Normal streaming response when debug is disabled
+                            client_ip = (
+                                request.client.host if request.client else "unknown"
+                            )
+                            _response_handled = True
+                            return await forward_success_stream(
+                                upstream_response=upstream_response,
+                                check_result=check_result,
+                                client_ip=client_ip,
+                                request_method=request.method,
+                                request_path=str(request.url),
+                                provider_name=instance_name,
+                                model_name=ALL_MODELS_MARKER,
+                            )
+
+                    reason = check_result.error_reason
+                    last_reason = reason
+                    logger.warning(
+                        f"Attempt {total_attempts} failed for '{instance_name}'. "
+                        f"Reason: [{reason.value}], "
+                        f"Key: #{key_id}, "
+                        f"Status: {upstream_response.status_code}"
+                    )
+                    logger.info(
+                        f"Retry status (sticky) - Total attempts: {total_attempts}, "
+                        f"Key errors: {key_error_attempts}/{key_error_policy.attempts}"
+                    )
+
+                    if reason.is_client_error():
+                        # Case 2: Client-side error. Retrying is pointless.
+                        # Abort the loop without consuming counters; the
+                        # sticky pointer is not changed.
+                        logger.error(
+                            f"Non-retryable client error received: {reason.value}. Aborting retry cycle."
+                        )
+                        effective_debug_mode = request.app.state.debug_mode_map.get(
+                            instance_name, "disabled"
+                        )
+                        if effective_debug_mode != "disabled":
+                            _response_handled = True
+                            return await forward_buffered_body(
+                                upstream_response, body_bytes
+                            )
+
+                        _response_handled = True
+                        return await forward_error_to_client(
+                            upstream_response, check_result, body_bytes
+                        )
+
+                    # Case 3: Rotation trigger. Fatal errors, OVERLOADED,
+                    # RATE_LIMITED, and server errors all exclude the failed
+                    # key and retry the REQUEST with a NEW key.
+                    failed_key_ids.add(key_id)
+
+                    if (
+                        reason.is_server_error()
+                        and reason is not ErrorReason.OVERLOADED
+                    ):
+                        # Server error: rotate WITHOUT ban — the provider, not
+                        # the key, is at fault (design D4). No
+                        # _report_key_failure, no remove_key_from_pool.
+                        cache.note_rotation_without_ban(instance_name)
+                        logger.warning(
+                            f"Sticky rotation without ban for key_id {key_id} "
+                            f"(Reason: {reason.value})."
+                        )
+                    else:
+                        # Fatal / OVERLOADED / RATE_LIMITED: ban and remove.
+                        logger.warning(
+                            f"Key fault detected (Reason: {reason.value}). "
+                            f"Marking key_id {key_id} as failed and removing from pool."
+                        )
+                        asyncio.create_task(
+                            _report_key_failure(
+                                db_manager,
+                                key_id,
+                                instance_name,
+                                check_result,
+                                accessor,
+                            )
+                        )
+                        asyncio.create_task(
+                            cache.remove_key_from_pool(instance_name, key_id)
+                        )
+
+                    key_error_attempts += 1
+
+                    if key_error_attempts < key_error_policy.attempts:
+                        # Intermediate attempt: discard and retry with next key
+                        await discard_response(upstream_response, body_bytes)
+                        _response_handled = True
+                        delay = key_error_policy.backoff_sec * (
+                            key_error_policy.backoff_factor ** (key_error_attempts - 1)
+                        )
+                        logger.info(
+                            f"Rotating key... Backoff {delay:.2f}s. (Key Error Attempt {key_error_attempts}/{key_error_policy.attempts})"
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                    else:
+                        logger.error(
+                            f"Exhausted all {key_error_policy.attempts} retry attempts for key errors."
+                        )
+                        _response_handled = True
+                        return await forward_error_to_client(
+                            upstream_response, check_result, body_bytes
+                        )
+
             while True:
                 total_attempts += 1
                 key_info = cache.get_key_from_pool(

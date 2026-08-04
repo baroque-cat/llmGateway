@@ -175,6 +175,25 @@ def get_default_config() -> dict[str, Any]:
                             "backoff_factor": 2.0,
                         },
                     },
+                    # API key selection strategy.
+                    # - "round_robin": every request rotates the pool head (default).
+                    # - "sticky": each worker keeps one key per provider until a
+                    #              rotation trigger fires.
+                    "key_selection": {
+                        "mode": "round_robin",
+                    },
+                    # Circuit breaker protecting sticky mode from failure-wave key burn.
+                    # Consulted only when key_selection.mode is "sticky".
+                    "circuit_breaker": {
+                        "enabled": True,
+                        "window_size": 20,
+                        "error_rate_threshold": 0.5,
+                        "min_samples": 5,
+                        "open_duration_sec": 30.0,
+                        "backoff_factor": 2.0,
+                        "max_open_duration_sec": 300.0,
+                        "probe_successes_to_close": 3,
+                    },
                 },
             },
         },

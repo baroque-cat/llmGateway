@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import collections
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -9,12 +9,18 @@ from src.services.gateway.gateway_cache import GatewayCache
 
 
 class TestGatewayCacheExcludeKeyIds:
-    """Test get_key_from_pool with exclude_key_ids parameter."""
+    """Test get_key_from_pool with exclude_key_ids parameter.
+
+    All tests operate in the default round-robin mode.  The fixture
+    explicitly returns an empty dict from ``get_enabled_providers()``
+    so no sticky-mode policy is initialized.
+    """
 
     @pytest.fixture
     def mock_accessor(self):
-        """Provide a mock ConfigAccessor."""
+        """Provide a mock ConfigAccessor with round-robin default."""
         accessor = MagicMock()
+        accessor.get_enabled_providers.return_value = {}
         return accessor
 
     @pytest.fixture
@@ -101,13 +107,15 @@ class TestGatewayCacheLogging:
 
     @pytest.fixture
     def mock_accessor_logging(self):
-        """Provide a mock ConfigAccessor."""
-        return Mock()
+        """Provide a mock ConfigAccessor with no enabled providers (round-robin default)."""
+        accessor = MagicMock()
+        accessor.get_enabled_providers.return_value = {}
+        return accessor
 
     @pytest.fixture
     def mock_db_manager_logging(self):
         """Provide a mock DatabaseManager."""
-        return Mock()
+        return MagicMock()
 
     @pytest.fixture
     def cache_logging(self, mock_accessor_logging, mock_db_manager_logging):
@@ -172,11 +180,16 @@ class TestGatewayCacheLogging:
 # ---------------------------------------------------------------------------
 
 
+def _make_cache_with_empty_providers():
+    """Create a GatewayCache with an accessor that returns no enabled providers."""
+    accessor = MagicMock()
+    accessor.get_enabled_providers.return_value = {}
+    return GatewayCache(accessor, MagicMock())
+
+
 def test_pool_key_is_provider_name_only():
     """Verify pool key is just provider_name, no model_name suffix."""
-    mock_accessor = MagicMock()
-    mock_db_manager = MagicMock()
-    cache = GatewayCache(mock_accessor, mock_db_manager)
+    cache = _make_cache_with_empty_providers()
 
     # Populate a pool manually — keyed by provider_name only
     cache._key_pool["my-provider"] = collections.deque([(1, "key1")])
@@ -194,7 +207,8 @@ def test_pool_key_is_provider_name_only():
 @pytest.mark.asyncio
 async def test_multiple_models_share_one_pool():
     """Verify 3 keys with different model_names all go into the same provider pool."""
-    mock_accessor = MagicMock()
+    accessor = MagicMock()
+    accessor.get_enabled_providers.return_value = {}
     mock_db_manager = MagicMock()
 
     # Mock refresh_key_pool to load records with different model_names
@@ -220,7 +234,7 @@ async def test_multiple_models_share_one_pool():
             },
         ]
     )
-    cache = GatewayCache(mock_accessor, mock_db_manager)
+    cache = GatewayCache(accessor, mock_db_manager)
     await cache.refresh_key_pool()
 
     # All 3 keys should be in the single pool keyed by provider_name only
@@ -235,9 +249,7 @@ async def test_multiple_models_share_one_pool():
 @pytest.mark.asyncio
 async def test_remove_key_from_pool_by_provider_and_key_id():
     """Verify remove_key_from_pool() removes the key and pool size decreases."""
-    mock_accessor = MagicMock()
-    mock_db_manager = MagicMock()
-    cache = GatewayCache(mock_accessor, mock_db_manager)
+    cache = _make_cache_with_empty_providers()
 
     # Populate pool with 3 keys
     cache._key_pool["my-provider"] = collections.deque(
@@ -257,9 +269,7 @@ async def test_remove_key_from_pool_by_provider_and_key_id():
 
 def test_get_key_from_pool_without_model_name():
     """Test get_key_from_pool works correctly without a model_name argument."""
-    mock_accessor = MagicMock()
-    mock_db_manager = MagicMock()
-    cache = GatewayCache(mock_accessor, mock_db_manager)
+    cache = _make_cache_with_empty_providers()
 
     # Populate the pool
     cache._key_pool["test"] = collections.deque([(1, "key1")])
@@ -271,9 +281,7 @@ def test_get_key_from_pool_without_model_name():
 
 def test_get_key_from_pool_returns_none_when_empty():
     """Test get_key_from_pool returns None for a nonexistent pool."""
-    mock_accessor = MagicMock()
-    mock_db_manager = MagicMock()
-    cache = GatewayCache(mock_accessor, mock_db_manager)
+    cache = _make_cache_with_empty_providers()
 
     # Don't populate the pool at all
     result = cache.get_key_from_pool("nonexistent")

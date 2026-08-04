@@ -120,3 +120,54 @@ def test_request_details_frozen() -> None:
     details = RequestDetails(model_name="gpt-4")
     with pytest.raises(AttributeError):
         details.model_name = "gpt-3.5"
+
+
+# ---------------------------------------------------------------------------
+# CircuitBreakerParams
+# ---------------------------------------------------------------------------
+
+
+def test_circuit_breaker_params_importable() -> None:
+    """CircuitBreakerParams is importable from src.core.models."""
+    from src.core.models import CircuitBreakerParams
+
+    assert CircuitBreakerParams is not None
+
+
+def test_circuit_breaker_params_construction() -> None:
+    """CircuitBreakerParams can be constructed with all required fields."""
+    from src.core.models import CircuitBreakerParams
+
+    params = CircuitBreakerParams(
+        window_size=60,
+        error_rate_threshold=0.5,
+        min_samples=10,
+        open_duration_sec=30.0,
+        backoff_factor=2.0,
+        max_open_duration_sec=300.0,
+        probe_successes_to_close=3,
+    )
+    assert params.window_size == 60
+    assert params.error_rate_threshold == 0.5
+    assert params.min_samples == 10
+    assert params.open_duration_sec == 30.0
+    assert params.backoff_factor == 2.0
+    assert params.max_open_duration_sec == 300.0
+    assert params.probe_successes_to_close == 3
+
+
+def test_circuit_breaker_params_frozen() -> None:
+    """CircuitBreakerParams is a frozen dataclass — modifying a field raises FrozenInstanceError."""
+    from src.core.models import CircuitBreakerParams
+
+    params = CircuitBreakerParams(
+        window_size=60,
+        error_rate_threshold=0.5,
+        min_samples=10,
+        open_duration_sec=30.0,
+        backoff_factor=2.0,
+        max_open_duration_sec=300.0,
+        probe_successes_to_close=3,
+    )
+    with pytest.raises(AttributeError):
+        params.window_size = 100

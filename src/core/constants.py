@@ -201,3 +201,40 @@ class ProviderType(StrEnum):
     ANTHROPIC = "anthropic"
     OPENAI_LIKE = "openai_like"
     GEMINI = "gemini"
+
+
+@unique
+class KeySelectionMode(StrEnum):
+    """
+    Defines the per-provider API key selection strategy used by the gateway.
+
+    Members:
+        ``ROUND_ROBIN`` — Default. Every request takes the pool head and
+            rotates it to the back of the deque (behavior prior to the
+            sticky-key feature).
+        ``STICKY`` — Each worker keeps a sticky pointer to one key per
+            provider and reuses it across consecutive requests until a
+            rotation trigger fires.
+    """
+
+    ROUND_ROBIN = "round_robin"
+    STICKY = "sticky"
+
+
+@unique
+class BreakerState(StrEnum):
+    """
+    Defines the states of the per-provider gateway circuit breaker.
+
+    Members:
+        ``CLOSED`` — Normal operation; upstream outcomes are recorded in the
+            sliding window and requests flow without restriction.
+        ``OPEN`` — A failure wave was detected; the retry loop is bypassed
+            (fail-fast) and bans for retryable errors are frozen.
+        ``HALF_OPEN`` — Cooldown elapsed; requests flow as probes and
+            consecutive successes restore the ``CLOSED`` state.
+    """
+
+    CLOSED = "closed"
+    OPEN = "open"
+    HALF_OPEN = "half_open"

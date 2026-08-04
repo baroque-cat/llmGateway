@@ -22,7 +22,7 @@ from pydantic import ValidationError
 from starlette.responses import StreamingResponse
 
 from src.config.schemas import GatewayPolicyConfig, ModelInfo
-from src.core.constants import ErrorReason
+from src.core.constants import ErrorReason, KeySelectionMode
 from src.core.models import CheckResult, RequestDetails
 from src.services.gateway.gateway_service import (
     GatewayStreamError,
@@ -72,6 +72,12 @@ def _make_mock_request(
     mock_provider_config.gateway_policy.retry.enabled = False
     mock_provider_config.gateway_policy.streaming_mode = "auto"
     mock_provider_config.gateway_policy.debug_mode = "disabled"
+    # Set default key_selection mode to round_robin so existing handler
+    # tests stay isolated (sticky mode is tested in test_gateway_sticky_handlers.py).
+    mock_provider_config.gateway_policy.key_selection = MagicMock()
+    mock_provider_config.gateway_policy.key_selection.mode = (
+        KeySelectionMode.ROUND_ROBIN
+    )
     mock_accessor.get_provider_or_raise = Mock(return_value=mock_provider_config)
     mock_accessor.get_provider = Mock(return_value=mock_provider_config)
     mock_accessor.get_enabled_providers = Mock(return_value={})
@@ -952,9 +958,14 @@ class TestGatewayStaticAnalysis:
 
     def test_no_json_503_in_retry_handler(self):
         """
-        Static analysis: _handle_buffered_retryable_request has no
-        JSONResponse(status_code=503, content={"error": ...}) in the retry/error
-        handling paths — all replaced by forward_error_to_client().
+        Static analysis: _handle_buffered_retryable_request uses
+        JSONResponse(status_code=503) ONLY for "no available API keys"
+        guards — all retry-exhaustion paths use forward_error_to_client().
+
+        The sticky/fail-fast branches added three "no keys available"
+        guards (fail-fast, sticky loop, round-robin loop), so the count
+        increased from 1 to 3.  No synthetic 503 replaces an upstream
+        error body in any path.
         """
         import src.services.gateway.gateway_service as gw_mod
 
@@ -965,20 +976,23 @@ class TestGatewayStaticAnalysis:
             re.findall(r"JSONResponse\s*\(\s*status_code\s*=\s*503", source)
         )
 
-        # There should be exactly 1: the "no available API keys" guard
-        assert json_503_count == 1, (
-            f"Expected exactly 1 JSONResponse(status_code=503) in "
-            f"_handle_buffered_retryable_request (the 'no keys available' guard), "
+        # There should be exactly 3: the "no available API keys" guards
+        # in the fail-fast, sticky, and round-robin branches.
+        assert json_503_count == 3, (
+            f"Expected exactly 3 JSONResponse(status_code=503) in "
+            f"_handle_buffered_retryable_request (the 'no keys available' guards "
+            f"in fail-fast, sticky, and round-robin branches), "
             f"but found {json_503_count}. All retry-exhaustion paths should use "
             f"forward_error_to_client() instead."
         )
 
         # Verify forward_error_to_client is used in the handler
         forward_error_count = len(re.findall(r"forward_error_to_client\(", source))
-        assert forward_error_count >= 3, (
-            f"Expected at least 3 forward_error_to_client calls in "
-            f"_handle_buffered_retryable_request (client error, key fault last, "
-            f"server error last), but found {forward_error_count}."
+        assert forward_error_count >= 6, (
+            f"Expected at least 6 forward_error_to_client calls in "
+            f"_handle_buffered_retryable_request (fail-fast, sticky client error, "
+            f"sticky exhausted, round-robin client error, round-robin key fault "
+            f"last, round-robin server error last), but found {forward_error_count}."
         )
 
     def test_pydantic_rejects_headers_only(self):

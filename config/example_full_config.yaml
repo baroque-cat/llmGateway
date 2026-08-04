@@ -221,6 +221,51 @@ providers:
           backoff_sec: 0.5
           backoff_factor: 2.0
 
+      # API key selection strategy for this provider instance.
+      # - "round_robin" (default): every request takes the pool head and rotates
+      #   it to the back of the deque — the historical behavior, unchanged.
+      # - "sticky": each uvicorn worker keeps its own sticky pointer to one key
+      #   and reuses it across consecutive requests until a rotation trigger
+      #   fires. The pointer survives the periodic key-pool cache refresh
+      #   (re-validated by key_id). Per-worker means up to `gateway.workers`
+      #   distinct keys are in simultaneous use per provider.
+      # Rotation triggers in sticky mode (final refined ErrorReason):
+      # - Client errors (BAD_REQUEST, UNKNOWN): no rotation, no penalty.
+      # - Fatal errors (INVALID_KEY, NO_ACCESS, NO_QUOTA, NO_MODEL) + OVERLOADED:
+      #   rotate + ban.
+      # - RATE_LIMITED: rotate + ban (per-key quota exhausted).
+      # - Server errors (SERVER_ERROR, TIMEOUT, NETWORK_ERROR,
+      #   SERVICE_UNAVAILABLE, STREAM_DISCONNECT): rotate the key for the
+      #   current request WITHOUT banning it — the provider, not the key,
+      #   is at fault.
+      key_selection:
+        mode: "round_robin" # "round_robin" (default) or "sticky"
+
+      # Circuit breaker protecting sticky mode from provider-wide failure waves
+      # (retry storms that burn the whole key pool). Consulted ONLY when
+      # key_selection.mode is "sticky"; in round_robin mode it has no effect.
+      # Per provider, per worker, in-memory only (resets on worker restart).
+      # Behavior:
+      # - CLOSED: outcomes are recorded in a count-based sliding window. When
+      #   the window holds >= min_samples outcomes and the retryable-error
+      #   share >= error_rate_threshold, the breaker OPENS.
+      # - OPEN: fail-fast (retry loop bypassed, upstream error forwarded to the
+      #   client transparently), ban freeze (retryable errors do not ban keys;
+      #   fatal errors still ban), and round-robin fallback for probe traffic.
+      # - HALF_OPEN: after open_duration_sec elapses, requests flow as probes;
+      #   probe_successes_to_close consecutive successes CLOSE the breaker and
+      #   re-engage sticky selection; any retryable failure re-OPENS it with the
+      #   cooldown multiplied by backoff_factor (capped at max_open_duration_sec).
+      circuit_breaker:
+        enabled: true # Master switch (sticky mode only)
+        window_size: 20 # Sliding window size (count-based, no timers)
+        error_rate_threshold: 0.5 # Retryable-error share (0 < x <= 1) that opens the breaker
+        min_samples: 5 # Minimum window fill before the threshold is evaluated (<= window_size)
+        open_duration_sec: 30.0 # Base cooldown before HALF_OPEN probing starts
+        backoff_factor: 2.0 # Cooldown multiplier on every re-open (>= 1.0)
+        max_open_duration_sec: 300.0 # Cooldown ceiling (>= open_duration_sec)
+        probe_successes_to_close: 3 # Consecutive successful probes needed to close
+
   # Example 2: OpenAI-compatible Provider (e.g. DeepSeek, Moonshot)
   deepseek-main:
     provider_type: "openai_like"
@@ -266,6 +311,21 @@ providers:
           attempts: 5
           backoff_sec: 0.5
           backoff_factor: 2.0
+
+      # Sticky key selection: this worker reuses the same DeepSeek key across
+      # consecutive requests (better prompt-cache affinity and full per-key
+      # quota utilization) until a rotation trigger fires. Note: in sticky
+      # mode the retry loop rotates the key on every rotation trigger and
+      # ignores retry.on_server_error entirely; retry.on_key_error.attempts
+      # MUST be >= 1 (validated at config load).
+      key_selection:
+        mode: "sticky"
+
+      # Circuit breaker defaults are active here because mode is "sticky".
+      # See the fully annotated circuit_breaker block on gemini-production
+      # for the complete state-machine documentation.
+      circuit_breaker:
+        enabled: true
 
     proxy_config:
       mode: "none"

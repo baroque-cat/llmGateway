@@ -11,11 +11,17 @@ Test IDs:
   IT-Y06  – Default config key order and nested structure
   IT-Y07-1 – max_concurrent_streams_per_connection defaults to 5
   IT-Y05  – Full config YAML key order (moved from integration)
+
+Extended for ``add-sticky-key-mode`` with circuit_breaker + key_selection
+defaults assertions in the provider template.
 """
 
 from ruamel.yaml import YAML
 
 from src.config.defaults import get_default_config
+from tests._canonical import CanonicalConfig
+
+_cfg = CanonicalConfig.from_example_files()
 
 # --- Env Var Tests ---
 
@@ -188,3 +194,42 @@ def test_full_config_key_order():
         "providers",
     ]
     assert list(data.keys()) == expected_order
+
+
+# --- Key selection & circuit_breaker defaults in provider template ---
+
+
+def test_defaults_provider_template_has_key_selection() -> None:
+    """The provider template includes a ``key_selection`` section with default mode."""
+    defaults = get_default_config()
+    gateway_policy = defaults["providers"]["llm_provider_default"]["gateway_policy"]
+
+    assert "key_selection" in gateway_policy, (
+        f"'key_selection' not found in provider template gateway_policy. "
+        f"Available keys: {list(gateway_policy.keys())}"
+    )
+    ks = gateway_policy["key_selection"]
+    assert ks["mode"] == _cfg.key_selection_mode_default
+
+
+def test_defaults_provider_template_has_circuit_breaker() -> None:
+    """The provider template includes a ``circuit_breaker`` section with all 8 defaults.
+
+    Values are derived from ``CanonicalConfig`` to satisfy the Golden Rule.
+    """
+    defaults = get_default_config()
+    gateway_policy = defaults["providers"]["llm_provider_default"]["gateway_policy"]
+
+    assert "circuit_breaker" in gateway_policy, (
+        f"'circuit_breaker' not found in provider template gateway_policy. "
+        f"Available keys: {list(gateway_policy.keys())}"
+    )
+    cb = gateway_policy["circuit_breaker"]
+    assert cb["enabled"] is _cfg.cb_enabled
+    assert cb["window_size"] == _cfg.cb_window_size
+    assert cb["error_rate_threshold"] == _cfg.cb_error_rate_threshold
+    assert cb["min_samples"] == _cfg.cb_min_samples
+    assert cb["open_duration_sec"] == _cfg.cb_open_duration_sec
+    assert cb["backoff_factor"] == _cfg.cb_backoff_factor
+    assert cb["max_open_duration_sec"] == _cfg.cb_max_open_duration_sec
+    assert cb["probe_successes_to_close"] == _cfg.cb_probe_successes_to_close

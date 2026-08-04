@@ -1,7 +1,9 @@
 import pytest
 
 from src.core.constants import (
+    BreakerState,
     ErrorReason,
+    KeySelectionMode,
     ProviderType,
     ProxyMode,
 )
@@ -328,58 +330,111 @@ class TestProxyModeEnumExistence:
 
 
 # ==============================================================================
-# Section A: Circuit Breaker removal verification
+# Section A: KeySelectionMode + BreakerState enum tests
+#   New enums introduced by the sticky-key-mode feature (design D10).
 # ==============================================================================
 
 
-class TestCircuitBreakerRemoval:
+class TestKeySelectionModeEnum:
     """
-    Tests verifying that CircuitBreaker-related types have been completely removed.
+    Tests for KeySelectionMode enum existence, members, values, and StrEnum
+    behavior.
     """
 
-    def test_circuit_breaker_mode_import_raises_import_error(self):
+    def test_key_selection_mode_enum_exists_and_has_correct_members(self):
         """
-        CircuitBreakerMode import → ImportError.
+        Verify that KeySelectionMode is defined in src.core.constants and contains
+        the expected members: ROUND_ROBIN, STICKY.
         """
-        with pytest.raises(ImportError):
-            from src.core.constants import CircuitBreakerMode  # noqa: F401
+        assert hasattr(
+            KeySelectionMode, "ROUND_ROBIN"
+        ), "KeySelectionMode should have ROUND_ROBIN member"
+        assert hasattr(
+            KeySelectionMode, "STICKY"
+        ), "KeySelectionMode should have STICKY member"
+        assert KeySelectionMode.ROUND_ROBIN.value == "round_robin"
+        assert KeySelectionMode.STICKY.value == "sticky"
 
-    def test_circuit_breaker_config_import_raises_import_error(self):
+    def test_key_selection_mode_has_exactly_two_members(self):
         """
-        CircuitBreakerConfig import → ImportError.
+        Verify that KeySelectionMode has exactly 2 members
+        (ROUND_ROBIN, STICKY) in definition order.
         """
-        with pytest.raises(ImportError):
-            from src.config.schemas import CircuitBreakerConfig  # noqa: F401
+        members = list(KeySelectionMode)
+        assert len(members) == 2, f"Expected 2 members, got {len(members)}: {members}"
+        assert members == [KeySelectionMode.ROUND_ROBIN, KeySelectionMode.STICKY]
 
-    def test_backoff_config_import_raises_import_error(self):
+    def test_key_selection_mode_members_are_strings(self):
         """
-        BackoffConfig import → ImportError.
+        Verify KeySelectionMode members are str instances (StrEnum).
         """
-        with pytest.raises(ImportError):
-            from src.config.schemas import BackoffConfig  # noqa: F401
+        assert isinstance(KeySelectionMode.ROUND_ROBIN, str)
+        assert isinstance(KeySelectionMode.STICKY, str)
+        # Equality-by-value with plain strings is a property of StrEnum
+        assert KeySelectionMode.ROUND_ROBIN == "round_robin"
+        assert KeySelectionMode.STICKY == "sticky"
 
-    def test_gateway_policy_config_has_no_circuit_breaker_field(self):
+    def test_key_selection_mode_invalid_value_raises_value_error(self):
         """
-        GatewayPolicyConfig() has no circuit_breaker field.
+        Constructing KeySelectionMode with an invalid string value
+        raises ValueError.
         """
-        from src.config.schemas import GatewayPolicyConfig
+        with pytest.raises(ValueError):
+            KeySelectionMode("invalid")
 
-        policy = GatewayPolicyConfig()
-        assert not hasattr(
-            policy, "circuit_breaker"
-        ), "GatewayPolicyConfig should NOT have a circuit_breaker field"
 
-    def test_defaults_have_no_circuit_breaker_key(self):
-        """
-        GatewayPolicyConfig defaults have no "circuit_breaker" key.
-        """
-        from src.config.schemas import GatewayPolicyConfig
+class TestBreakerStateEnum:
+    """
+    Tests for BreakerState enum existence, members, values, and StrEnum
+    behavior.
+    """
 
-        policy = GatewayPolicyConfig()
-        policy_dict = policy.model_dump()
-        assert (
-            "circuit_breaker" not in policy_dict
-        ), f"'circuit_breaker' should not appear in defaults, got keys: {list(policy_dict.keys())}"
+    def test_breaker_state_enum_exists_and_has_correct_members(self):
+        """
+        Verify that BreakerState is defined in src.core.constants and contains
+        the expected members: CLOSED, OPEN, HALF_OPEN.
+        """
+        assert hasattr(BreakerState, "CLOSED"), "BreakerState should have CLOSED member"
+        assert hasattr(BreakerState, "OPEN"), "BreakerState should have OPEN member"
+        assert hasattr(
+            BreakerState, "HALF_OPEN"
+        ), "BreakerState should have HALF_OPEN member"
+        assert BreakerState.CLOSED.value == "closed"
+        assert BreakerState.OPEN.value == "open"
+        assert BreakerState.HALF_OPEN.value == "half_open"
+
+    def test_breaker_state_has_exactly_three_members(self):
+        """
+        Verify that BreakerState has exactly 3 members
+        (CLOSED, OPEN, HALF_OPEN) in definition order.
+        """
+        members = list(BreakerState)
+        assert len(members) == 3, f"Expected 3 members, got {len(members)}: {members}"
+        assert members == [
+            BreakerState.CLOSED,
+            BreakerState.OPEN,
+            BreakerState.HALF_OPEN,
+        ]
+
+    def test_breaker_state_members_are_strings(self):
+        """
+        Verify BreakerState members are str instances (StrEnum).
+        """
+        assert isinstance(BreakerState.CLOSED, str)
+        assert isinstance(BreakerState.OPEN, str)
+        assert isinstance(BreakerState.HALF_OPEN, str)
+        # Equality-by-value with plain strings is a property of StrEnum
+        assert BreakerState.CLOSED == "closed"
+        assert BreakerState.OPEN == "open"
+        assert BreakerState.HALF_OPEN == "half_open"
+
+    def test_breaker_state_invalid_value_raises_value_error(self):
+        """
+        Constructing BreakerState with an invalid string value
+        raises ValueError.
+        """
+        with pytest.raises(ValueError):
+            BreakerState("invalid")
 
 
 # ==============================================================================

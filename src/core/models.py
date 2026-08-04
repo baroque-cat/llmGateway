@@ -143,6 +143,40 @@ class AdaptiveBatchingParams:
 
 
 @dataclass(frozen=True)
+class CircuitBreakerParams:
+    """Pure data container for ``KeyCircuitBreaker`` — no Pydantic dependency.
+
+    Contains all tuning knobs of the per-provider circuit breaker state
+    machine. Conversion from the Pydantic-based ``CircuitBreakerConfig``
+    happens at the boundary (gateway service layer).
+
+    Fields:
+        window_size: Number of recent upstream outcomes kept in the
+            count-based sliding window.
+        error_rate_threshold: Share of retryable-error outcomes in the window
+            (``0 < x <= 1``) at or above which the breaker opens.
+        min_samples: Minimum number of outcomes required in the window before
+            the error-rate condition is evaluated.
+        open_duration_sec: Base cooldown in seconds before an ``OPEN`` breaker
+            transitions to ``HALF_OPEN``.
+        backoff_factor: Multiplier applied to the cooldown on every re-open
+            from ``HALF_OPEN`` (``>= 1.0``).
+        max_open_duration_sec: Hard ceiling for the exponentially growing
+            cooldown.
+        probe_successes_to_close: Number of consecutive successful probes in
+            ``HALF_OPEN`` required to close the breaker.
+    """
+
+    window_size: int
+    error_rate_threshold: float
+    min_samples: int
+    open_duration_sec: float
+    backoff_factor: float
+    max_open_duration_sec: float
+    probe_successes_to_close: int
+
+
+@dataclass(frozen=True)
 class KeyExportSnapshot:
     """
     Immutable snapshot record representing a single API key's current state

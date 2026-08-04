@@ -189,3 +189,68 @@ def test_max_concurrent_streams_field_rejects_above_1000():
 
     error_message = str(exc_info.value)
     assert "max_concurrent_streams_per_connection" in error_message
+
+
+# ==============================================================================
+# KeySelectionConfig + CircuitBreakerConfig schema validation (direct construction)
+# ==============================================================================
+
+
+def test_key_selection_config_default_construction() -> None:
+    """``KeySelectionConfig()`` creates with ``ROUND_ROBIN`` mode and ``extra='forbid'``."""
+    from src.config.schemas import KeySelectionConfig
+    from src.core.constants import KeySelectionMode
+
+    ks = KeySelectionConfig()
+    assert ks.mode is KeySelectionMode.ROUND_ROBIN
+
+    with pytest.raises(ValidationError):
+        KeySelectionConfig(mode="round_robin", bogus=True)  # type: ignore[call-arg]
+
+
+def test_key_selection_config_sticky_mode() -> None:
+    """``KeySelectionConfig(mode='sticky')`` is valid."""
+    from src.config.schemas import KeySelectionConfig
+    from src.core.constants import KeySelectionMode
+
+    ks = KeySelectionConfig(mode="sticky")  # type: ignore[arg-type]
+    assert ks.mode is KeySelectionMode.STICKY
+
+
+def test_circuit_breaker_config_default_construction() -> None:
+    """``CircuitBreakerConfig()`` creates with all defaults and ``extra='forbid'``."""
+    from src.config.schemas import CircuitBreakerConfig
+
+    cb = CircuitBreakerConfig()
+    assert cb.enabled is True
+    assert cb.window_size == 20
+
+    with pytest.raises(ValidationError):
+        CircuitBreakerConfig(bogus=1)  # type: ignore[call-arg]
+
+
+def test_circuit_breaker_config_all_fields_set() -> None:
+    """All 8 ``CircuitBreakerConfig`` fields accept explicit values from ``CanonicalConfig``."""
+    from src.config.schemas import CircuitBreakerConfig
+    from tests._canonical import CanonicalConfig
+
+    cfg = CanonicalConfig.from_example_files()
+    cb = CircuitBreakerConfig(
+        enabled=cfg.cb_enabled,
+        window_size=cfg.cb_window_size,
+        error_rate_threshold=cfg.cb_error_rate_threshold,
+        min_samples=cfg.cb_min_samples,
+        open_duration_sec=cfg.cb_open_duration_sec,
+        backoff_factor=cfg.cb_backoff_factor,
+        max_open_duration_sec=cfg.cb_max_open_duration_sec,
+        probe_successes_to_close=cfg.cb_probe_successes_to_close,
+    )
+
+    assert cb.enabled is cfg.cb_enabled
+    assert cb.window_size == cfg.cb_window_size
+    assert cb.error_rate_threshold == cfg.cb_error_rate_threshold
+    assert cb.min_samples == cfg.cb_min_samples
+    assert cb.open_duration_sec == cfg.cb_open_duration_sec
+    assert cb.backoff_factor == cfg.cb_backoff_factor
+    assert cb.max_open_duration_sec == cfg.cb_max_open_duration_sec
+    assert cb.probe_successes_to_close == cfg.cb_probe_successes_to_close
