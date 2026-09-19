@@ -5,6 +5,8 @@ venv/
 env
 .env
 .env/
+.secrets
+.secrets/
 venv.bak/
 env.bak/
 ENV/
