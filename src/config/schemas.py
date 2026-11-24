@@ -71,6 +71,9 @@ class RetryPolicyConfig(BaseModel):
     on_key_error: RetryOnErrorConfig = Field(default_factory=RetryOnErrorConfig)
     # Specific retry settings for 5xx server-side errors.
     on_server_error: RetryOnErrorConfig = Field(default_factory=RetryOnErrorConfig)
+    # Specific retry settings for transport-level failures (connect/read
+    # timeouts, protocol errors). These retries never penalize the key.
+    on_transport_error: RetryOnErrorConfig = Field(default_factory=RetryOnErrorConfig)
 
     @model_validator(mode="after")
     def check_retry_meaningful(self) -> "RetryPolicyConfig":
@@ -79,10 +82,12 @@ class RetryPolicyConfig(BaseModel):
             self.enabled
             and self.on_key_error.attempts < 1
             and self.on_server_error.attempts < 1
+            and self.on_transport_error.attempts < 1
         ):
             raise ValueError(
-                "retry.enabled is True but both on_key_error.attempts and "
-                "on_server_error.attempts are 0. At least one must be >= 1."
+                "retry.enabled is True but on_key_error.attempts, "
+                "on_server_error.attempts and on_transport_error.attempts are all 0. "
+                "At least one must be >= 1."
             )
         return self
 
@@ -853,6 +858,36 @@ class GatewayConfig(BaseModel):
     workers: int = Field(default=4, gt=0, le=64)
 
 
+class NetworkGuardConfig(BaseModel):
+    """Configuration for the global network-outage guard.
+
+    The guard is disabled by default so it can be rolled out in shadow mode
+    first.  In ``pause`` mode a DOWN state blocks gateway requests and keeper
+    probe cycles; in ``log`` mode it only records state and metrics.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    mode: Literal["log", "pause"] = "pause"
+    # TCP+TLS probe targets.  Use at least three providers from different
+    # networks; no HTTP request or API key is used.
+    probe_urls: list[str] = Field(default_factory=list)
+    probe_interval_sec: int = Field(default=30, ge=5)
+    probe_connect_timeout_sec: float = Field(default=3.0, gt=0)
+    probe_total_timeout_sec: float = Field(default=5.0, gt=0)
+    min_probe_successes: int = Field(default=2, ge=1)
+    fail_threshold: int = Field(default=3, ge=1)
+    passive_window_sec: int = Field(default=60, ge=5)
+    passive_min_providers: int = Field(default=3, ge=1)
+    passive_min_failures: int = Field(default=6, ge=1)
+    startup_probe: bool = True
+    # Recovery requires a container restart unless this is explicitly enabled.
+    auto_recover: bool = False
+    # Shared volume path (gateway and keeper both mount ./data).
+    marker_path: str = "/app/data/network_guard/state.json"
+
+
 # ==============================================================================
 # 4. ROOT CONFIGURATION OBJECT
 # ==============================================================================
@@ -874,6 +909,7 @@ class Config(BaseModel):
     keeper: KeeperConfig = Field(default_factory=KeeperConfig)
     metrics: MetricsConfig = Field(default_factory=MetricsConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
+    network_guard: NetworkGuardConfig = Field(default_factory=NetworkGuardConfig)
     # A dictionary mapping the unique instance name to its full configuration.
     providers: dict[str, ProviderConfig] = Field(default_factory=dict)
 

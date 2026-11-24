@@ -15,6 +15,7 @@ from src.config.schemas import (
     LoggingConfig,
     MetricsConfig,
     ModelInfo,
+    NetworkGuardConfig,
     ProviderConfig,
     ProxyConfig,
     TimeoutConfig,
@@ -236,3 +237,7 @@ class ConfigAccessor:
     def get_http_client_config(self) -> HttpClientConfig:
         """Returns the global HTTP client configuration (pool limits, http2 toggle)."""
         return self._config.http_client
+
+    def get_network_guard_config(self) -> NetworkGuardConfig:
+        """Returns the global network-outage guard configuration."""
+        return self._config.network_guard

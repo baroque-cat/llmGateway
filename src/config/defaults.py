@@ -30,6 +30,24 @@ def get_default_config() -> dict[str, Any]:
             "pool_health_log_interval_sec": 60,
         },
         # The metrics accessor key belongs here in the future when added.
+        # --- NETWORK OUTAGE GUARD ---
+        # Disabled by default: enable in providers.yaml after shadow logging.
+        "network_guard": {
+            "enabled": False,
+            "mode": "pause",
+            "probe_urls": [],
+            "probe_interval_sec": 30,
+            "probe_connect_timeout_sec": 3.0,
+            "probe_total_timeout_sec": 5.0,
+            "min_probe_successes": 2,
+            "fail_threshold": 3,
+            "passive_window_sec": 60,
+            "passive_min_providers": 3,
+            "passive_min_failures": 6,
+            "startup_probe": True,
+            "auto_recover": False,
+            "marker_path": "/app/data/network_guard/state.json",
+        },
         # --- GATEWAY SETTINGS ---
         "gateway": {
             "host": "${GATEWAY_HOST}",
@@ -172,6 +190,14 @@ def get_default_config() -> dict[str, Any]:
                         "on_server_error": {
                             "attempts": 5,
                             "backoff_sec": 0.5,
+                            "backoff_factor": 2.0,
+                        },
+                        # Transport failures (connect/read timeout, protocol
+                        # reset) are retried with a fresh connection and are
+                        # never charged to the key.
+                        "on_transport_error": {
+                            "attempts": 2,
+                            "backoff_sec": 0.3,
                             "backoff_factor": 2.0,
                         },
                     },

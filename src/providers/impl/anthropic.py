@@ -239,18 +239,28 @@ class AnthropicProvider(AIBaseProvider):
                 status_code=response.status_code,
             )
 
-        except httpx.TimeoutException:
+        except httpx.TimeoutException as e:
             response_time = timeout.read if timeout.read is not None else 0.0
             return CheckResult.fail(
-                ErrorReason.TIMEOUT, "Request timed out", response_time, 408
+                ErrorReason.TIMEOUT,
+                "Request timed out",
+                response_time,
+                408,
+                transport_class=self._classify_transport_exception(e),
             )
         except httpx.ProxyError as e:
             return CheckResult.fail(
-                ErrorReason.NETWORK_ERROR, f"Proxy error: {e}", status_code=503
+                ErrorReason.NETWORK_ERROR,
+                f"Proxy error: {e}",
+                status_code=503,
+                transport_class=self._classify_transport_exception(e),
             )
         except httpx.ConnectError as e:
             return CheckResult.fail(
-                ErrorReason.NETWORK_ERROR, f"Connection error: {e}", status_code=503
+                ErrorReason.NETWORK_ERROR,
+                f"Connection error: {e}",
+                status_code=503,
+                transport_class=self._classify_transport_exception(e),
             )
         except httpx.HTTPStatusError as e:
             response = e.response
@@ -271,7 +281,12 @@ class AnthropicProvider(AIBaseProvider):
                 status_code=status_code,
             )
         except httpx.RequestError as e:
-            return CheckResult.fail(ErrorReason.NETWORK_ERROR, str(e), status_code=503)
+            return CheckResult.fail(
+                ErrorReason.NETWORK_ERROR,
+                str(e),
+                status_code=503,
+                transport_class=self._classify_transport_exception(e),
+            )
 
     async def inspect(
         self, client: httpx.AsyncClient, token: str, **kwargs: Any

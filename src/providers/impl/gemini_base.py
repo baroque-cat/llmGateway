@@ -224,34 +224,38 @@ class GeminiBaseProvider(AIBaseProvider):
                 status_code=response.status_code,
             )
 
-        except httpx.TimeoutException:
+        except httpx.TimeoutException as e:
             # Use 0.0 as response time for timeouts since timeout.read can be None
             response_time = timeout.read if timeout.read is not None else 0.0
             return CheckResult.fail(
-                ErrorReason.TIMEOUT, "Request timed out", response_time, 504
+                ErrorReason.TIMEOUT,
+                "Request timed out",
+                response_time,
+                504,
+                transport_class=self._classify_transport_exception(e),
             )
         except httpx.ProxyError as e:
             return CheckResult.fail(
-                ErrorReason.NETWORK_ERROR, f"Proxy error: {e}", status_code=503
+                ErrorReason.NETWORK_ERROR,
+                f"Proxy error: {e}",
+                status_code=503,
+                transport_class=self._classify_transport_exception(e),
             )
         except httpx.ConnectError as e:
             return CheckResult.fail(
-                ErrorReason.NETWORK_ERROR, f"Connection error: {e}", status_code=503
+                ErrorReason.NETWORK_ERROR,
+                f"Connection error: {e}",
+                status_code=503,
+                transport_class=self._classify_transport_exception(e),
             )
         except httpx.HTTPStatusError as e:
             response = e.response
             status_code = response.status_code
 
-            # Special handling for worker: 400 errors in check() likely indicate invalid key
-            # since the request format is predetermined and correct
-            if status_code == 400:
-                reason = ErrorReason.INVALID_KEY
-                logger.debug(
-                    f"Worker check received 400 error, treating as {reason.value} for key validation"
-                )
-            else:
-                # Use the centralized error mapping method.
-                reason = self._map_error_to_reason(status_code, response.text)
+            # A 400 from a health probe usually means a bad test payload or a
+            # proxy/middlebox mangled the request, not that the key is dead.
+            # Treat it as non-fatal; explicit body rules may reclassify it.
+            reason = self._map_error_to_reason(status_code, response.text)
 
             # Refine reason using error parsing rules from provider-level config
             text = response.text
@@ -266,7 +270,12 @@ class GeminiBaseProvider(AIBaseProvider):
                 status_code=status_code,
             )
         except httpx.RequestError as e:
-            return CheckResult.fail(ErrorReason.NETWORK_ERROR, str(e), status_code=503)
+            return CheckResult.fail(
+                ErrorReason.NETWORK_ERROR,
+                str(e),
+                status_code=503,
+                transport_class=self._classify_transport_exception(e),
+            )
 
     # --- Abstract Methods (Contracts for Subclasses) ---
 

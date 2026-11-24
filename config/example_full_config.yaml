@@ -35,6 +35,31 @@ metrics:
   # Set to empty string to disable metrics endpoint even if enabled=true
   access_token: "${METRICS_ACCESS_TOKEN}"
 
+# --- NETWORK OUTAGE GUARD ---
+# Detects a dead upstream network (e.g. the Xray/TUN tunnel), pauses gateway
+# requests and keeper probe cycles, and refuses to mark keys invalid because
+# of transport failures. Disabled by default; enable after shadow logging.
+network_guard:
+  enabled: false
+  # "log" records state/metrics only; "pause" blocks requests and probes.
+  mode: "pause"
+  # TCP+TLS probe targets. Use at least three providers from different
+  # networks. No HTTP request or API key is used.
+  probe_urls: []
+  probe_interval_sec: 30
+  probe_connect_timeout_sec: 3.0
+  probe_total_timeout_sec: 5.0
+  min_probe_successes: 2
+  fail_threshold: 3
+  passive_window_sec: 60
+  passive_min_providers: 3
+  passive_min_failures: 6
+  startup_probe: true
+  # Recovery requires a container restart unless explicitly enabled.
+  auto_recover: false
+  # Shared volume path; gateway and keeper both mount ./data.
+  marker_path: "/app/data/network_guard/state.json"
+
 # --- GATEWAY SETTINGS ---
 gateway:
   # Host to bind the API Gateway server to.
@@ -220,6 +245,10 @@ providers:
           attempts: 5
           backoff_sec: 0.5
           backoff_factor: 2.0
+        on_transport_error:
+          attempts: 2
+          backoff_sec: 0.3
+          backoff_factor: 2.0
 
       # API key selection strategy for this provider instance.
       # - "round_robin" (default): every request takes the pool head and rotates
@@ -310,6 +339,10 @@ providers:
         on_server_error:
           attempts: 5
           backoff_sec: 0.5
+          backoff_factor: 2.0
+        on_transport_error:
+          attempts: 2
+          backoff_sec: 0.3
           backoff_factor: 2.0
 
       # Sticky key selection: this worker reuses the same DeepSeek key across
@@ -410,6 +443,10 @@ providers:
         on_server_error:
           attempts: 5
           backoff_sec: 0.5
+          backoff_factor: 2.0
+        on_transport_error:
+          attempts: 2
+          backoff_sec: 0.3
           backoff_factor: 2.0
 
     proxy_config:
@@ -639,4 +676,8 @@ providers:
         on_server_error:
           attempts: 5
           backoff_sec: 0.5
+          backoff_factor: 2.0
+        on_transport_error:
+          attempts: 2
+          backoff_sec: 0.3
           backoff_factor: 2.0

@@ -14,6 +14,7 @@ from src.core.batching import AdaptiveBatchController
 from src.core.constants import ErrorReason
 from src.core.http_client_factory import HttpClientFactory
 from src.core.models import CheckResult
+from src.core.network_guard import get_network_guard
 
 if TYPE_CHECKING:
     from src.db.database import DatabaseManager
@@ -92,6 +93,14 @@ class IResourceProbe(ABC):
         logger.info(
             f"Starting async resource check cycle for {self.__class__.__name__}..."
         )
+
+        guard = get_network_guard()
+        if guard is not None and guard.enforcing and guard.is_down():
+            logger.warning(
+                "Network guard is DOWN; skipping resource check cycle for %s.",
+                self.__class__.__name__,
+            )
+            return
 
         try:
             resources_to_check = await self._get_resources_to_check()
@@ -201,6 +210,14 @@ class IResourceProbe(ABC):
             i = 0
             batch_num = 0
             while i < len(resources):
+                guard = get_network_guard()
+                if guard is not None and guard.enforcing and guard.is_down():
+                    logger.warning(
+                        "Network guard is DOWN; aborting remaining batches for '%s'.",
+                        provider_name,
+                    )
+                    return
+
                 batch = resources[i : i + batch_size]
                 batch_num += 1
                 logger.debug(

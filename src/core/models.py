@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from src.core.constants import ErrorReason
+from src.core.constants import ErrorReason, TransportFailureClass
 
 
 @dataclass(frozen=True)
@@ -45,6 +45,9 @@ class CheckResult:
     message: str = ""
     response_time: float = 0.0
     status_code: int | None = None
+    # Set only for transport-level failures (timeouts, connect errors,
+    # protocol breaks).  None for HTTP-status failures and successes.
+    transport_class: TransportFailureClass | None = None
 
     @property
     def ok(self) -> bool:
@@ -76,9 +79,18 @@ class CheckResult:
         message: str = "",
         response_time: float = 0.0,
         status_code: int | None = None,
+        transport_class: TransportFailureClass | None = None,
     ) -> "CheckResult":
         """
         Factory method to create a failed check result.
+
+        Args:
+            reason: The classified error reason.
+            message: Human-readable error message.
+            response_time: Observed response time in seconds.
+            status_code: HTTP or synthetic status code.
+            transport_class: Optional transport-phase classification for
+                timeout/connect/protocol failures.
         """
         # If no specific message is provided, use the enum's value for clarity.
         final_message = message or reason.value.replace("_", " ").capitalize()
@@ -88,19 +100,23 @@ class CheckResult:
             message=final_message,
             response_time=response_time,
             status_code=status_code,
+            transport_class=transport_class,
         )
 
     def to_dict(self) -> dict[str, Any]:
         """
         Serializes the CheckResult object to a dictionary.
         """
-        return {
+        result: dict[str, Any] = {
             "available": self.available,
             "error_reason": self.error_reason.value,
             "message": self.message,
             "response_time": self.response_time,
             "status_code": self.status_code,
         }
+        if self.transport_class is not None:
+            result["transport_class"] = self.transport_class.value
+        return result
 
 
 @dataclass(frozen=True)

@@ -10,7 +10,7 @@ from typing import Any
 import httpx
 
 from src.config.schemas import ErrorParsingRule, ProviderConfig
-from src.core.constants import ErrorReason
+from src.core.constants import ErrorReason, TransportFailureClass
 from src.core.interfaces import IProvider
 
 # --- Import the required data models ---
@@ -205,6 +205,42 @@ class AIBaseProvider(IProvider):
                 return None
         return current
 
+    @staticmethod
+    def _classify_transport_exception(
+        exc: BaseException,
+    ) -> TransportFailureClass | None:
+        """Map an httpx transport exception to a stable failure class.
+
+        The order of ``isinstance`` checks matters: ``PoolTimeout`` and
+        ``ConnectTimeout`` are subclasses of ``TimeoutException``, so the
+        specific classes are checked first.
+
+        Args:
+            exc: Exception raised by httpx/httpcore.
+
+        Returns:
+            A transport class for known transport errors, otherwise ``None``.
+        """
+        if isinstance(exc, httpx.PoolTimeout):
+            return TransportFailureClass.POOL_TIMEOUT
+        if isinstance(exc, httpx.ConnectTimeout):
+            return TransportFailureClass.CONNECT_TIMEOUT
+        if isinstance(exc, httpx.ConnectError):
+            return TransportFailureClass.CONNECT_ERROR
+        if isinstance(exc, httpx.ReadTimeout):
+            if "Per-stream timeout" in str(exc):
+                return TransportFailureClass.STREAM_READ_TIMEOUT
+            return TransportFailureClass.READ_TIMEOUT
+        if isinstance(exc, httpx.WriteTimeout):
+            return TransportFailureClass.WRITE_TIMEOUT
+        if isinstance(exc, httpx.RemoteProtocolError):
+            return TransportFailureClass.REMOTE_PROTOCOL
+        if isinstance(exc, httpx.LocalProtocolError):
+            return TransportFailureClass.POOL_SATURATED
+        if isinstance(exc, httpx.RequestError):
+            return TransportFailureClass.REQUEST_ERROR
+        return None
+
     # --- REFACTORED: Protected helper method for sending requests (Template Method pattern) ---
     async def _send_proxy_request(
         self, client: httpx.AsyncClient, request: httpx.Request
@@ -289,6 +325,10 @@ class AIBaseProvider(IProvider):
         except httpx.RequestError as e:
             error_type = type(e).__name__
             url = str(getattr(request, "url", "unknown"))
+            transport_class = self._classify_transport_exception(e)
+            transport_label = (
+                transport_class.value if transport_class is not None else "unknown"
+            )
 
             if isinstance(e, httpx.PoolTimeout):
                 detail = " — connection pool exhausted"
@@ -319,18 +359,25 @@ class AIBaseProvider(IProvider):
             error_message = (
                 f"Upstream network error: [{error_type}] "
                 f"provider='{self.name}' "
-                f"url='{url}'"
+                f"url='{url}' "
+                f"transport={transport_label}"
                 f"{detail}"
                 f" — {e}"
             )
             logger.error(error_message)
             if isinstance(e, httpx.LocalProtocolError):
                 check_result = CheckResult.fail(
-                    ErrorReason.BAD_REQUEST, error_message, status_code=503
+                    ErrorReason.BAD_REQUEST,
+                    error_message,
+                    status_code=503,
+                    transport_class=transport_class,
                 )
             else:
                 check_result = CheckResult.fail(
-                    ErrorReason.NETWORK_ERROR, error_message, status_code=503
+                    ErrorReason.NETWORK_ERROR,
+                    error_message,
+                    status_code=503,
+                    transport_class=transport_class,
                 )
             upstream_response = httpx.Response(503, content=error_message.encode())
             content_bytes = None

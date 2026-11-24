@@ -27,6 +27,15 @@ DB_PURGED_KEYS: str = "llm_gateway_purged_keys_total"
 REQUESTS_TOTAL: str = "llm_gateway_requests_total"
 REQUEST_DURATION_SECONDS: str = "llm_gateway_request_duration_seconds"
 
+# ---- Upstream transport metrics ----
+UPSTREAM_ATTEMPTS_TOTAL: str = "llm_gateway_upstream_attempts_total"
+TRANSPORT_FAILURES_TOTAL: str = "llm_gateway_transport_failures_total"
+STREAM_DISCONNECTS_TOTAL: str = "llm_gateway_stream_disconnects_total"
+
+# ---- Network outage guard metrics ----
+NETWORK_GUARD_DOWN: str = "llm_gateway_network_down"
+NETWORK_GUARD_TRIPS_TOTAL: str = "llm_gateway_guard_trips_total"
+
 # ---- Sticky key mode / circuit breaker metrics (Gateway) ----
 BREAKER_OPENED_EVENTS: str = "llm_gateway_breaker_opened_total"
 BREAKER_CLOSED_EVENTS: str = "llm_gateway_breaker_closed_total"
@@ -49,6 +58,11 @@ ALL_METRIC_NAMES: frozenset[str] = frozenset(
         DB_PURGED_KEYS,
         REQUESTS_TOTAL,
         REQUEST_DURATION_SECONDS,
+        UPSTREAM_ATTEMPTS_TOTAL,
+        TRANSPORT_FAILURES_TOTAL,
+        STREAM_DISCONNECTS_TOTAL,
+        NETWORK_GUARD_DOWN,
+        NETWORK_GUARD_TRIPS_TOTAL,
         BREAKER_OPENED_EVENTS,
         BREAKER_CLOSED_EVENTS,
         BREAKER_REOPENED_EVENTS,
@@ -77,6 +91,19 @@ METRIC_DESCRIPTIONS: dict[str, str] = {
     DB_PURGED_KEYS: "Total number of API keys purged per provider",
     REQUESTS_TOTAL: "Total number of gateway requests",
     REQUEST_DURATION_SECONDS: "Request duration in seconds",
+    UPSTREAM_ATTEMPTS_TOTAL: (
+        "Total number of upstream attempts by provider and outcome"
+    ),
+    TRANSPORT_FAILURES_TOTAL: (
+        "Total number of transport-level upstream failures by provider and class"
+    ),
+    STREAM_DISCONNECTS_TOTAL: (
+        "Total number of upstream streaming disconnects by provider"
+    ),
+    NETWORK_GUARD_DOWN: "1 when the network outage guard is in the DOWN state",
+    NETWORK_GUARD_TRIPS_TOTAL: (
+        "Total number of network guard DOWN transitions by reason"
+    ),
     BREAKER_OPENED_EVENTS: (
         "Total number of circuit breaker CLOSED->OPEN transitions per provider"
     ),

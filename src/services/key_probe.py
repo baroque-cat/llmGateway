@@ -13,6 +13,7 @@ from src.core.accessor import ConfigAccessor
 from src.core.constants import ALL_MODELS_MARKER, ErrorReason
 from src.core.http_client_factory import HttpClientFactory
 from src.core.models import CheckResult
+from src.core.network_guard import get_network_guard
 from src.core.probes import BatchCallback, IResourceProbe
 from src.core.retry import AsyncRetrier
 from src.db.database import DatabaseManager, KeyToCheck
@@ -244,7 +245,18 @@ class KeyProbe(IResourceProbe):
             policy=health_policy, result=result, failing_since=failing_since
         )
 
-        status_str = "valid" if result.ok else result.error_reason.value
+        # A transport-level failure is not evidence against the key: keep the
+        # existing status and only refresh the check metadata.  The same
+        # applies to any failure observed while the global guard is DOWN.
+        guard = get_network_guard()
+        guard_down = guard is not None and guard.enforcing and guard.is_down()
+        transport_failure = result.transport_class is not None or (
+            guard_down and not result.ok
+        )
+        if transport_failure:
+            status_str = "transport_failure"
+        else:
+            status_str = "valid" if result.ok else result.error_reason.value
 
         # Format the model name for logging
         formatted_model = "shared" if model_name == ALL_MODELS_MARKER else model_name
@@ -257,6 +269,7 @@ class KeyProbe(IResourceProbe):
                 provider_name=provider_name,
                 result=result,
                 next_check_time=next_check_time,
+                transport_failure=transport_failure,
             )
         )
 

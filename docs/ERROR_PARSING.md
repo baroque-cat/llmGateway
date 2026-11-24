@@ -240,32 +240,23 @@ producing the same end result but less transparently.
 
 ## 4. Keeper-Specific Behaviour
 
-### 4.1. The 400 → INVALID_KEY Override
+### 4.1. No 400 → INVALID_KEY Override
 
-The Keeper (`check()` method in openai_like.py:226-232) has a special override:
+Earlier versions of the Keeper hard-overrode every 400 to `INVALID_KEY` on the
+assumption that the probe payload was always correct. In practice a bad
+`test_payload`, a changed provider schema, or a proxy/middlebox could then ban
+the whole key pool for `on_invalid_key_days` (10 days).
 
-```python
-if status_code == 400:
-    reason = ErrorReason.INVALID_KEY  # hard override before refinement
-```
+The override has been removed. A 400 now follows the normal status table and
+becomes `BAD_REQUEST` (soft penalty, `on_other_error_hr`, default 1 hour).
 
-This exists because the Keeper sends a **pre-determined, known-correct** test
-payload. A 400 response to a known-good request strongly suggests the key itself
-is bad.
+### 4.2. Body Rules Can Still Reclassify
 
-### 4.2. Refinement Runs AFTER the Override
-
-Critically, `_refine_error_reason()` is called **after** the override (line 236):
-
-```python
-refined = await self._refine_error_reason(response, reason, body_bytes=text.encode())
-```
-
-This means error parsing rules can **correct** an over-aggressive
-`400 → INVALID_KEY` classification. For example, a DashScope 400 with body
-`{"code": "Arrearage"}` would initially be classified as `INVALID_KEY`, but a
-rule matching `"Arrearage" → NO_QUOTA` would reclassify it correctly — the key
-gets banned for quota reasons instead of being treated as an invalid key.
+`_refine_error_reason()` runs after the status mapping, so an explicit
+`error_parsing` rule can still turn a 400 into `INVALID_KEY`, `NO_QUOTA`, or
+`NETWORK_ERROR` when the body clearly says so. For example, a DashScope 400
+with `{"code": "Arrearage"}` should be mapped to `NO_QUOTA` by a rule; without
+such a rule it stays `BAD_REQUEST` rather than a 10-day key ban.
 
 ### 4.3. Keeper Endpoint and Error Format
 

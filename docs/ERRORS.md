@@ -35,6 +35,7 @@ This logic is defined in `src/services/probes/key_probe.py` and configured via `
 These errors indicate that the key is fundamentally unusable. Retrying immediately will not fix the issue.
 
 *   **Behavior (Fast Fail)**: The worker **immediately** marks the key as failed. No verification retries are attempted.
+*   **400 is not fatal**: a 400 from a health probe is classified as `BAD_REQUEST` (usually a probe payload/config issue or an intermediary), not `INVALID_KEY`.
 *   **Penalty**: The key is disabled for a long duration (Days).
 *   **Configuration Mapping**:
     *   `INVALID_KEY` -> `on_invalid_key_days` (default: 10 days)
@@ -61,7 +62,23 @@ These errors are temporary. The key is likely valid, but the environment or prov
     *   `SERVER_ERROR` / `TIMEOUT` -> `on_server_error_min` (default: 30 mins)
     *   `OVERLOADED` -> `on_overload_min` (default: 60 mins)
 
-### 2.3. Other Errors (Soft Failures)
+### 2.3. Transport Failures (Not Key Faults)
+
+A transport failure is a failure without a usable HTTP response:
+`ConnectTimeout`, `ConnectError`, `ReadTimeout`, `WriteTimeout`,
+`RemoteProtocolError`, `PoolTimeout`, or `LocalProtocolError` (HTTP/2 pool
+saturation). `CheckResult.transport_class` records the phase.
+
+*   **Behavior**: The Keeper updates only `last_checked`, `next_check_time`,
+    `status_code`, `response_time`, and `error_message`. It does **not**
+    change `status` or `failing_since`, so a `valid` key remains eligible for
+    the gateway cache.
+*   **Rationale**: the key may be perfectly valid; the tunnel/provider path is
+    the problem. Recovery does not wait for a 30-minute server-error cooldown.
+*   **400 vs transport**: a 400 is still an HTTP response and follows the
+    normal `BAD_REQUEST` path; only exceptions/timeouts are transport.
+
+### 2.4. Other Errors (Soft Failures)
 **Errors**: `BAD_REQUEST`, `UNKNOWN`
 
 These errors are ambiguous. `BAD_REQUEST` (400) typically implies the Worker sent a malformed payload (probe configuration issue) or the Provider rejected a specific parameter.
@@ -91,6 +108,25 @@ mode (`gateway_policy.key_selection.mode`):
   `RATE_LIMITED` still rotate and ban. Client errors never rotate or penalize.
   While the circuit breaker is `OPEN`, retryable errors are additionally
   ban-frozen (fatal errors still ban).
+
+### 3.1 Transport retries
+
+Transport failures use a separate `gateway_policy.retry.on_transport_error`
+budget (default `attempts: 2`, `backoff_sec: 0.3`, `backoff_factor: 2.0`).
+They do **not** consume `on_key_error` or `on_server_error` attempts, do not
+call `_report_key_failure`, and do not remove the key from the pool. The
+gateway evicts the provider's HTTP client before the retry, forcing a fresh
+TCP/TLS connection; the same key is retried because all keys share the same
+tunnel.
+
+### 3.2 Network outage guard
+
+When the upstream network is down, the optional `network_guard` pauses the
+gateway and keeper instead of burning keys. In `pause` mode gateway requests
+return `503` with `Retry-After: 60`, `/readyz` returns `503`, and keeper probe
+cycles are skipped. Recovery requires an operator restart; a startup TCP+TLS
+probe decides whether the guard starts UP or DOWN. The guard is disabled by
+default and can be run in `log` mode first.
 
 See `docs/STICKY_KEY_MODE.md` for the full sticky-mode semantics, rotation
 triggers, and circuit breaker behavior, and `docs/ERROR_PARSING.md` for the

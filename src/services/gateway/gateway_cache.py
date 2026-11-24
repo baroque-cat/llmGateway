@@ -7,6 +7,7 @@ import logging
 from src.core.accessor import ConfigAccessor
 from src.core.breaker import KeyCircuitBreaker
 from src.core.constants import BreakerState, ErrorReason, KeySelectionMode
+from src.core.models import CheckResult
 from src.db.database import DatabaseManager
 from src.metrics import get_collector
 from src.metrics.registry import (
@@ -16,6 +17,8 @@ from src.metrics.registry import (
     BREAKER_REOPENED_EVENTS,
     METRIC_DESCRIPTIONS,
     STICKY_ROTATIONS_WITHOUT_BAN,
+    TRANSPORT_FAILURES_TOTAL,
+    UPSTREAM_ATTEMPTS_TOTAL,
 )
 
 logger = logging.getLogger(__name__)
@@ -37,6 +40,40 @@ def _inc_provider_metric(metric_name: str, provider_name: str) -> None:
         metric_name, METRIC_DESCRIPTIONS[metric_name], ["provider"]
     )
     counter.inc(labels={"provider": provider_name})
+
+
+def observe_upstream_attempt(provider_name: str, result: CheckResult) -> None:
+    """Record one upstream attempt and, if applicable, its transport class.
+
+    This is a lightweight observability hook called after every
+    ``provider.proxy_request()`` attempt, independent of the key-selection
+    mode (sticky or round-robin).  It deliberately does not touch the
+    breaker or the key pool.
+
+    Args:
+        provider_name: Provider instance name used as the metric label.
+        result: The attempt result returned by the provider.
+    """
+    outcome = "ok" if result.ok else result.error_reason.value
+    attempts = get_collector().counter(
+        UPSTREAM_ATTEMPTS_TOTAL,
+        METRIC_DESCRIPTIONS[UPSTREAM_ATTEMPTS_TOTAL],
+        ["provider", "outcome"],
+    )
+    attempts.inc(labels={"provider": provider_name, "outcome": outcome})
+
+    if result.transport_class is not None:
+        failures = get_collector().counter(
+            TRANSPORT_FAILURES_TOTAL,
+            METRIC_DESCRIPTIONS[TRANSPORT_FAILURES_TOTAL],
+            ["provider", "transport_class"],
+        )
+        failures.inc(
+            labels={
+                "provider": provider_name,
+                "transport_class": result.transport_class.value,
+            }
+        )
 
 
 class GatewayCache:

@@ -427,18 +427,54 @@ class KeyRepository:
         provider_name: str,
         result: CheckResult,
         next_check_time: datetime,
+        transport_failure: bool = False,
     ) -> None:
         """
         Updates the status of a key-model pair based on a check result.
         This method contains the core logic for managing the `failing_since` timestamp.
+
+        When ``transport_failure`` is true, only check metadata is refreshed:
+        the key keeps its current ``status`` and ``failing_since`` because a
+        network/tunnel failure is not evidence against the key itself.
+
+        Args:
+            key_id: Database key ID.
+            model_name: Model name (always ``ALL_MODELS_MARKER`` in this design).
+            provider_name: Provider instance name.
+            result: The check/proxy result.
+            next_check_time: When the key should be checked next.
+            transport_failure: If true, do not change ``status`` or
+                ``failing_since``.
         """
-        status_str = Status.VALID if result.ok else result.error_reason.value
-
-        assert (
-            status_str in Status
-        ), f"Attempted to write invalid status '{status_str}' to the database!"
-
         async with self._pool.acquire() as conn, conn.transaction():
+            if transport_failure:
+                query = """
+                    UPDATE key_model_status
+                    SET
+                        last_checked = NOW() AT TIME ZONE 'utc',
+                        next_check_time = $1,
+                        status_code = $2,
+                        response_time = $3,
+                        error_message = $4
+                    WHERE key_id = $5 AND model_name = $6
+                    """
+                params = [
+                    next_check_time,
+                    result.status_code,
+                    result.response_time,
+                    result.message[:1000],
+                    key_id,
+                    ALL_MODELS_MARKER,
+                ]
+                await conn.execute(query, *params)
+                return
+
+            status_str = Status.VALID if result.ok else result.error_reason.value
+
+            assert (
+                status_str in Status
+            ), f"Attempted to write invalid status '{status_str}' to the database!"
+
             base_query = """
                 UPDATE key_model_status
                 SET

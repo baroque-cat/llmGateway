@@ -12,6 +12,10 @@ from src.config.logging_config import get_trace_handler
 from src.core.accessor import ConfigAccessor
 from src.core.http2 import CapacityAwareHttp2Transport
 
+# Grace period before a retired client is closed.  In-flight requests keep
+# using the old client; new requests immediately get a fresh one.
+_RETIRED_CLIENT_GRACE_SEC: float = 30.0
+
 
 class HttpClientFactory:
     """
@@ -52,6 +56,10 @@ class HttpClientFactory:
         # The cache to store long-lived client instances.
         # The key is a unique identifier for the client's configuration (e.g., proxy URL).
         self._clients: dict[str, httpx.AsyncClient] = {}
+
+        # Clients removed by ``evict()``.  They are kept alive briefly so that
+        # in-flight requests can finish, then closed in a background task.
+        self._retired_clients: set[httpx.AsyncClient] = set()
 
         # A dictionary to hold asyncio.Lock objects, one for each potential cache key.
         # This prevents race conditions where multiple coroutines try to create the
@@ -176,6 +184,43 @@ class HttpClientFactory:
                 # Re-raise the exception so the caller knows something went wrong.
                 raise
 
+    async def evict(self, provider_name: str) -> None:
+        """Retire the cached client for a provider and force a fresh one.
+
+        The old client is removed from the cache immediately, so the next
+        :meth:`get_client_for_provider` call creates a new client with a new
+        connection pool.  The retired client is closed after a grace period,
+        allowing requests that are already in flight to finish.
+
+        Args:
+            provider_name: The provider instance whose client should be retired.
+        """
+        cache_key = self._get_cache_key_for_provider(provider_name)
+        client = self._clients.pop(cache_key, None)
+        if client is None:
+            return
+
+        self._retired_clients.add(client)
+        asyncio.create_task(self._close_retired_client(client))
+        self.logger.info(
+            f"Evicted HTTP client for provider '{provider_name}' after a "
+            f"transport failure; a fresh connection pool will be created."
+        )
+
+    async def _close_retired_client(self, client: httpx.AsyncClient) -> None:
+        """Close a retired client after the grace period.
+
+        Args:
+            client: The client removed from the active cache.
+        """
+        try:
+            await asyncio.sleep(_RETIRED_CLIENT_GRACE_SEC)
+            await client.aclose()
+        except Exception as exc:  # noqa: BLE001 - cleanup must never raise
+            self.logger.warning(f"Failed to close retired HTTP client: {exc}")
+        finally:
+            self._retired_clients.discard(client)
+
     async def close_all(self) -> None:
         """
         Gracefully closes all cached httpx.AsyncClient instances.
@@ -183,17 +228,22 @@ class HttpClientFactory:
         This should be called during application shutdown to ensure all
         underlying network connections are properly terminated.
         """
-        if not self._clients:
+        if not self._clients and not self._retired_clients:
             self.logger.info("No active HTTP clients to close.")
             return
 
-        self.logger.info(f"Closing {len(self._clients)} cached HTTP client(s)...")
+        total = len(self._clients) + len(self._retired_clients)
+        self.logger.info(f"Closing {total} cached/retired HTTP client(s)...")
 
-        # Concurrently close all clients.
-        closing_tasks = [client.aclose() for client in self._clients.values()]
+        # Concurrently close all active and retired clients.
+        closing_tasks = [
+            client.aclose()
+            for client in (*self._clients.values(), *self._retired_clients)
+        ]
         await asyncio.gather(*closing_tasks, return_exceptions=True)
 
         self._clients.clear()
+        self._retired_clients.clear()
         self._locks.clear()
         self.logger.info(
             "All HTTP clients have been closed and cache has been cleared."

@@ -13,12 +13,14 @@ from apscheduler.triggers.interval import IntervalTrigger
 # Import the new centralized package entry point and key components.
 from src.config import load_config
 from src.config.logging_config import setup_logging
+from src.config.schemas import NetworkGuardConfig
 from src.core.accessor import ConfigAccessor
 from src.core.http_client_factory import HttpClientFactory
 from src.core.interfaces import IResourceSyncer, ProviderKeyState
+from src.core.network_guard import NetworkGuard, set_network_guard
 from src.db import database
 from src.db.database import DatabaseManager
-from src.metrics import get_collector
+from src.metrics import emit_guard_transition, get_collector
 from src.metrics.registry import (
     ADAPTIVE_BACKOFF_EVENTS,
     ADAPTIVE_BATCH_DELAY,
@@ -301,6 +303,7 @@ async def run_keeper() -> None:
     scheduler = None
     logger: logging.Logger | None = None
     client_factory: HttpClientFactory | None = None
+    guard_tasks: list[asyncio.Task[None]] = []
 
     try:
         # Step 1: Load Configuration and create the Accessor.
@@ -312,6 +315,26 @@ async def run_keeper() -> None:
         logger = logging.getLogger(__name__)
 
         logger.info("--- Starting LLM Gateway Keeper (Async) ---")
+
+        # Global outage guard.  Keeper is the single authoritative active
+        # prober: it sees all providers and owns the mass key-status writes.
+        guard_config = accessor.get_network_guard_config()
+        if not isinstance(guard_config, NetworkGuardConfig):
+            # Test/legacy accessor double without the new section.
+            guard_config = NetworkGuardConfig()
+        guard = NetworkGuard(
+            guard_config,
+            source="keeper",
+            on_transition=emit_guard_transition,
+        )
+        set_network_guard(guard)
+        await guard.startup_probe()
+        emit_guard_transition(
+            "down" if guard.is_down() else "up", {"reason": "startup"}
+        )
+        if guard.enabled:
+            guard_tasks.append(asyncio.create_task(guard.poll_loop()))
+            guard_tasks.append(asyncio.create_task(guard.active_loop()))
 
         # Step 3: Setup Directories.
         _setup_directories(accessor)
@@ -484,6 +507,9 @@ async def run_keeper() -> None:
         # Step 10: Graceful Shutdown
         shutdown_logger = logging.getLogger(__name__) or logging.getLogger("shutdown")
         shutdown_logger.info("Initiating graceful shutdown...")
+        for guard_task in guard_tasks:
+            guard_task.cancel()
+        set_network_guard(None)
         if scheduler and scheduler.running:
             scheduler.shutdown()
             shutdown_logger.info("Scheduler shut down.")

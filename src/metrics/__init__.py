@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import Any
 
 from src.core.interfaces import IMetricsCollector
 
@@ -77,6 +78,34 @@ def get_collector() -> IMetricsCollector:
         }
 
     return _collector
+
+
+def emit_guard_transition(state: str, evidence: dict[str, Any]) -> None:
+    """Update the network-guard metrics on an UP/DOWN transition.
+
+    Args:
+        state: ``"up"`` or ``"down"``.
+        evidence: Transition evidence; ``reason`` is used as a counter label.
+    """
+    from src.metrics.registry import (  # local import avoids a cycle at import time
+        METRIC_DESCRIPTIONS,
+        NETWORK_GUARD_DOWN,
+        NETWORK_GUARD_TRIPS_TOTAL,
+    )
+
+    try:
+        collector = get_collector()
+        collector.gauge(
+            NETWORK_GUARD_DOWN, METRIC_DESCRIPTIONS[NETWORK_GUARD_DOWN], []
+        ).set(1.0 if state == "down" else 0.0)
+        if state == "down":
+            collector.counter(
+                NETWORK_GUARD_TRIPS_TOTAL,
+                METRIC_DESCRIPTIONS[NETWORK_GUARD_TRIPS_TOTAL],
+                ["reason"],
+            ).inc(labels={"reason": str(evidence.get("reason", "unknown"))})
+    except Exception:  # noqa: BLE001 - metrics must never break service startup
+        logger.warning("Failed to emit network guard metrics", exc_info=True)
 
 
 def reset_collector() -> None:

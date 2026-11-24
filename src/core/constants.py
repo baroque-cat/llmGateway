@@ -117,6 +117,31 @@ class ErrorReason(Enum):
 
 
 @unique
+class TransportFailureClass(StrEnum):
+    """
+    Classifies *where* an upstream HTTP exchange broke.
+
+    ``ErrorReason`` answers "whose fault is it" (key, provider, client),
+    while this enum answers "which transport phase failed".  It is attached
+    to :class:`~src.core.models.CheckResult` for transport-level exceptions
+    only, so callers can distinguish a dead tunnel from a provider 5xx
+    without parsing log strings.
+
+    Values are stable strings suitable for metric labels.
+    """
+
+    CONNECT_TIMEOUT = "connect_timeout"
+    CONNECT_ERROR = "connect_error"
+    POOL_TIMEOUT = "pool_timeout"
+    READ_TIMEOUT = "read_timeout"
+    STREAM_READ_TIMEOUT = "stream_read_timeout"
+    WRITE_TIMEOUT = "write_timeout"
+    REMOTE_PROTOCOL = "remote_protocol"
+    POOL_SATURATED = "pool_saturated"
+    REQUEST_ERROR = "request_error"
+
+
+@unique
 class Status(StrEnum):
     """
     Represents all possible states for a resource's status in the database.

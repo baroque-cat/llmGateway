@@ -12,6 +12,7 @@ from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 
 # Import core application components
+from src.config.schemas import NetworkGuardConfig, RetryOnErrorConfig
 from src.core.accessor import ConfigAccessor
 from src.core.constants import (  # Added explicitly for error type checking
     ALL_MODELS_MARKER,
@@ -21,16 +22,18 @@ from src.core.constants import (  # Added explicitly for error type checking
 from src.core.http_client_factory import HttpClientFactory
 from src.core.interfaces import IProvider
 from src.core.models import CheckResult
+from src.core.network_guard import NetworkGuard, set_network_guard
 from src.core.policy_utils import compute_next_check_time
 from src.db import database
 from src.db.database import DatabaseManager
+from src.metrics import emit_guard_transition
 from src.metrics.auth import (
     MetricsAuthError,
     validate_metrics_access,
     validate_metrics_token,
 )
 from src.providers import get_provider
-from src.services.gateway.gateway_cache import GatewayCache
+from src.services.gateway.gateway_cache import GatewayCache, observe_upstream_attempt
 from src.services.gateway.response_forwarder import (
     discard_response,
     forward_buffered_body,
@@ -61,6 +64,24 @@ def _get_http_client_factory(request: Request) -> HttpClientFactory:
 def _get_config_accessor(request: Request) -> ConfigAccessor:
     """Retrieves the ConfigAccessor from the application state."""
     return request.app.state.accessor
+
+
+def _observe_attempt(
+    request: Request, provider_name: str, check_result: CheckResult
+) -> None:
+    """Emit attempt metrics and feed transport failures to the outage guard.
+
+    Args:
+        request: Current FastAPI request (for app state access).
+        provider_name: Provider instance name.
+        check_result: Result of the upstream attempt.
+    """
+    observe_upstream_attempt(provider_name, check_result)
+    if check_result.transport_class is None:
+        return
+    guard = getattr(request.app.state, "network_guard", None)
+    if isinstance(guard, NetworkGuard):
+        guard.note_failure(provider_name, check_result.transport_class)
 
 
 # --- Module-level setup ---
@@ -368,7 +389,17 @@ async def _report_key_failure(
 
     In transparent proxy mode, model_name is always ALL_MODELS_MARKER since
     the gateway no longer tracks per-model key status.
+
+    Transport-level failures are deliberately ignored: a dead tunnel or
+    connection reset is not evidence that the key is bad.
     """
+    if result.transport_class is not None:
+        logger.debug(
+            f"Fast feedback: skipping key {key_id} penalty for transport "
+            f"failure ({result.transport_class.value})."
+        )
+        return
+
     try:
         provider_config = accessor.get_provider_or_raise(provider_name)
         health_policy = provider_config.worker_health_policy
@@ -542,6 +573,7 @@ async def _handle_full_stream_request(
         query_params=str(request.url.query),
         content=request.stream(),
     )
+    _observe_attempt(request, instance_name, check_result)
 
     if sticky:
         # Feed the attempt outcome to the circuit breaker. No-op when the
@@ -676,6 +708,25 @@ async def _handle_buffered_retryable_request(
     retry_policy = provider_config.gateway_policy.retry
     key_error_policy = retry_policy.on_key_error
     server_error_policy = retry_policy.on_server_error
+    transport_error_policy = retry_policy.on_transport_error
+    # Tests and older configs may provide a mocked/legacy retry policy without
+    # the new field; fall back to "no transport retries" rather than guessing.
+    if not isinstance(transport_error_policy, RetryOnErrorConfig):
+        transport_error_policy = RetryOnErrorConfig(attempts=0)
+
+    # Debug mode forces the buffered path and, per the startup warning, takes
+    # priority over the retry policy.  Honour both that warning and
+    # ``retry.enabled=false`` by zeroing the attempt budgets, so a debug
+    # session never silently retries.
+    effective_debug_mode = request.app.state.debug_mode_map.get(
+        instance_name, "disabled"
+    )
+    if not retry_policy.enabled or effective_debug_mode != "disabled":
+        key_error_policy = key_error_policy.model_copy(update={"attempts": 0})
+        server_error_policy = server_error_policy.model_copy(update={"attempts": 0})
+        transport_error_policy = transport_error_policy.model_copy(
+            update={"attempts": 0}
+        )
 
     # Sticky-mode wiring (design D5). In round-robin mode both flags are
     # False and the retry loop below behaves exactly as before this change.
@@ -696,6 +747,8 @@ async def _handle_buffered_retryable_request(
     total_attempts = 0
     key_error_attempts = 0
     server_error_attempts = 0
+    transport_error_attempts = 0
+    evicted_providers: set[str] = set()
     last_reason: ErrorReason | None = None
 
     timeout_sec = provider_config.timeouts.total
@@ -747,6 +800,7 @@ async def _handle_buffered_retryable_request(
                     )
                 )
                 _response_handled = False
+                _observe_attempt(request, instance_name, check_result)
                 cache.record_upstream_result(
                     instance_name,
                     check_result.ok,
@@ -842,6 +896,7 @@ async def _handle_buffered_retryable_request(
                         )
                     )
                     _response_handled = False
+                    _observe_attempt(request, instance_name, check_result)
                     cache.record_upstream_result(
                         instance_name,
                         check_result.ok,
@@ -888,6 +943,48 @@ async def _handle_buffered_retryable_request(
                         f"Retry status (sticky) - Total attempts: {total_attempts}, "
                         f"Key errors: {key_error_attempts}/{key_error_policy.attempts}"
                     )
+
+                    if check_result.transport_class is not None:
+                        # Transport failure: the key is not at fault. Rotate to
+                        # another key for this request, but never ban it.
+                        transport_error_attempts += 1
+                        logger.warning(
+                            f"Transport failure for '{instance_name}' "
+                            f"(class={check_result.transport_class.value}, "
+                            f"attempt {transport_error_attempts}/"
+                            f"{transport_error_policy.attempts}). "
+                            f"Key #{key_id} is NOT penalized."
+                        )
+                        if transport_error_attempts < transport_error_policy.attempts:
+                            # The key is not at fault and all keys share the
+                            # same tunnel, so retry the same key with a fresh
+                            # HTTP client instead of exhausting the pool.
+                            await discard_response(upstream_response, body_bytes)
+                            _response_handled = True
+                            delay = transport_error_policy.backoff_sec * (
+                                transport_error_policy.backoff_factor
+                                ** (transport_error_attempts - 1)
+                            )
+                            if instance_name not in evicted_providers:
+                                evicted_providers.add(instance_name)
+                                await http_factory.evict(instance_name)
+                            logger.info(
+                                f"Transport retry in {delay:.2f}s with a fresh "
+                                f"connection (attempt {transport_error_attempts}/"
+                                f"{transport_error_policy.attempts})..."
+                            )
+                            await asyncio.sleep(delay)
+                            continue
+
+                        logger.error(
+                            f"Exhausted all {transport_error_policy.attempts} "
+                            f"transport retry attempts for '{instance_name}'. "
+                            f"Key #{key_id} is not penalized; forwarding the error."
+                        )
+                        _response_handled = True
+                        return await forward_error_to_client(
+                            upstream_response, check_result, body_bytes
+                        )
 
                     if reason.is_client_error():
                         # Case 2: Client-side error. Retrying is pointless.
@@ -997,6 +1094,7 @@ async def _handle_buffered_retryable_request(
                     )
                 )
                 _response_handled = False
+                _observe_attempt(request, instance_name, check_result)
 
                 if check_result.ok:
                     # Case 1: Success. Check if debug logging is needed.
@@ -1035,6 +1133,46 @@ async def _handle_buffered_retryable_request(
                     f"Retry status - Total attempts: {total_attempts}, Key errors: {key_error_attempts}/{key_error_policy.attempts}, "
                     f"Server errors (current key): {server_error_attempts}/{server_error_policy.attempts}"
                 )
+
+                if check_result.transport_class is not None:
+                    # Transport failure: do not charge it to the key and do not
+                    # consume the server-error budget. Rotate for this request.
+                    transport_error_attempts += 1
+                    logger.warning(
+                        f"Transport failure for '{instance_name}' "
+                        f"(class={check_result.transport_class.value}, "
+                        f"attempt {transport_error_attempts}/"
+                        f"{transport_error_policy.attempts}). "
+                        f"Key #{key_id} is NOT penalized."
+                    )
+                    if transport_error_attempts < transport_error_policy.attempts:
+                        # Keep the key: the tunnel, not the key, failed.
+                        await discard_response(upstream_response, body_bytes)
+                        _response_handled = True
+                        delay = transport_error_policy.backoff_sec * (
+                            transport_error_policy.backoff_factor
+                            ** (transport_error_attempts - 1)
+                        )
+                        if instance_name not in evicted_providers:
+                            evicted_providers.add(instance_name)
+                            await http_factory.evict(instance_name)
+                        logger.info(
+                            f"Transport retry in {delay:.2f}s with a fresh "
+                            f"connection (attempt {transport_error_attempts}/"
+                            f"{transport_error_policy.attempts})..."
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+
+                    logger.error(
+                        f"Exhausted all {transport_error_policy.attempts} "
+                        f"transport retry attempts for '{instance_name}'. "
+                        f"Key #{key_id} is not penalized; forwarding the error."
+                    )
+                    _response_handled = True
+                    return await forward_error_to_client(
+                        upstream_response, check_result, body_bytes
+                    )
 
                 if reason.is_client_error():
                     # Case 2: Client-side error. Retrying is pointless. Abort the loop.
@@ -1206,9 +1344,32 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
     async def lifespan(app: FastAPI):
         # --- Startup Logic ---
         logger.info("Gateway service starting up...")
+        guard_task: asyncio.Task[None] | None = None
         try:
             # Store the accessor in the app state for other components to use.
             app.state.accessor = accessor
+
+            # Global outage guard.  It starts before any provider work and, if
+            # its startup probe fails, keeps the gateway paused (503) instead
+            # of burning keys against a dead network.
+            guard_config = accessor.get_network_guard_config()
+            if not isinstance(guard_config, NetworkGuardConfig):
+                # Test/legacy accessor double without the new section.
+                guard_config = NetworkGuardConfig()
+            guard = NetworkGuard(
+                guard_config,
+                source="gateway",
+                on_transition=emit_guard_transition,
+            )
+            app.state.network_guard = guard
+            set_network_guard(guard)
+            await guard.startup_probe()
+            emit_guard_transition(
+                "down" if guard.is_down() else "up", {"reason": "startup"}
+            )
+            if guard.enabled:
+                guard_task = asyncio.create_task(guard.poll_loop())
+                app.state.network_guard_task = guard_task
 
             # This block implements the requested feature for detailed startup logging.
             logger.info("[Gateway Startup] Analyzing provider streaming modes...")
@@ -1320,6 +1481,9 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
 
         # --- Shutdown Logic ---
         logger.info("Gateway service shutting down...")
+        if guard_task is not None:
+            guard_task.cancel()
+        set_network_guard(None)
         if task := getattr(app.state, "cache_refresh_task", None):
             task.cancel()
         if health_task := getattr(app.state, "pool_health_task", None):
@@ -1330,6 +1494,23 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
         logger.info("All resources have been released gracefully.")
 
     app = FastAPI(title="llmGateway - API Gateway Service", lifespan=lifespan)
+
+    @app.get("/healthz")
+    async def healthz() -> JSONResponse:
+        """Liveness probe: the process is alive and serving."""
+        return JSONResponse(status_code=200, content={"status": "ok"})
+
+    @app.get("/readyz")
+    async def readyz(request: Request) -> JSONResponse:
+        """Readiness probe: not paused by the network guard."""
+        guard = getattr(request.app.state, "network_guard", None)
+        if isinstance(guard, NetworkGuard) and guard.enforcing and guard.is_down():
+            return JSONResponse(
+                status_code=503,
+                content={"status": "network_down", "guard": guard.snapshot()},
+                headers={"Retry-After": "60"},
+            )
+        return JSONResponse(status_code=200, content={"status": "ready"})
 
     @app.get("/metrics")
     async def metrics_endpoint(
@@ -1390,6 +1571,19 @@ def create_app(accessor: ConfigAccessor) -> FastAPI:
         if not instance_name:
             return JSONResponse(
                 status_code=401, content={"error": "Invalid authentication token."}
+            )
+
+        guard = getattr(request.app.state, "network_guard", None)
+        if isinstance(guard, NetworkGuard) and guard.enforcing and guard.is_down():
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "error": (
+                        "Network outage guard is active: upstream attempts are "
+                        "paused. Fix connectivity and restart the container."
+                    )
+                },
+                headers={"Retry-After": "60"},
             )
 
         try:
