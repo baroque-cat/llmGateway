@@ -188,10 +188,10 @@ class TestOpenAILikeErrorParsing:
         Test that check() calls _refine_error_reason() on HTTP 400 errors.
 
         When error_parsing is disabled, check() returns the default reason
-        (INVALID_KEY for 400). When enabled with a matching rule, it returns
+        (BAD_REQUEST for 400). When enabled with a matching rule, it returns
         the refined reason from error_parsing.
         """
-        # Case 1: error_parsing disabled → default reason (INVALID_KEY for 400)
+        # Case 1: error_parsing disabled → default reason (BAD_REQUEST for 400)
         provider_disabled = self.create_mock_provider(
             error_config=ErrorParsingConfig(enabled=False, rules=[])
         )
@@ -223,7 +223,7 @@ class TestOpenAILikeErrorParsing:
         result = await provider_disabled.check(mock_client, "test_token", model="gpt-4")
 
         assert not result.available
-        assert result.error_reason == ErrorReason.INVALID_KEY
+        assert result.error_reason == ErrorReason.BAD_REQUEST
         assert result.status_code == 400
 
         # Case 2: error_parsing enabled with matching rule → refined reason
@@ -318,8 +318,8 @@ class TestOpenAILikeErrorParsing:
             call_args = mock_refine.call_args
             # First positional arg is the response object
             assert call_args[0][0] is mock_response
-            # Second positional arg is default_reason (INVALID_KEY for 400 in check())
-            assert call_args[0][1] == ErrorReason.INVALID_KEY
+            # Second positional arg is default_reason (BAD_REQUEST for 400 in check())
+            assert call_args[0][1] == ErrorReason.BAD_REQUEST
             # body_bytes keyword arg contains encoded response text
             assert "body_bytes" in call_args[1]
             assert (

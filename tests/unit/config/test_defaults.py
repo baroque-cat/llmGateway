@@ -95,6 +95,7 @@ def test_default_config_keys_and_values():
     expected_keys = [
         "logging",
         "http_client",
+        "network_guard",
         "gateway",
         "keeper",
         "database",
@@ -188,6 +189,7 @@ def test_full_config_key_order():
         "logging",
         "http_client",
         "metrics",
+        "network_guard",
         "gateway",
         "keeper",
         "database",

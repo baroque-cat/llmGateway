@@ -49,7 +49,7 @@ test-boundary:
 # All groups are fault-tolerant (-prefix) — one group failing does not stop the rest.
 test-slow:
 	@echo "=== G6a: fast server + metrics tests ==="
-	-poetry run pytest tests/stress/test_ephemeral_server.py tests/stress/test_metrics_collector.py -q --timeout=15 -m slow
+	-poetry run pytest tests/stress/test_ephemeral_server.py tests/stress/test_metrics_collector.py tests/stress/test_network_guard_chaos.py -q --timeout=15 -m slow
 	@echo "=== G6b: concurrency scenarios ==="
 	-poetry run pytest tests/stress/test_cap_prevents_freeze.py tests/stress/test_connection_growth.py tests/stress/test_multi_client.py tests/stress/test_stream_exhaustion.py tests/stress/test_cascading_freeze.py tests/stress/test_pool_saturation.py tests/stress/test_throughput_bottleneck.py -q --timeout=30 -m slow
 	@echo "=== G6c: long-running scenarios ==="

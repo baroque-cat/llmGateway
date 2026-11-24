@@ -1878,3 +1878,96 @@ class TestEnhancedNetworkErrorLogging:
         assert check_result.available is False
         assert check_result.error_reason == ErrorReason.NETWORK_ERROR
         assert body_bytes is None
+
+
+# ---------------------------------------------------------------------------
+# Transport Failure Classification — parametrized cases
+# ---------------------------------------------------------------------------
+
+
+class TestClassifyTransportException:
+    """Tests for AIBaseProvider._classify_transport_exception() static method.
+
+    Verifies that each httpx transport exception type is mapped to the correct
+    TransportFailureClass enum value.
+    """
+
+    @pytest.mark.parametrize(
+        "exception_factory,expected_class",
+        [
+            pytest.param(
+                lambda: httpx.PoolTimeout("Pool timeout"),
+                "pool_timeout",
+                id="PoolTimeout→pool_timeout",
+            ),
+            pytest.param(
+                lambda: httpx.ConnectTimeout("Connect timeout"),
+                "connect_timeout",
+                id="ConnectTimeout→connect_timeout",
+            ),
+            pytest.param(
+                lambda: httpx.ConnectError("Connection failed"),
+                "connect_error",
+                id="ConnectError→connect_error",
+            ),
+            pytest.param(
+                lambda: httpx.ReadTimeout("Per-stream timeout exceeded"),
+                "stream_read_timeout",
+                id="ReadTimeout(Per-stream)→stream_read_timeout",
+            ),
+            pytest.param(
+                lambda: httpx.ReadTimeout("Read timeout"),
+                "read_timeout",
+                id="ReadTimeout→read_timeout",
+            ),
+            pytest.param(
+                lambda: httpx.WriteTimeout("Write timeout"),
+                "write_timeout",
+                id="WriteTimeout→write_timeout",
+            ),
+            pytest.param(
+                lambda: httpx.RemoteProtocolError("Protocol error"),
+                "remote_protocol",
+                id="RemoteProtocolError→remote_protocol",
+            ),
+            pytest.param(
+                lambda: httpx.LocalProtocolError("Local protocol error"),
+                "pool_saturated",
+                id="LocalProtocolError→pool_saturated",
+            ),
+            pytest.param(
+                lambda: httpx.RequestError("Generic request error"),
+                "request_error",
+                id="RequestError→request_error",
+            ),
+        ],
+    )
+    def test_classify_transport_exception_mapping(
+        self, exception_factory, expected_class: str
+    ) -> None:
+        """Each httpx transport exception maps to the correct TransportFailureClass."""
+        exc = exception_factory()
+        result = AIBaseProvider._classify_transport_exception(exc)
+        assert result is not None
+        assert result.value == expected_class
+
+    def test_classify_transport_exception_returns_none_for_unknown(self) -> None:
+        """Non-transport exceptions return None."""
+        exc = ValueError("Not a transport error")
+        result = AIBaseProvider._classify_transport_exception(exc)
+        assert result is None
+
+    def test_local_protocol_error_maps_to_pool_saturated_and_bad_request(
+        self,
+    ) -> None:
+        """LocalProtocolError maps to pool_saturated transport class.
+
+        When _send_proxy_request catches LocalProtocolError, it should set
+        ErrorReason.BAD_REQUEST (not NETWORK_ERROR) with transport_class=pool_saturated.
+        This test verifies the classification; the full integration is tested in
+        test_send_proxy_request_local_protocol_error.
+        """
+        exc = httpx.LocalProtocolError("Pool saturated")
+        result = AIBaseProvider._classify_transport_exception(exc)
+        assert result is not None
+        assert result.value == "pool_saturated"

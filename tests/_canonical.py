@@ -301,6 +301,13 @@ class CanonicalConfig:
         cb_max_open_duration_sec: Hard ceiling for cooldown (from YAML).
         cb_probe_successes_to_close: Consecutive successes to close breaker (from YAML).
         key_selection_mode_default: Default key selection mode (from YAML).
+        ng_enabled: Network guard master switch (from YAML).
+        ng_mode: Network guard mode (``log`` or ``pause``).
+        ng_probe_urls: TCP+TLS probe targets (from YAML).
+        ng_probe_interval_sec: Active probe interval (from YAML).
+        ng_fail_threshold: Consecutive probe failures before DOWN (from YAML).
+        ng_passive_window_sec: Passive evidence window (from YAML).
+        ng_marker_path: Shared marker path (from YAML).
         canonical_provider_types: Tuple of valid provider type strings.
         canonical_model_names: Tuple of valid model name strings.
     """
@@ -391,6 +398,15 @@ class CanonicalConfig:
     # === Key Selection (1) ===
     key_selection_mode_default: str
 
+    # === Network Guard (7) ===
+    ng_enabled: bool
+    ng_mode: str
+    ng_probe_urls: tuple[str, ...]
+    ng_probe_interval_sec: int
+    ng_fail_threshold: int
+    ng_passive_window_sec: int
+    ng_marker_path: str
+
     # === Canonical lists (2) ===
     canonical_provider_types: tuple[str, ...] = field(
         default_factory=lambda: ("anthropic", "openai_like", "gemini")
@@ -428,6 +444,7 @@ class CanonicalConfig:
         http_client = _dict_or_empty(_get_nested(cfg, "http_client", default={}))
         http_pool = _dict_or_empty(http_client.get("pool", {}))
         metrics = _dict_or_empty(_get_nested(cfg, "metrics", default={}))
+        ng = _dict_or_empty(_get_nested(cfg, "network_guard", default={}))
 
         # Extract from first provider that has timeouts + worker_health_policy
         provider = _first_provider_with(cfg, "timeouts", "worker_health_policy")
@@ -529,6 +546,16 @@ class CanonicalConfig:
             cb_probe_successes_to_close=int(cb.get("probe_successes_to_close", 3)),
             # Key Selection (from YAML, first provider with gateway_policy.key_selection)
             key_selection_mode_default=str(ks.get("mode", "round_robin")),
+            # Network Guard (from YAML)
+            ng_enabled=bool(ng.get("enabled", False)),
+            ng_mode=str(ng.get("mode", "pause")),
+            ng_probe_urls=tuple(str(u) for u in (ng.get("probe_urls") or [])),
+            ng_probe_interval_sec=int(ng.get("probe_interval_sec", 30)),
+            ng_fail_threshold=int(ng.get("fail_threshold", 3)),
+            ng_passive_window_sec=int(ng.get("passive_window_sec", 60)),
+            ng_marker_path=str(
+                ng.get("marker_path", "/app/data/network_guard/state.json")
+            ),
         )
 
     def to_env_dict(self) -> dict[str, str]:
