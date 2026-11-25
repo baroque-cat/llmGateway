@@ -55,7 +55,8 @@ network_guard:
   passive_min_providers: 3
   passive_min_failures: 6
   startup_probe: true
-  # Recovery requires a container restart unless explicitly enabled.
+  # "pause": recovery requires a container restart unless auto_recover=true.
+  # "log": the guard auto-recovers after probes succeed again.
   auto_recover: false
   # Shared volume path; gateway and keeper both mount ./data.
   marker_path: "/app/data/network_guard/state.json"

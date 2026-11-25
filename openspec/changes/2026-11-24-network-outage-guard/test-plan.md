@@ -60,8 +60,13 @@ always banned by the gatekeeper, even with `# boundary:`.
   `probe_urls` does not clear an existing marker.
 - Unit: marker atomicity/TTL; expired marker ignored; fresh marker adopted by
   `poll_marker`.
-- Unit: `active_loop` trips after `fail_threshold` consecutive failures and
-  does not auto-recover when `auto_recover=False`.
+- Unit: `active_loop` trips after `fail_threshold` consecutive failures;
+  `pause` mode does not auto-recover when `auto_recover=False`; `log` mode
+  auto-recovers after a successful probe.
+- Unit: a successful TLS handshake is not invalidated by a hanging
+  `wait_closed()`; failed targets are included in marker evidence.
+- Unit: `mark_down` logs `CRITICAL` only in `pause` mode and `WARNING` in
+  `log` mode.
 - Integration: two `NetworkGuard` instances share a `tmp_path` marker; one
   writes, the other adopts; `mark_up` removes it.
 - Integration: gateway `catch_all_endpoint` returns 503 with `Retry-After`

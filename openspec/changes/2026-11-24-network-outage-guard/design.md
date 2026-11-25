@@ -18,8 +18,9 @@ Two failure classes must be separated:
   consuming key/server-error budgets.
 - Detect a system-wide outage (all/most providers unreachable) and pause both
   gateway and keeper.
-- Reset only on operator action (container restart + startup probe), not by
-  time-based auto-recovery.
+- In `pause` mode, reset only on operator action (container restart + startup
+  probe), not by time-based auto-recovery. `log` mode is observational and
+  auto-recovers when probes succeed again.
 - Work with `GATEWAY_WORKERS=1` today and not collapse when workers > 1.
 - Keep the per-provider `KeyCircuitBreaker` unchanged; compose the new guard
   outside it.
@@ -104,12 +105,14 @@ problem.
 
 ### State
 
-Process-local `UP`/`DOWN`; no auto-recovery while the process is alive.
-Transitions:
+Process-local `UP`/`DOWN`. `pause` mode has no auto-recovery while the process
+is alive; `log` mode auto-recovers after a successful probe because it never
+blocks traffic. Transitions:
 
 - `startup_probe` success -> UP (and marker removed)
 - `startup_probe` failure -> DOWN (marker written)
 - passive window / active probe / keeper preflight -> DOWN
+- active probe success in `log` mode -> UP (marker removed)
 - operator restart -> new process -> startup probe decides
 
 `mode: "log"` records state and metrics but does not block requests/probes.
@@ -124,8 +127,10 @@ Transitions:
 | Keeper preflight | keeper, before each `run_cycle` | < 2 of 3 targets reachable in 2 s |
 | Keeper per-batch check | keeper, between batches | marker/local DOWN |
 
-Active probes use `asyncio.open_connection` with TLS and a 3 s timeout. No HTTP
-request or API key is used.
+Active probes use `asyncio.open_connection` with TLS and a 3 s timeout. The
+verdict covers DNS resolution plus the TCP/TLS handshake; closing the socket is
+best-effort and is not part of the probe budget. No HTTP request or API key is
+used.
 
 ### Shared marker
 
@@ -139,7 +144,9 @@ Path: `/app/data/network_guard/state.json` (both containers mount `./data`).
   "since": 1795542498.0,
   "reason": "active_probe",
   "expires_at": 1795542588.0,
-  "evidence": {"providers": ["a", "b", "c"], "classes": ["connect_timeout"]}
+  "evidence": {
+    "failed_probes": [{"url": "https://provider.example", "error": "TimeoutError: ..."}]
+  }
 }
 ```
 
@@ -147,8 +154,9 @@ Path: `/app/data/network_guard/state.json` (both containers mount `./data`).
 - TTL: `max(2 * probe_interval_sec, 60)`.
 - Readers cache the marker for 1 s in a background loop; no file I/O in the
   request hot path.
-- A live process never auto-recovers when the marker disappears; only a
-  restart does.
+- In `pause` mode a live process never auto-recovers when the marker
+  disappears; only a restart does. In `log` mode a missing/expired marker or a
+  successful active probe clears the local DOWN state.
 - At startup, a successful probe clears the marker (the operator reset path).
   With no `probe_urls` configured, the startup probe does not clear an
   existing marker; the poll loop adopts it.

@@ -88,18 +88,28 @@ marker on the shared `data/` volume.
 - **GIVEN** a marker whose `expires_at` is in the past
 - **WHEN** a process reads it
 - **THEN** the marker SHALL be ignored
-- **AND** a live process SHALL NOT auto-recover from its local DOWN state
+- **AND** in `pause` mode a live process SHALL NOT auto-recover from its local
+  DOWN state
+- **AND** in `log` mode the process SHALL recover automatically
 
-### Requirement: Recovery requires an operator restart
+### Requirement: Recovery in pause mode requires an operator restart
 
-The guard SHALL NOT auto-recover a running process.
+The guard SHALL NOT auto-recover a running process in `pause` mode. `log` mode
+is observational and recovers automatically when probes succeed.
 
-#### Scenario: Network restored while the process is running
+#### Scenario: Network restored while the process is running in pause mode
 
-- **GIVEN** the guard is DOWN and `auto_recover = false`
+- **GIVEN** the guard is DOWN, `mode = "pause"`, and `auto_recover = false`
 - **WHEN** the active probe succeeds
 - **THEN** the guard SHALL remain DOWN
 - **AND** SHALL only refresh the marker
+
+#### Scenario: Network restored in log mode
+
+- **GIVEN** the guard is DOWN and `mode = "log"`
+- **WHEN** the active probe succeeds
+- **THEN** the guard SHALL transition to UP
+- **AND** the marker SHALL be removed
 
 #### Scenario: Operator restarts the gateway
 
