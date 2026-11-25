@@ -13,13 +13,14 @@ Verifies that:
 import asyncio
 import contextlib
 import json
-from unittest.mock import AsyncMock, patch
+import logging
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from src.config.schemas import NetworkGuardConfig
 from src.core.constants import TransportFailureClass
-from src.core.network_guard import NetworkGuard
+from src.core.network_guard import NetworkGuard, ProbeFailure
 
 
 @pytest.fixture
@@ -115,6 +116,125 @@ async def test_network_guard_mark_up(base_config, temp_marker_path):
     await guard.mark_up("test_recovery")
     assert guard.is_down() is False
     assert not temp_marker_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_probe_one_does_not_await_close(base_config):
+    """Successful handshake is not failed by a hanging TLS close."""
+    guard = NetworkGuard(base_config, source="test")
+    reader = MagicMock()
+    writer = MagicMock()
+    writer.wait_closed = AsyncMock(
+        side_effect=AssertionError("wait_closed must not be awaited")
+    )
+
+    with (
+        patch(
+            "src.core.network_guard.asyncio.open_connection",
+            new=AsyncMock(return_value=(reader, writer)),
+        ),
+        patch(
+            "src.core.network_guard.ssl.create_default_context",
+            return_value=MagicMock(),
+        ),
+    ):
+        result = await guard._probe_one("https://example.com")
+
+    assert result is None
+    writer.close.assert_called_once()
+    writer.wait_closed.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_probe_once_records_failed_probes(base_config):
+    """probe_once retains per-target failures for marker evidence."""
+    config = base_config.model_copy(
+        update={
+            "probe_urls": ["https://one.example", "https://two.example"],
+            "min_probe_successes": 1,
+        }
+    )
+    guard = NetworkGuard(config, source="test")
+    failure = ProbeFailure("https://two.example", "TimeoutError: timed out")
+
+    with patch.object(
+        guard,
+        "_probe_once_detailed",
+        new=AsyncMock(return_value=(True, [failure])),
+    ):
+        result = await guard.probe_once()
+
+    assert result is True
+    assert guard._probe_evidence() == {
+        "failed_probes": [
+            {"url": "https://two.example", "error": "TimeoutError: timed out"}
+        ]
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("mode", "level", "needle"),
+    [
+        ("log", logging.WARNING, "log-only"),
+        ("pause", logging.CRITICAL, "paused"),
+    ],
+)
+async def test_mark_down_log_level_matches_mode(
+    base_config, caplog, mode, level, needle
+):
+    """log mode warns that attempts continue; pause mode reports a pause."""
+    config = base_config.model_copy(update={"mode": mode})
+    guard = NetworkGuard(config, source="test")
+
+    with caplog.at_level(logging.DEBUG, logger="src.core.network_guard"):
+        await guard.mark_down("test_reason", {"test": "evidence"})
+
+    record = next(
+        record
+        for record in caplog.records
+        if record.name == "src.core.network_guard" and record.levelno == level
+    )
+    assert needle in record.getMessage()
+
+
+@pytest.mark.asyncio
+async def test_active_loop_log_mode_recovers(base_config):
+    """log mode auto-recovers after a successful probe."""
+    config = base_config.model_copy(update={"mode": "log"})
+    guard = NetworkGuard(config, source="test")
+    await guard.mark_down("test_reason", {})
+
+    await guard._on_probe_success()
+
+    assert guard.is_down() is False
+
+
+@pytest.mark.asyncio
+async def test_active_loop_pause_mode_stays_down(base_config):
+    """pause mode keeps manual-reset semantics after a successful probe."""
+    config = base_config.model_copy(update={"mode": "pause", "auto_recover": False})
+    guard = NetworkGuard(config, source="test")
+    await guard.mark_down("test_reason", {})
+
+    await guard._on_probe_success()
+
+    assert guard.is_down() is True
+
+
+@pytest.mark.asyncio
+async def test_poll_marker_log_mode_recovers_when_marker_cleared(
+    base_config, temp_marker_path
+):
+    """log mode recovers when the shared marker disappears."""
+    config = base_config.model_copy(update={"mode": "log"})
+    guard = NetworkGuard(config, source="test")
+    await guard.mark_down("test_reason", {})
+    temp_marker_path.unlink()
+
+    await guard.poll_marker()
+
+    assert guard.is_down() is False
 
 
 @pytest.mark.asyncio

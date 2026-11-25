@@ -9,8 +9,10 @@ restart clears it and a startup probe decides whether the service may run.
 
 A small JSON marker in the shared ``data/`` volume coordinates the gateway
 workers and the single keeper process.  The marker has a TTL so a dead writer
-cannot keep the system paused forever, but a live process never auto-recovers
-on its own: only a restart (or an explicit ``mark_up`` at startup) does that.
+cannot keep the system paused forever.  In ``pause`` mode a live process never
+auto-recovers on its own: only a restart (or an explicit ``mark_up`` at
+startup) does that.  In ``log`` mode the guard auto-recovers once the active
+probe succeeds again, because it never blocks traffic in the first place.
 
 The module is stdlib-only and deliberately free of service-layer imports.
 """
@@ -26,6 +28,7 @@ import ssl
 import time
 from collections import deque
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Protocol, cast
 from urllib.parse import urlsplit
@@ -65,6 +68,19 @@ class NetworkGuardSettings(Protocol):
 _MARKER_STATE = "down"
 
 
+@dataclass(frozen=True)
+class ProbeFailure:
+    """One failed active-probe target.
+
+    Attributes:
+        url: Configured probe URL.
+        error: Short exception description suitable for logs and marker JSON.
+    """
+
+    url: str
+    error: str
+
+
 class NetworkGuard:
     """Process-local outage state with a shared TTL marker.
 
@@ -97,6 +113,7 @@ class NetworkGuard:
         self._evidence: dict[str, Any] = {}
         self._last_heartbeat = 0.0
         self._consecutive_probe_failures = 0
+        self._last_probe_failures: list[ProbeFailure] = []
         self._passive: deque[tuple[float, str, TransportFailureClass]] = deque()
         self._marker_path = Path(config.marker_path)
 
@@ -194,41 +211,47 @@ class NetworkGuard:
     # Active probing
     # ------------------------------------------------------------------
 
-    async def _probe_one(self, url: str) -> bool:
+    async def _probe_one(self, url: str) -> ProbeFailure | None:
         """Open a TCP+TLS connection to one probe target.
 
-        No HTTP request is sent, so no provider quota or API key is used.
+        No HTTP request is sent, so no provider quota or API key is used.  The
+        probe verdict covers DNS resolution plus the TCP/TLS handshake only.
+        Closing the socket is best-effort: some servers keep the TLS session
+        open, and ``wait_closed()`` must not consume the probe timeout and turn
+        a successful handshake into a false outage.
 
         Args:
             url: Target URL; only scheme, host and port are used.
 
         Returns:
-            True when the connection (and TLS handshake for https) succeeded.
+            ``None`` when the connection (and TLS handshake for https)
+            succeeded, otherwise a :class:`ProbeFailure` with the error.
         """
         normalized = url if "://" in url else f"https://{url}"
         parsed = urlsplit(normalized)
         host = parsed.hostname
         if not host:
             logger.warning("network_guard: probe URL has no host: %s", url)
-            return False
+            return ProbeFailure(url, "missing host")
 
         scheme = (parsed.scheme or "https").lower()
         port = parsed.port or (443 if scheme == "https" else 80)
         use_tls = scheme == "https"
 
         try:
+            context = ssl.create_default_context() if use_tls else None
             async with asyncio.timeout(self._config.probe_connect_timeout_sec):
-                context = ssl.create_default_context() if use_tls else None
-                reader, writer = await asyncio.open_connection(
+                _reader, writer = await asyncio.open_connection(
                     host,
                     port,
                     ssl=context,
                     server_hostname=host if use_tls else None,
                 )
-                _ = reader  # keep the reader alive until the connection closes
+            # Handshake succeeded.  Do not await wait_closed(): graceful TLS
+            # shutdown is not part of connectivity and can block indefinitely.
+            with contextlib.suppress(Exception):
                 writer.close()
-                await writer.wait_closed()
-            return True
+            return None
         except Exception as exc:  # noqa: BLE001 - any probe failure is DOWN evidence
             logger.debug(
                 "network_guard: probe failed for %s (%s): %s",
@@ -236,20 +259,13 @@ class NetworkGuard:
                 type(exc).__name__,
                 exc,
             )
-            return False
+            return ProbeFailure(url, f"{type(exc).__name__}: {exc}")
 
-    async def probe_once(self) -> bool:
-        """Run all configured probes in parallel.
-
-        Returns:
-            True when at least ``min_probe_successes`` targets are reachable.
-            With no configured targets the active probe is considered
-            inconclusive and returns True (the guard then relies on passive
-            detection).
-        """
+    async def _probe_once_detailed(self) -> tuple[bool, list[ProbeFailure]]:
+        """Run all configured probes and return the failed targets."""
         urls = [u for u in self._config.probe_urls if u.strip()]
         if not urls:
-            return True
+            return True, []
 
         required = min(self._config.min_probe_successes, len(urls))
         try:
@@ -265,10 +281,33 @@ class NetworkGuard:
                 "network_guard: probe batch exceeded %.1fs",
                 self._config.probe_total_timeout_sec,
             )
-            return False
+            return False, [ProbeFailure(url, "probe batch timeout") for url in urls]
 
-        successes = sum(1 for ok in results if ok)
-        return successes >= required
+        failures = [result for result in results if result is not None]
+        successes = len(urls) - len(failures)
+        return successes >= required, failures
+
+    async def probe_once(self) -> bool:
+        """Run all configured probes in parallel.
+
+        Returns:
+            True when at least ``min_probe_successes`` targets are reachable.
+            With no configured targets the active probe is considered
+            inconclusive and returns True (the guard then relies on passive
+            detection).
+        """
+        ok, failures = await self._probe_once_detailed()
+        self._last_probe_failures = failures
+        return ok
+
+    def _probe_evidence(self) -> dict[str, Any]:
+        """Return JSON-serializable details about the last failed probes."""
+        return {
+            "failed_probes": [
+                {"url": failure.url, "error": failure.error}
+                for failure in self._last_probe_failures
+            ]
+        }
 
     async def startup_probe(self) -> bool:
         """Decide the initial state at process startup.
@@ -292,34 +331,47 @@ class NetworkGuard:
         if ok:
             await self.mark_up("startup_probe")
         else:
-            await self.mark_down(
-                "startup_probe", {"probes": len(self._config.probe_urls)}
-            )
+            evidence: dict[str, Any] = {
+                "probes": len(self._config.probe_urls),
+                **self._probe_evidence(),
+            }
+            await self.mark_down("startup_probe", evidence)
         return ok
+
+    async def _on_probe_success(self) -> None:
+        """Handle a successful probe cycle.
+
+        ``pause`` mode keeps manual-reset semantics: a running process stays
+        DOWN while its marker exists.  ``log`` mode never blocks traffic, so it
+        recovers as soon as probes succeed again.
+        """
+        self._consecutive_probe_failures = 0
+        self._last_probe_failures = []
+        if not self._down:
+            return
+
+        if self._config.auto_recover or not self.enforcing:
+            await self.mark_up("active_probe")
+        elif not self._marker_path.exists():
+            # Another process (e.g. a restarted gateway) cleared the marker:
+            # that is the operator reset signal, so the keeper may resume.
+            await self.mark_up("marker_cleared")
+        else:
+            await self.heartbeat()
 
     async def active_loop(self) -> None:
         """Continuously probe the network while the process is alive.
 
-        The loop never auto-recovers a running process: after a successful
-        probe it only refreshes the marker.  Recovery requires a restart
-        (or ``auto_recover=True`` for explicit opt-in).
+        In ``pause`` mode the loop never auto-recovers a running process after
+        a successful probe; recovery requires a restart (or
+        ``auto_recover=True``).  In ``log`` mode it recovers automatically.
         """
         while True:
             try:
                 if self._config.enabled:
                     ok = await self.probe_once()
                     if ok:
-                        self._consecutive_probe_failures = 0
-                        if self._down:
-                            if self._config.auto_recover:
-                                await self.mark_up("active_probe")
-                            elif not self._marker_path.exists():
-                                # Another process (e.g. a restarted gateway)
-                                # cleared the marker: that is the operator
-                                # reset signal, so the keeper may resume.
-                                await self.mark_up("marker_cleared")
-                            else:
-                                await self.heartbeat()
+                        await self._on_probe_success()
                     else:
                         self._consecutive_probe_failures += 1
                         if (
@@ -327,14 +379,13 @@ class NetworkGuard:
                             and self._consecutive_probe_failures
                             >= self._config.fail_threshold
                         ):
-                            await self.mark_down(
-                                "active_probe",
-                                {
-                                    "consecutive_failures": (
-                                        self._consecutive_probe_failures
-                                    )
-                                },
-                            )
+                            evidence: dict[str, Any] = {
+                                "consecutive_failures": (
+                                    self._consecutive_probe_failures
+                                ),
+                                **self._probe_evidence(),
+                            }
+                            await self.mark_down("active_probe", evidence)
                         elif self._down:
                             await self.heartbeat()
             except asyncio.CancelledError:
@@ -413,13 +464,19 @@ class NetworkGuard:
     async def poll_marker(self) -> None:
         """Adopt a fresh DOWN marker written by another process.
 
-        A live process never clears its local DOWN state when the marker
-        disappears; that requires a restart.
+        In ``pause`` mode a live process never clears its local DOWN state
+        when the marker disappears; that requires a restart.  In ``log`` mode
+        the guard recovers automatically so an old marker cannot keep the
+        process in a permanent, non-enforcing DOWN state.
         """
-        if not self._config.enabled or self._down:
+        if not self._config.enabled:
             return
 
         data = await asyncio.to_thread(self._read_marker)
+        if self._down:
+            if not self.enforcing and data is None:
+                await self.mark_up("marker_cleared")
+            return
         if data is None:
             return
 
@@ -428,13 +485,22 @@ class NetworkGuard:
         self._reason = str(data.get("reason", "marker"))
         evidence = data.get("evidence")
         self._evidence = evidence if isinstance(evidence, dict) else {}
-        logger.critical(
-            "network_guard: DOWN adopted from marker (source=%s, reason=%s, "
-            "evidence=%s)",
-            data.get("source", "unknown"),
-            self._reason,
-            self._evidence,
-        )
+        if self.enforcing:
+            logger.critical(
+                "network_guard: DOWN adopted from marker (source=%s, reason=%s, "
+                "evidence=%s)",
+                data.get("source", "unknown"),
+                self._reason,
+                self._evidence,
+            )
+        else:
+            logger.warning(
+                "network_guard: DOWN adopted from marker (source=%s, reason=%s) "
+                "in log-only mode; upstream attempts continue. Evidence: %s",
+                data.get("source", "unknown"),
+                self._reason,
+                self._evidence,
+            )
         if self._on_transition is not None:
             self._on_transition("down", {"reason": self._reason, **self._evidence})
 
@@ -463,12 +529,20 @@ class NetworkGuard:
         self._reason = reason
         self._evidence = evidence
         self._last_heartbeat = self._clock()
-        logger.critical(
-            "network_guard: DOWN (%s) — upstream attempts are paused. "
-            "Fix connectivity and restart the container. Evidence: %s",
-            reason,
-            evidence,
-        )
+        if self.enforcing:
+            logger.critical(
+                "network_guard: DOWN (%s) - upstream attempts are paused. "
+                "Fix connectivity and restart the container. Evidence: %s",
+                reason,
+                evidence,
+            )
+        else:
+            logger.warning(
+                "network_guard: DOWN (%s) in log-only mode - upstream attempts "
+                "continue. Evidence: %s",
+                reason,
+                evidence,
+            )
         await self._write_marker(evidence)
         if self._on_transition is not None:
             self._on_transition("down", {"reason": reason, **evidence})
@@ -480,6 +554,7 @@ class NetworkGuard:
             reason: Short reason label (usually ``startup_probe``).
         """
         if not self._down:
+            self._passive.clear()
             await self._remove_marker()
             return
 
@@ -487,6 +562,7 @@ class NetworkGuard:
         self._reason = reason
         self._evidence = {}
         self._last_heartbeat = 0.0
+        self._passive.clear()
         logger.info("network_guard: UP (%s) — upstream attempts are allowed.", reason)
         await self._remove_marker()
         if self._on_transition is not None:
